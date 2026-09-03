@@ -1,5 +1,5 @@
-This is your new *vault*.
+# Keystone Documentation
 
-Make a note of something, [[create a link]], or try [the Importer](https://help.obsidian.md/Plugins/Importer)!
+This vault contains the product, architecture, engineering, operational, and decision documentation for Keystone.
 
-When you're ready, delete this note and make the vault your own.
+> GitHub integration test: documentation can be reviewed and updated directly from the Keystone repository.
