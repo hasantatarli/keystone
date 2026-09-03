@@ -1,0 +1,1 @@
+Keystone, feature-first değil, use case-first geliştirilecektir.
