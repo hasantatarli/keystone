@@ -1,91 +1,86 @@
-**Status:** Draft  
+# Technology Architecture
+
+**Status:** Current  
 **Version:** 0.1  
 **Project:** Keystone  
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-09-04
 
 ## Architectural Direction
 
-Keystone will use a cross-platform core with database-specific providers and environment-specific adapters.
+Keystone is a provider-oriented database engineering platform with a shared execution and repository core.
 
-The platform lifecycle will remain consistent across technologies:
+The core coordinates targets, connections, collector definitions, assignments, execution, run history, and provider integration. Database-specific behavior remains inside providers.
 
-- Deploy
-- Validate
-- Status
-- Upgrade
-- Repair
-- Uninstall
-
-Provider implementations may differ based on the target technology and operating environment.
+PostgreSQL is the first implemented provider. Additional providers such as SQL Server, MySQL, and MongoDB can be added without changing the fundamental execution model.
 
 ## Core Technology
 
-The preferred implementation technology for the future Keystone Core is .NET 8 with C#.
+The current Keystone execution and installation components are implemented in Python.
 
-Reasons:
+PostgreSQL is used as the central Keystone repository. It stores shared platform metadata and provider telemetry while keeping those concerns separated by schema.
 
-- Cross-platform support for Windows and Linux
-- Existing DataWiser development expertise
-- Strong database connectivity libraries
-- Support for CLI, API and future portal development
-- Testability and maintainability
-- Single-file executable deployment options
+The architecture does not depend on a future application or portal technology. CLI, API, UI, reporting, and automation interfaces can be added around the same repository and execution model.
 
 ## Provider Model
 
-Each database technology will have its own provider.
+Each database technology has its own provider containing database-specific collectors, repository migrations, and collection semantics.
 
-Initial providers may include:
+Provider code is responsible for understanding the target database technology. Generic orchestration concerns remain in the Keystone core.
 
-- PostgreSQL
-- SQL Server
-- MySQL
-- MongoDB
+This boundary is intended to allow new providers to reuse the same target, assignment, queue, worker, history, and security concepts.
 
-Each provider is responsible for:
+## Repository Model
 
-- Database-specific collectors
-- Repository objects
-- Permission requirements
-- Scheduler integration
-- Installation validation
-- Upgrade and removal logic
+Keystone uses one central PostgreSQL repository.
 
-## Scheduler Model
+The `keystone` schema contains provider-independent platform metadata and execution state. Provider schemas, such as `postgresql`, contain provider-specific inventory and telemetry.
 
-Keystone does not require a single scheduler technology.
+Repository data is intentionally separated into two broad forms:
 
-Scheduler adapters will support the native capabilities of each environment.
+- **Current state** for facts where only the latest known state is required.
+- **Snapshots** for telemetry where historical comparison and trend analysis are valuable.
 
-| Provider | Possible Schedulers |
-|---|---|
-| PostgreSQL | cron, pg_cron, systemd timer |
-| SQL Server | SQL Server Agent |
-| MySQL | Event Scheduler, cron |
-| MongoDB | cron, systemd timer |
+## Execution Technology
 
-## Repository Strategy
+Collectors are registered as definitions and assigned to targets. Executions are coordinated through the Keystone collection queue and processed by workers.
 
-The initial implementation will prefer provider-local repositories to minimize customer dependencies.
+Target topology and execution scope are separate concepts:
 
-Future options may include:
+- Target topology: `SYSTEM`, `NODE`
+- Collector execution scope: `SYSTEM`, `NODE`, `DATABASE`
 
-- SQLite for lightweight local deployments
-- PostgreSQL for sidecar or centralized repositories
-- Central DataWiser repositories where security and regulatory requirements allow
+Database-scoped collectors do not require database targets. A SYSTEM assignment discovers the currently connectable databases and executes the collector against them individually.
 
-## Agent Strategy
+This keeps database inventory dynamic while avoiding a large target hierarchy that mirrors every database.
 
-Keystone will initially operate without a permanently installed agent wherever possible.
+## Worker Model
 
-Operating-system metrics may be obtained through:
+Workers claim eligible queued tasks and execute collectors independently. Multiple tasks can be processed concurrently.
 
-- Existing monitoring platforms
-- SSH or WinRM
-- A future lightweight Keystone Agent when justified
+Running tasks use heartbeat-based liveness detection. Tasks abandoned by a worker can be recovered and retried within a bounded retry policy.
 
-A dedicated agent is not part of the initial scope.
+Execution history is retained separately from the active queue so operational state and historical evidence remain distinct.
+
+## Credential Model
+
+Target connection metadata is stored centrally. Authentication behavior is selected through an authentication type.
+
+Password credentials are stored encrypted and decrypted only when a connection is required. The encryption master key is intentionally kept outside the Keystone repository so a repository backup alone is not sufficient to recover credentials.
+
+The model is designed to allow additional credential backends, such as external secret stores, without changing target definitions.
+
+## Collection and Interpretation
+
+Collectors are responsible for collecting factual database state and telemetry. They should not embed business interpretation merely because a metric can be derived during collection.
+
+Keystone's intended engineering pipeline is:
+
+**Collection → Finding → Recommendation → Action**
+
+Collection is the currently implemented foundation. Findings, recommendations, and actions are higher-level capabilities that will be built on top of collected evidence.
 
 ## Principle
 
-Generic lifecycle, provider-specific implementation.
+**Shared platform core, provider-specific database knowledge.**
+
+Keystone should introduce abstractions when they solve repeated engineering problems, not in anticipation of hypothetical future requirements.
