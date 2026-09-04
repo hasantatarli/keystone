@@ -1,0 +1,2 @@
+# Keep text documentation line endings consistent across platforms.
+*.md text eol=lf
