@@ -1,29 +1,33 @@
-**Status:** Approved  
-**Date:** 2026-08-05
+# ADR-0007 — Cross-Platform Provider Architecture
+
+**Status:** Approved — implementation approach amended  
+**Date:** 2026-08-05  
+**Amended:** 2026-09-04
 
 ## Context
 
-DataWiser supports database platforms running across Windows and Linux environments.
-
-SQL Server commonly runs on Windows, while PostgreSQL, MySQL and MongoDB commonly run on Linux. A platform tied to one operating system would restrict Keystone's ability to support DataWiser services consistently.
+DataWiser supports database platforms running across Windows and Linux environments. A platform tied to one operating system or database engine would restrict Keystone's ability to support those services consistently.
 
 ## Decision
 
-Keystone will use:
+Keystone will use a shared, cross-platform core with database-specific providers.
 
-- A cross-platform core
-- Database-specific providers
-- Environment-specific scheduler and deployment adapters
+The common platform owns provider-independent concepts such as targets, connections, collector definitions, assignments, execution coordination, and run history. Providers own database-specific collection knowledge and repository structures.
 
-The preferred future implementation technology for the Keystone Core is .NET 8 with C#.
+Common abstractions should be introduced when repeated provider or execution behavior justifies them rather than being designed speculatively.
 
-The initial PostgreSQL implementation may use SQL and shell scripts before repeated lifecycle logic is moved into the common core.
+## Implementation Amendment
+
+The original ADR anticipated a future .NET core, provider-local scheduling, and an initial SQL/shell-oriented PostgreSQL implementation.
+
+Development has since established a Python-based execution core, a central PostgreSQL repository, and a queue/worker execution model. These implementation choices replace those original assumptions without changing the underlying architectural decision: a shared cross-platform core with isolated database providers.
+
+The architecture does not require future providers to use database-native schedulers or provider-local repositories.
 
 ## Consequences
 
-- The user-facing lifecycle remains consistent across platforms.
-- Database-specific logic remains isolated inside providers.
-- PostgreSQL development can begin without waiting for the complete framework.
-- SQL Server can use SQL Server Agent while PostgreSQL uses cron or pg_cron.
-- A permanent agent is not required in the initial release.
-- Common abstractions will be extracted only after real provider implementations reveal repeated behavior.
+- Database-specific knowledge remains isolated inside providers.
+- Core execution concepts can be reused across PostgreSQL and future providers.
+- Provider telemetry can evolve independently while sharing central orchestration.
+- The implementation language and runtime mechanisms can evolve without redefining the provider boundary.
+- Cross-platform support remains an architectural requirement rather than an operating-system-specific implementation choice.
