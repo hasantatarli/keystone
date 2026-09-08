@@ -778,9 +778,7 @@ def save_database_snapshot(conn, task, rows):
 
 def save_table_capacity_snapshot(conn, task, rows):
     if not rows:
-        raise RuntimeError(
-            "PG_TABLE_CAPACITY collector returned no rows."
-        )
+        return
 
     captured_at_values = {
         row["captured_at"]
@@ -863,12 +861,274 @@ def save_table_capacity_snapshot(conn, task, rows):
     with conn.cursor() as cur:
         cur.executemany(sql, params)
         
+def save_vacuum_analyze_snapshot(conn, task, rows):
+    if not rows:
+        return
+
+    captured_at_values = {
+        row["captured_at"]
+        for row in rows
+    }
+
+    if len(captured_at_values) != 1:
+        raise RuntimeError(
+            "PG_VACUUM_ANALYZE rows contain multiple captured_at values."
+        )
+
+    sql = """
+        INSERT INTO postgresql.vacuum_analyze_snapshot
+        (
+            target_id,
+            captured_at,
+
+            database_oid,
+            database_name,
+
+            schema_name,
+            object_oid,
+            object_name,
+            is_partition,
+
+            n_live_tup,
+            n_dead_tup,
+            n_mod_since_analyze,
+            n_ins_since_vacuum,
+
+            last_vacuum,
+            last_autovacuum,
+            last_analyze,
+            last_autoanalyze,
+
+            vacuum_count,
+            autovacuum_count,
+            analyze_count,
+            autoanalyze_count
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+
+            %(database_oid)s,
+            %(database_name)s,
+
+            %(schema_name)s,
+            %(object_oid)s,
+            %(object_name)s,
+            %(is_partition)s,
+
+            %(n_live_tup)s,
+            %(n_dead_tup)s,
+            %(n_mod_since_analyze)s,
+            %(n_ins_since_vacuum)s,
+
+            %(last_vacuum)s,
+            %(last_autovacuum)s,
+            %(last_analyze)s,
+            %(last_autoanalyze)s,
+
+            %(vacuum_count)s,
+            %(autovacuum_count)s,
+            %(analyze_count)s,
+            %(autoanalyze_count)s
+        );
+    """
+
+    data = []
+
+    for row in rows:
+        data.append(
+            {
+                "target_id": task["target_id"],
+                "captured_at": row["captured_at"],
+
+                "database_oid": row["database_oid"],
+                "database_name": row["database_name"],
+
+                "schema_name": row["schema_name"],
+                "object_oid": row["object_oid"],
+                "object_name": row["object_name"],
+                "is_partition": row["is_partition"],
+
+                "n_live_tup": row["n_live_tup"],
+                "n_dead_tup": row["n_dead_tup"],
+                "n_mod_since_analyze": row["n_mod_since_analyze"],
+                "n_ins_since_vacuum": row["n_ins_since_vacuum"],
+
+                "last_vacuum": row["last_vacuum"],
+                "last_autovacuum": row["last_autovacuum"],
+                "last_analyze": row["last_analyze"],
+                "last_autoanalyze": row["last_autoanalyze"],
+
+                "vacuum_count": row["vacuum_count"],
+                "autovacuum_count": row["autovacuum_count"],
+                "analyze_count": row["analyze_count"],
+                "autoanalyze_count": row["autoanalyze_count"],
+            }
+        )
+
+    with conn.cursor() as cur:
+        cur.executemany(sql, data)
+
+def save_transaction_wraparound_snapshot(conn, task, rows):
+    if not rows:
+        raise RuntimeError(
+            "PG_TRANSACTION_WRAPAROUND collector returned no rows."
+        )
+
+    captured_at_values = {
+        row["captured_at"]
+        for row in rows
+    }
+
+    if len(captured_at_values) != 1:
+        raise RuntimeError(
+            "PG_TRANSACTION_WRAPAROUND rows contain multiple captured_at values."
+        )
+
+    database_rows = []
+    relation_rows = []
+
+    for row in rows:
+        record_type = row["record_type"]
+
+        if record_type == "DATABASE":
+            database_rows.append(row)
+
+        elif record_type == "RELATION":
+            relation_rows.append(row)
+
+        else:
+            raise RuntimeError(
+                f"PG_TRANSACTION_WRAPAROUND returned unsupported "
+                f"record_type: {record_type}"
+            )
+
+    if not database_rows:
+        raise RuntimeError(
+            "PG_TRANSACTION_WRAPAROUND returned no DATABASE rows."
+        )
+
+    database_names = [
+        row["database_name"]
+        for row in database_rows
+    ]
+
+    if len(database_names) != len(set(database_names)):
+        raise RuntimeError(
+            "PG_TRANSACTION_WRAPAROUND returned multiple DATABASE rows "
+            "for the same database."
+        )
+
+    database_sql = """
+        INSERT INTO postgresql.transaction_wraparound_snapshot
+        (
+            target_id,
+            captured_at,
+            database_oid,
+            database_name,
+            frozen_xid,
+            xid_age,
+            min_mxid,
+            mxid_age
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+            %(database_oid)s,
+            %(database_name)s,
+            %(frozen_xid)s::xid,
+            %(xid_age)s,
+            %(min_mxid)s::xid,
+            %(mxid_age)s
+        );
+    """
+
+    database_params = [
+        {
+            "target_id": task["target_id"],
+            "captured_at": row["captured_at"],
+            "database_oid": row["database_oid"],
+            "database_name": row["database_name"],
+            "frozen_xid": row["frozen_xid"],
+            "xid_age": row["xid_age"],
+            "min_mxid": row["min_mxid"],
+            "mxid_age": row["mxid_age"],
+        }
+        for row in database_rows
+    ]
+
+    relation_sql = """
+        INSERT INTO postgresql.relation_wraparound_snapshot
+        (
+            target_id,
+            captured_at,
+            database_oid,
+            database_name,
+            schema_name,
+            object_oid,
+            object_name,
+            is_partition,
+            frozen_xid,
+            xid_age,
+            min_mxid,
+            mxid_age
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+            %(database_oid)s,
+            %(database_name)s,
+            %(schema_name)s,
+            %(object_oid)s,
+            %(object_name)s,
+            %(is_partition)s,
+            %(frozen_xid)s::xid,
+            %(xid_age)s,
+            %(min_mxid)s::xid,
+            %(mxid_age)s
+        );
+    """
+
+    relation_params = [
+        {
+            "target_id": task["target_id"],
+            "captured_at": row["captured_at"],
+            "database_oid": row["database_oid"],
+            "database_name": row["database_name"],
+            "schema_name": row["schema_name"],
+            "object_oid": row["object_oid"],
+            "object_name": row["object_name"],
+            "is_partition": row["is_partition"],
+            "frozen_xid": row["frozen_xid"],
+            "xid_age": row["xid_age"],
+            "min_mxid": row["min_mxid"],
+            "mxid_age": row["mxid_age"],
+        }
+        for row in relation_rows
+    ]
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            database_sql,
+            database_params
+        )
+
+        if relation_params:
+            cur.executemany(
+                relation_sql,
+                relation_params
+            )
 
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
     "PG_DATABASE_INVENTORY": save_database_snapshot,
     "PG_TABLE_CAPACITY": save_table_capacity_snapshot,
+    "PG_VACUUM_ANALYZE": save_vacuum_analyze_snapshot,
+    "PG_TRANSACTION_WRAPAROUND": save_transaction_wraparound_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):
