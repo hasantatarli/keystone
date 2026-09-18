@@ -1,34 +1,90 @@
 # Keystone Reference Architecture
 
-**Status:** Draft  
-**Version:** 0.1
+**Status:** Current  
+**Version:** 0.2  
+**Last Updated:** 2026-09-18
 
 ## Purpose
 
-Keystone is a provider-agnostic database engineering platform designed to collect technical facts from database environments, preserve them centrally, and turn them into findings, recommendations, and eventually controlled engineering actions.
+Keystone is a provider-agnostic database engineering platform designed to collect technical facts from database environments, preserve them centrally, transform them into engineering findings and recommendations, and present those results to users for human-controlled action.
 
-The architecture separates data collection from interpretation. Collectors gather facts; findings and recommendations are produced by separate engineering logic.
+The architecture separates evidence collection, engineering interpretation, and user-facing presentation.
 
 ## Architectural Model
 
-Keystone is organized around four main layers:
+Keystone is organized around three main layers:
 
-1. **Targets and Connections** — describe the database systems and nodes Keystone can reach.
-2. **Collectors and Execution** — define what is collected and at which execution scope it runs.
-3. **Repository** — stores Keystone metadata, execution history, and provider-specific telemetry.
-4. **Engineering Logic** — evaluates collected facts and produces findings, recommendations, and future actions.
+### 1. Automation
 
-The current implementation uses a central PostgreSQL repository and a Python-based worker that executes registered collectors against assigned targets.
+**Collection → Scheduling → Execution → Repository**
+
+The Automation layer is responsible for continuously and reliably producing engineering evidence with minimal human intervention.
+
+- **Collection** defines and gathers observable database facts.
+- **Scheduling** determines when assigned collectors should run.
+- **Execution** reliably runs collectors through the queue/worker model.
+- **Repository** stores platform state, execution history, provider telemetry, and historical evidence.
+
+The repository is the system of record for collected engineering evidence.
+
+### 2. Engineering Intelligence
+
+Engineering Intelligence transforms evidence into engineering meaning.
+
+It may combine:
+
+- deterministic engineering rules,
+- statistical analysis,
+- machine-learning techniques,
+- correlation,
+- provider-specific engineering logic,
+- AI-assisted analysis where it adds value.
+
+The primary outputs are **Findings** and **Recommendations**.
+
+AI is not required for conclusions that can be produced more reliably by deterministic or statistical methods. AI may contribute to contextual reasoning and correlation, but collected evidence remains the source of truth and AI is not the sole source of engineering decisions.
+
+### 3. Presentation and Action
+
+The Presentation layer exposes engineering outputs to users through reports and future interactive interfaces.
+
+Typical outputs include:
+
+- findings,
+- supporting evidence,
+- recommendations,
+- proposed actions,
+- generated scripts or commands where appropriate.
+
+Keystone does not autonomously remediate production environments. It may propose an action, prepare a script, or provide a user-initiated execution mechanism, but the decision to perform a change remains with the user.
+
+## AI Engineering Assistant
+
+The **AI Engineering Assistant** is a cross-cutting Keystone capability spanning Engineering Intelligence and Presentation rather than a standalone pipeline stage.
+
+It is intended to let users interact naturally with Keystone's evidence, history, findings, recommendations, and engineering context.
+
+Representative interactions include:
+
+- What became worse in this PostgreSQL environment during the last month?
+- Why does replication lag repeatedly?
+- Why is this finding Critical?
+- What changed on a table during the last three months?
+- Which risks should be addressed before a database upgrade?
+
+The Assistant may explain, summarize, compare, correlate, and reason over Keystone evidence and engineering outputs. Its answers should remain evidence-backed and traceable where practical.
+
+Autonomous target-side diagnostic investigation is not part of the AI Engineering Assistant. A separate **Keystone AI Agents** concept has been identified for future exploration and is not part of the current Keystone product scope.
 
 ## Provider Architecture
 
 Database-specific behavior is implemented through providers.
 
-The Keystone core owns generic concepts such as targets, connections, collector definitions, assignments, queueing, execution history, and credential handling.
+The Keystone core owns generic concepts such as targets, connections, collector definitions, assignments, scheduling/orchestration, queueing, execution history, and credential handling.
 
-Each provider owns its database-specific collectors, repository objects, migrations, and persistence logic.
+Each provider owns its database-specific collectors, repository objects, migrations, persistence logic, and provider-specific engineering knowledge where appropriate.
 
-The initial provider is PostgreSQL. The architecture is intended to support additional providers such as SQL Server, MySQL, and MongoDB without changing the core execution model.
+The initial provider is PostgreSQL. The architecture is intended to support additional providers such as SQL Server, MySQL, MongoDB, and other database technologies without changing the core execution model.
 
 ## Target Topology
 
@@ -55,7 +111,7 @@ DATABASE-scoped collectors are assigned to a SYSTEM target and fan out dynamical
 
 ## Execution Model
 
-Collector assignments determine which collectors run against which targets.
+Collector assignments determine which collectors run against which targets. Scheduling will determine when recurring assignments become eligible for execution.
 
 Execution requests are placed into a central queue. Workers claim eligible tasks, execute the appropriate collector, persist the results, and record execution history.
 
@@ -72,19 +128,33 @@ The central repository separates generic Keystone metadata from provider-specifi
 
 Repository data is intentionally separated into current-state and historical snapshot models depending on the nature of the collector.
 
-The repository is the system of record for collected engineering facts and execution history.
-
-## Collection and Interpretation
+## Collection and Interpretation Boundary
 
 Collectors are responsible for collecting observable facts from the target environment.
 
-They should not embed business conclusions such as risk level, health score, growth classification, or remediation advice unless the value itself is a direct database fact.
+They should not embed conclusions such as risk level, health score, growth classification, root cause, or remediation advice unless the value itself is a direct database fact.
 
-Interpretation belongs to a separate engineering layer:
+Interpretation belongs to Engineering Intelligence.
 
-**Collector → Finding → Recommendation → Action**
+This preserves the reusable flow:
 
-This allows deterministic engineering rules, future anomaly detection, and AI-assisted analysis to operate on the same normalized evidence without coupling interpretation to data collection.
+**Evidence → Analysis → Finding → Recommendation → Proposed Action**
+
+The same evidence can therefore support multiple customer-facing capabilities without duplicating collection logic.
+
+## Human Decision Boundary
+
+Keystone may analyze, recommend, explain, and prepare proposed remediation.
+
+It must not independently decide to change a production database environment.
+
+Any state-changing operational action remains behind an explicit human decision boundary. Future user-initiated execution may be supported, but it must be distinguishable from autonomous remediation and auditable.
+
+## UI and API
+
+UI and API are cross-cutting interaction mechanisms rather than architectural pipeline stages.
+
+Over time they may expose capabilities across all three layers, including target management, collector assignment, scheduling, execution history, findings, recommendations, reports, AI Assistant interaction, and user-controlled actions.
 
 ## Security Model
 
@@ -106,12 +176,17 @@ Collectors are discovered and registered from provider metadata rather than bein
 
 ## Architectural Principles
 
-- Provider-agnostic core, provider-specific implementation.
+- Provider-agnostic core, provider-specific database knowledge.
+- Automation, Engineering Intelligence, and Presentation are separate architectural concerns.
 - Target topology and collector execution scope are separate concepts.
 - Databases are execution units, not Keystone targets.
 - Collect facts before interpreting them.
+- Evidence is the source of truth.
+- Use deterministic or statistical methods where they are more reliable than AI.
+- AI augments engineering analysis and user interaction; it does not replace evidence.
 - Keep provider telemetry separate from platform metadata.
-- Prefer stable metadata-driven execution over collector-specific branching.
 - Preserve execution history and failure visibility.
+- Keystone does not autonomously remediate production environments.
+- UI and API may span the platform rather than belonging to a single layer.
 - Introduce abstractions when repeated implementation needs justify them.
 - Keep the architecture simple enough to evolve from real customer requirements.
