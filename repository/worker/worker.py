@@ -1122,6 +1122,452 @@ def save_transaction_wraparound_snapshot(conn, task, rows):
                 relation_params
             )
 
+def save_replication_status_snapshot(conn, task, rows):
+    if not rows:
+        raise RuntimeError(
+            "PG_REPLICATION_STATUS collector returned no rows."
+        )
+
+    captured_at_values = {
+        row["captured_at"]
+        for row in rows
+    }
+
+    if len(captured_at_values) != 1:
+        raise RuntimeError(
+            "PG_REPLICATION_STATUS rows contain multiple captured_at values."
+        )
+
+    system_rows = []
+    replica_rows = []
+
+    for row in rows:
+        record_type = row["record_type"]
+
+        if record_type == "SYSTEM":
+            system_rows.append(row)
+
+        elif record_type == "REPLICA":
+            replica_rows.append(row)
+
+        else:
+            raise RuntimeError(
+                f"PG_REPLICATION_STATUS returned unsupported "
+                f"record_type: {record_type}"
+            )
+
+    if len(system_rows) != 1:
+        raise RuntimeError(
+            f"PG_REPLICATION_STATUS returned {len(system_rows)} "
+            f"SYSTEM rows; expected 1."
+        )
+
+    system_row = system_rows[0]
+
+    if system_row["connected_replica_count"] != len(replica_rows):
+        raise RuntimeError(
+            "PG_REPLICATION_STATUS connected_replica_count does not "
+            "match the number of REPLICA rows."
+        )
+
+    system_sql = """
+        INSERT INTO postgresql.replication_status_snapshot
+        (
+            target_id,
+            captured_at,
+            current_wal_lsn,
+            connected_replica_count
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+            %(current_wal_lsn)s,
+            %(connected_replica_count)s
+        );
+    """
+
+    system_params = {
+        "target_id": task["target_id"],
+        "captured_at": system_row["captured_at"],
+        "current_wal_lsn": system_row["current_wal_lsn"],
+        "connected_replica_count": system_row["connected_replica_count"],
+    }
+
+    replica_sql = """
+        INSERT INTO postgresql.replica_status_snapshot
+        (
+            target_id,
+            captured_at,
+            application_name,
+            client_addr,
+            client_port,
+            backend_start,
+            state,
+            sync_state,
+            sent_lsn,
+            write_lsn,
+            flush_lsn,
+            replay_lsn,
+            write_lag,
+            flush_lag,
+            replay_lag,
+            reply_time,
+            backend_xmin,
+            current_wal_lsn
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+            %(application_name)s,
+            %(client_addr)s,
+            %(client_port)s,
+            %(backend_start)s,
+            %(state)s,
+            %(sync_state)s,
+            %(sent_lsn)s,
+            %(write_lsn)s,
+            %(flush_lsn)s,
+            %(replay_lsn)s,
+            %(write_lag)s,
+            %(flush_lag)s,
+            %(replay_lag)s,
+            %(reply_time)s,
+            %(backend_xmin)s::xid,
+            %(current_wal_lsn)s
+        );
+    """
+
+    replica_params = [
+        {
+            "target_id": task["target_id"],
+            "captured_at": row["captured_at"],
+            "application_name": row["application_name"],
+            "client_addr": row["client_addr"],
+            "client_port": row["client_port"],
+            "backend_start": row["backend_start"],
+            "state": row["state"],
+            "sync_state": row["sync_state"],
+            "sent_lsn": row["sent_lsn"],
+            "write_lsn": row["write_lsn"],
+            "flush_lsn": row["flush_lsn"],
+            "replay_lsn": row["replay_lsn"],
+            "write_lag": row["write_lag"],
+            "flush_lag": row["flush_lag"],
+            "replay_lag": row["replay_lag"],
+            "reply_time": row["reply_time"],
+            "backend_xmin": row["backend_xmin"],
+            "current_wal_lsn": row["current_wal_lsn"],
+        }
+        for row in replica_rows
+    ]
+
+    with conn.cursor() as cur:
+        cur.execute(
+            system_sql,
+            system_params
+        )
+
+        if replica_params:
+            cur.executemany(
+                replica_sql,
+                replica_params
+            )
+
+def save_replication_slot_snapshot(conn, task, rows):
+    if not rows:
+        return
+
+    captured_at_values = {
+        row["captured_at"]
+        for row in rows
+    }
+
+    if len(captured_at_values) != 1:
+        raise RuntimeError(
+            "PG_REPLICATION_SLOTS rows contain multiple captured_at values."
+        )
+
+    sql = """
+        INSERT INTO postgresql.replication_slot_snapshot
+        (
+            target_id,
+            captured_at,
+            slot_name,
+            plugin,
+            slot_type,
+            database_name,
+            temporary,
+            active,
+            active_pid,
+            slot_xmin,
+            catalog_xmin,
+            restart_lsn,
+            confirmed_flush_lsn,
+            wal_status,
+            safe_wal_size,
+            two_phase,
+            conflicting,
+            invalidation_reason,
+            failover
+        )
+        VALUES
+        (
+            %(target_id)s,
+            %(captured_at)s,
+            %(slot_name)s,
+            %(plugin)s,
+            %(slot_type)s,
+            %(database_name)s,
+            %(temporary)s,
+            %(active)s,
+            %(active_pid)s,
+            %(slot_xmin)s::xid,
+            %(catalog_xmin)s::xid,
+            %(restart_lsn)s,
+            %(confirmed_flush_lsn)s,
+            %(wal_status)s,
+            %(safe_wal_size)s,
+            %(two_phase)s,
+            %(conflicting)s,
+            %(invalidation_reason)s,
+            %(failover)s
+        );
+    """
+
+    params = [
+        {
+            "target_id": task["target_id"],
+            "captured_at": row["captured_at"],
+            "slot_name": row["slot_name"],
+            "plugin": row["plugin"],
+            "slot_type": row["slot_type"],
+            "database_name": row["database"],
+            "temporary": row["temporary"],
+            "active": row["active"],
+            "active_pid": row["active_pid"],
+            "slot_xmin": row["slot_xmin"],
+            "catalog_xmin": row["catalog_xmin"],
+            "restart_lsn": row["restart_lsn"],
+            "confirmed_flush_lsn": row["confirmed_flush_lsn"],
+            "wal_status": row["wal_status"],
+            "safe_wal_size": row["safe_wal_size"],
+            "two_phase": row["two_phase"],
+            "conflicting": row["conflicting"],
+            "invalidation_reason": row["invalidation_reason"],
+            "failover": row["failover"],
+        }
+        for row in rows
+    ]
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            sql,
+            params
+        )
+
+def save_connection_activity_snapshot(conn, task, rows):
+    if not rows:
+        return
+
+    system_rows = [
+        row for row in rows
+        if row["record_type"] == "SYSTEM"
+    ]
+
+    database_rows = [
+        row for row in rows
+        if row["record_type"] == "DATABASE"
+    ]
+
+    breakdown_rows = [
+        row for row in rows
+        if row["record_type"] == "BREAKDOWN"
+    ]
+
+    target_id = task["target_id"]
+
+    with conn.cursor() as cur:
+
+        # ---------------------------------------------------------------------
+        # SYSTEM
+        # ---------------------------------------------------------------------
+        for row in system_rows:
+            cur.execute(
+                """
+                INSERT INTO postgresql.connection_activity_snapshot
+                (
+                    target_id,
+                    captured_at,
+
+                    total_client_connections,
+                    active_connections,
+                    idle_connections,
+                    idle_in_transaction_connections,
+                    idle_in_transaction_aborted_connections,
+
+                    oldest_idle_state_change,
+                    oldest_idle_in_transaction_state_change,
+                    oldest_idle_in_transaction_aborted_state_change
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    target_id,
+                    row["captured_at"],
+
+                    row["current_connections"],
+                    row["active_connections"],
+                    row["idle_connections"],
+                    row["idle_in_transaction_connections"],
+                    row["idle_in_transaction_aborted_connections"],
+
+                    row["oldest_idle_state_change"],
+                    row["oldest_idle_in_transaction_state_change"],
+                    row[
+                        "oldest_idle_in_transaction_aborted_state_change"
+                    ],
+                ),
+            )
+
+        # ---------------------------------------------------------------------
+        # DATABASE
+        # ---------------------------------------------------------------------
+        for row in database_rows:
+            cur.execute(
+                """
+                INSERT INTO postgresql.connection_database_snapshot
+                (
+                    target_id,
+                    captured_at,
+
+                    database_oid,
+                    database_name,
+
+                    sessions,
+                    sessions_abandoned,
+                    sessions_fatal,
+                    sessions_killed,
+
+                    session_time,
+                    active_time,
+                    idle_in_transaction_time,
+
+                    stats_reset,
+
+                    current_connections,
+                    active_connections,
+                    idle_connections,
+                    idle_in_transaction_connections,
+                    idle_in_transaction_aborted_connections
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    target_id,
+                    row["captured_at"],
+
+                    row["database_oid"],
+                    row["database_name"],
+
+                    row["sessions"],
+                    row["sessions_abandoned"],
+                    row["sessions_fatal"],
+                    row["sessions_killed"],
+
+                    row["session_time"],
+                    row["active_time"],
+                    row["idle_in_transaction_time"],
+
+                    row["stats_reset"],
+
+                    row["current_connections"],
+                    row["active_connections"],
+                    row["idle_connections"],
+                    row["idle_in_transaction_connections"],
+                    row[
+                        "idle_in_transaction_aborted_connections"
+                    ],
+                ),
+            )
+
+        # ---------------------------------------------------------------------
+        # BREAKDOWN
+        # ---------------------------------------------------------------------
+        for row in breakdown_rows:
+            cur.execute(
+                """
+                INSERT INTO postgresql.connection_breakdown_snapshot
+                (
+                    target_id,
+                    captured_at,
+
+                    breakdown_type,
+                    dimension_value,
+                    state,
+                    connection_count
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    target_id,
+                    row["captured_at"],
+
+                    row["breakdown_type"],
+                    row["dimension_value"],
+                    row["state"],
+                    row["connection_count"],
+                ),
+            )        
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -1129,6 +1575,9 @@ COLLECTOR_HANDLERS = {
     "PG_TABLE_CAPACITY": save_table_capacity_snapshot,
     "PG_VACUUM_ANALYZE": save_vacuum_analyze_snapshot,
     "PG_TRANSACTION_WRAPAROUND": save_transaction_wraparound_snapshot,
+    "PG_REPLICATION_STATUS": save_replication_status_snapshot,
+    "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
+    "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):
