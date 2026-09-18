@@ -3,7 +3,7 @@
 **Status:** Current  
 **Version:** 0.1  
 **Project:** Keystone  
-**Last Updated:** 2026-09-04
+**Last Updated:** 2026-09-18
 
 ## Architectural Direction
 
@@ -77,7 +77,7 @@ Keystone's intended engineering pipeline is:
 
 **Collection → Finding → Recommendation → Action**
 
-Collection is the currently implemented foundation. Findings, recommendations, and actions are higher-level capabilities that will be built on top of collected evidence.
+Collection is the currently implemented foundation. The PostgreSQL provider currently implements the functional collector baseline through PG-008 — Session & Connection Activity. Findings, recommendations, and actions are higher-level capabilities that will be built on top of collected evidence.
 
 ## Principle
 
