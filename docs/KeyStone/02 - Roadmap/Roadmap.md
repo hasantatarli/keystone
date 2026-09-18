@@ -8,11 +8,11 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 | PG-002 | Configuration Snapshot | NODE | SNAPSHOT | High | **Done** |
 | PG-003 | Database Inventory & Capacity | SYSTEM | SNAPSHOT | Medium | **Done** |
 | PG-004 | Table & Index Capacity | DATABASE | SNAPSHOT | Medium | **Done** |
-| PG-005 | Vacuum & Analyze Statistics | DATABASE | SNAPSHOT | Very High | **Next** |
-| PG-006 | Transaction / Wraparound Health | SYSTEM / DATABASE | SNAPSHOT | Very High | Planned |
-| PG-007 | Replication & Slot Health | SYSTEM / NODE | SNAPSHOT | Very High | Planned |
-| PG-008 | Session & Connection Activity | SYSTEM / DATABASE | SNAPSHOT | High | Planned |
-| PG-009 | Locking / Long Transactions | DATABASE | SNAPSHOT / EVENT | Very High | Planned |
+| PG-005 | Vacuum & Analyze Statistics | DATABASE | SNAPSHOT | Very High | **Done** |
+| PG-006 | Transaction / Wraparound Health | SYSTEM / DATABASE | SNAPSHOT | Very High | **Done** |
+| PG-007 | Replication & Slot Health | SYSTEM / NODE | SNAPSHOT | Very High | **Done** |
+| PG-008 | Session & Connection Activity | SYSTEM / DATABASE | SNAPSHOT | High | **Done** |
+| PG-009 | Locking / Long Transactions | DATABASE | SNAPSHOT / EVENT | Very High | **Next** |
 | PG-010 | Index Inventory & Usage | DATABASE | SNAPSHOT | Very High | Planned |
 | PG-011 | Index Quality | DATABASE | SNAPSHOT | Very High | Planned |
 | PG-012 | pg_stat_statements Workload | DATABASE | SNAPSHOT / DELTA | Very High | Planned |
@@ -38,6 +38,8 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 
 ## Current Development Focus
 
-The collection foundation is established through PG-001 to PG-004. The next implementation target is **PG-005 — Vacuum & Analyze Statistics**.
+The PostgreSQL collection baseline is implemented through **PG-008 — Session & Connection Activity**. The next functional collector target is **PG-009 — Locking / Long Transactions**.
+
+Roadmap collector IDs describe functional collection capabilities and are independent from PostgreSQL provider repository migration versions. A single functional collector may require multiple repository migrations, and migration numbering may therefore advance independently from this roadmap.
 
 Higher-level findings and recommendations will be developed on top of collected telemetry rather than embedded into individual collectors.
