@@ -59,17 +59,46 @@ A stable design principle emerged during the collection work:
 
 > Collectors persist observable technical facts. Engineering conclusions derived from those facts belong above the collection layer.
 
-This was formalized by ADR-0010. The same evidence may later support health assessment, performance engineering, trend analysis, recommendations, reporting, or controlled actions.
+This was formalized by ADR-0010. The same evidence may later support health assessment, performance engineering, trend analysis, recommendations, reporting, or proposed actions.
+
+## 2026-09-18 — Architecture Convergence
+
+The high-level Keystone model was clarified into three architectural concerns:
+
+1. **Automation** — Collection → Scheduling → Execution → Repository
+2. **Engineering Intelligence** — deterministic rules, statistical analysis, ML, correlation, engineering logic, findings, and recommendations
+3. **Presentation and Action** — reports, findings, recommendations, proposed actions, and human-controlled operational decisions
+
+UI and API were explicitly treated as cross-cutting interaction mechanisms rather than a fourth pipeline stage.
+
+The AI direction was also clarified. The main Keystone product may include an **AI Engineering Assistant** spanning Engineering Intelligence and Presentation. The Assistant can use Keystone evidence, history, findings, recommendations, and engineering context to explain, summarize, compare, correlate, and support natural-language interactive analysis.
+
+AI is intentionally not the source of truth. Deterministic and statistical methods remain first-class engineering mechanisms, and AI is used where contextual reasoning or natural-language interaction adds value.
+
+A human decision boundary was established for remediation: Keystone may recommend and prepare proposed actions, but it does not autonomously change production environments.
+
+## 2026-09-18 — Keystone AI Agents Concept
+
+A separate product idea emerged during the AI architecture discussion: **Keystone AI Agents**.
+
+The concept is distinct from the AI Engineering Assistant in the main Keystone product.
+
+- **AI Engineering Assistant:** interacts with evidence and engineering intelligence already available to Keystone.
+- **Keystone AI Agents:** future autonomous read-only diagnostic investigation, capable of requesting or executing approved diagnostics to investigate a problem or perform root-cause analysis.
+
+The AI Agents concept has a materially different security and testing profile. It must remain read-only for investigation and must not autonomously remediate target environments.
+
+This is recorded as a **future / separate product concept**, not as current Keystone scope or V1 commitment.
 
 ## Open Design Work
 
-The following areas are intentionally not recorded here as final decisions because their architecture and product boundaries still need to be clarified:
+The following areas remain intentionally open until module design is completed:
 
-- scheduler architecture and scheduling policy,
-- management UI / API boundaries,
-- final platform module boundaries,
+- scheduler implementation and scheduling policy,
+- final technical module boundaries inside Automation, Engineering Intelligence, and Presentation,
 - customer-facing product/capability module boundaries,
 - V1 scope for each module,
-- development order after the current collection foundation.
+- development order after the current collection foundation,
+- concrete AI Engineering Assistant implementation architecture and model/tool boundaries.
 
 When decisions are made, they should be captured in current architecture documents and, where significant, new ADRs. This history should remain as context rather than being rewritten to make the past look identical to the final design.
