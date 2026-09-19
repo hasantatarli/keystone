@@ -1,8 +1,8 @@
 # Keystone Reference Architecture
 
 **Status:** Current  
-**Version:** 0.2  
-**Last Updated:** 2026-09-18
+**Version:** 0.3  
+**Last Updated:** 2026-09-19
 
 ## Purpose
 
@@ -18,12 +18,17 @@ Keystone is organized around three main layers:
 
 **Collection → Scheduling → Execution → Repository**
 
-The Automation layer is responsible for continuously and reliably producing engineering evidence with minimal human intervention.
+The Automation layer is responsible for reliably producing engineering evidence with minimal human intervention. Collection may be continuous, assessment-driven, or explicitly requested by a user.
 
-- **Collection** defines and gathers observable database facts.
-- **Scheduling** determines when assigned collectors should run.
-- **Execution** reliably runs collectors through the queue/worker model.
-- **Repository** stores platform state, execution history, provider telemetry, and historical evidence.
+Its current logical module boundaries are:
+
+- **Target Management** — systems, nodes, connections, credentials, and provider association.
+- **Collector Framework** — collector definitions, discovery/registration, execution scope, assignments, and provider collectors.
+- **Scheduler** — recurring policies, frequencies, eligibility, and queue creation.
+- **Execution Engine** — queueing, workers, claiming, credentials, DATABASE fan-out, retries, timeout handling, heartbeat, recovery, and run history.
+- **Evidence Repository** — current state, historical snapshots, provider telemetry, and evidence access.
+
+Scheduling is one source of collection requests, not the only source. Snapshot assessment runs and explicit user requests may also request approved collectors through the same Execution Engine.
 
 The repository is the system of record for collected engineering evidence.
 
@@ -40,23 +45,50 @@ It may combine:
 - provider-specific engineering logic,
 - AI-assisted analysis where it adds value.
 
-The primary outputs are **Findings** and **Recommendations**.
+Engineering Intelligence is an asynchronous processing pipeline. New evidence can trigger analysis independently from the user interface, and reusable analysis results are persisted rather than recomputed whenever a screen is opened.
+
+The engineering model distinguishes:
+
+- **Raw Evidence** — observable facts collected from target environments.
+- **Derived Evidence** — reusable calculations, trends, correlations, and other analytical results derived from raw evidence.
+- **Assessment Results** — the outcome of an engineering assessment: assessed and healthy, attention required, or not assessed / insufficient evidence.
+- **Findings** — engineering conditions, problems, or risks requiring attention.
+- **Root Cause Analysis (RCA)** — hypotheses evaluated using supporting, contradicting, and missing evidence.
+- **Recommendations** — one or more possible engineering responses to a finding.
+- **Proposed Actions** — reusable operational steps that may later support a recommendation, always behind the human decision boundary.
+
+Finding confidence, root-cause confidence, and recommendation confidence are separate concepts. Confidence must be grounded in evidence coverage, evidence quality, hypothesis support, contradicting evidence, and historical consistency rather than an ungrounded AI-generated percentage.
+
+A healthy assessment is a first-class result. Zero findings must never be treated as proof that everything is healthy when required evidence was not collected.
 
 AI is not required for conclusions that can be produced more reliably by deterministic or statistical methods. AI may contribute to contextual reasoning and correlation, but collected evidence remains the source of truth and AI is not the sole source of engineering decisions.
 
-### 3. Presentation and Action
+### Keystone Dictionary
 
-The Presentation layer exposes engineering outputs to users through reports and future interactive interfaces.
+The **Keystone Dictionary** is the engineering knowledge base used by Engineering Intelligence and the AI Engineering Assistant.
 
-Typical outputs include:
+It may contain engineering concepts, assessment definitions, analysis definitions, finding definitions, RCA models, evidence requirements, hypotheses, recommendation definitions, and reusable action definitions.
 
-- findings,
-- supporting evidence,
-- recommendations,
-- proposed actions,
-- generated scripts or commands where appropriate.
+Provider-specific knowledge remains provider-specific. For example, PostgreSQL dead tuple and transaction-ID wraparound knowledge belongs to the PostgreSQL provider. Generic concepts such as capacity risk may be shared by multiple providers while each provider supplies its own detection and analysis logic.
 
-Keystone does not autonomously remediate production environments. It may propose an action, prepare a script, or provide a user-initiated execution mechanism, but the decision to perform a change remains with the user.
+Dictionary definitions are distinct from customer/runtime instances. The Dictionary describes what Keystone knows; the repository records what Keystone observed or concluded about a specific environment.
+
+RCA definitions should describe the evidence required to investigate likely causes, not only the minimum evidence required to detect a finding. Missing required evidence is itself visible as an evidence gap. AI may suggest additional hypotheses outside the predefined model, but such suggestions must remain distinguishable from Dictionary-defined engineering knowledge.
+
+### 3. Presentation
+
+The current design focus is Presentation. Action execution is intentionally deferred until the engineering presentation experience is established.
+
+Presentation is an engineering workspace rather than only a monitoring dashboard or report viewer. Its primary views are:
+
+- **Estate Overview** — what needs attention across managed environments.
+- **System Engineering View** — the engineering state, assessment coverage, healthy areas, findings, and unassessed areas for one system.
+- **Finding / Investigation Workspace** — finding details, evidence, RCA hypotheses, supporting and contradicting evidence, missing evidence, recommendations, and contextual AI interaction.
+- **Change & History Explorer** — configuration, workload, capacity, topology, behavior, and finding changes over time.
+
+Presentation should emphasize engineering meaning rather than raw metric dashboards. Raw evidence remains available for inspection where useful.
+
+Action remains a later concern. The existing human decision boundary still applies to any future state-changing capability.
 
 ## AI Engineering Assistant
 
@@ -74,7 +106,11 @@ Representative interactions include:
 
 The Assistant may explain, summarize, compare, correlate, and reason over Keystone evidence and engineering outputs. Its answers should remain evidence-backed and traceable where practical.
 
-Autonomous target-side diagnostic investigation is not part of the AI Engineering Assistant. A separate **Keystone AI Agents** concept has been identified for future exploration and is not part of the current Keystone product scope.
+The Assistant should preferentially ground its reasoning in actual Keystone evidence, derived evidence, findings, Dictionary knowledge, and historical context. General model knowledge may supplement these sources when appropriate, but it must not silently replace missing evidence.
+
+The Assistant may reason over predefined RCA hypotheses, explain why a hypothesis is supported, identify contradicting or missing evidence, and suggest additional investigation paths. It must not invent unavailable telemetry.
+
+Autonomous target-side diagnostic investigation is not part of the AI Engineering Assistant. Main Keystone may allow a user to request an existing approved collector to obtain fresh evidence. A separate **Keystone AI Agents** concept covers autonomous target-side investigation and is not part of the current Keystone product scope.
 
 ## Provider Architecture
 
@@ -128,6 +164,14 @@ The central repository separates generic Keystone metadata from provider-specifi
 
 Repository data is intentionally separated into current-state and historical snapshot models depending on the nature of the collector.
 
+Logically, the repository also distinguishes:
+
+- **Platform Repository** — targets, collectors, schedules, executions, and runtime state.
+- **Evidence Repository** — raw current-state and historical evidence.
+- **Intelligence Repository** — reusable derived evidence, assessment results, findings and finding history, RCA results, and recommendations.
+
+These are logical responsibilities and do not require separate physical databases.
+
 ## Collection and Interpretation Boundary
 
 Collectors are responsible for collecting observable facts from the target environment.
@@ -138,9 +182,23 @@ Interpretation belongs to Engineering Intelligence.
 
 This preserves the reusable flow:
 
-**Evidence → Analysis → Finding → Recommendation → Proposed Action**
+**Evidence → Derived Evidence → Assessment → Finding → RCA → Recommendation → Proposed Action**
+
+Not every assessment produces a finding. An assessment may explicitly conclude that the assessed area is healthy or that evidence is insufficient.
 
 The same evidence can therefore support multiple customer-facing capabilities without duplicating collection logic.
+
+## Assessment Operating Modes
+
+Keystone uses the same collection, Dictionary, analysis, assessment, finding, RCA, and recommendation foundations in multiple operating modes.
+
+- **Snapshot Assessment** — point-in-time collection for one-off health checks or similar assessments.
+- **Temporary Observation** — collection over a bounded period such as 24 hours or seven days when trends and workload behavior are needed.
+- **Continuous Engineering** — recurring collection, historical analysis, change detection, and continuously updated assessments.
+
+An **Assessment Profile** defines the assessment purpose and therefore the assessment definitions, evidence requirements, and collector coverage required for a run. Examples may include PostgreSQL Health Check, Upgrade Readiness, HA/DR Assessment, Security Assessment, or Performance Baseline.
+
+Snapshot assessments must clearly expose historical evidence that cannot be assessed from point-in-time data. One-off Health Check and Continuous Engineering are therefore operating modes over the same engineering platform rather than separate analysis products.
 
 ## Human Decision Boundary
 
@@ -182,6 +240,10 @@ Collectors are discovered and registered from provider metadata rather than bein
 - Databases are execution units, not Keystone targets.
 - Collect facts before interpreting them.
 - Evidence is the source of truth.
+- Healthy, attention-required, and insufficient-evidence assessment outcomes are explicitly distinguishable.
+- Collect enough evidence not only to detect important conditions but, where practical, to investigate their likely causes.
+- Missing evidence must remain visible rather than being filled by inference.
+- Keystone Dictionary definitions and runtime/customer results are separate concerns.
 - Use deterministic or statistical methods where they are more reliable than AI.
 - AI augments engineering analysis and user interaction; it does not replace evidence.
 - Keep provider telemetry separate from platform metadata.
