@@ -90,15 +90,40 @@ The AI Agents concept has a materially different security and testing profile. I
 
 This is recorded as a **future / separate product concept**, not as current Keystone scope or V1 commitment.
 
+## 2026-09-19 — Assessment, RCA, Dictionary, and Presentation Model
+
+The architecture discussion moved beyond finding detection and clarified how Keystone should support repeatable database engineering assessment and root-cause analysis.
+
+Key decisions and directions:
+
+- Automation was decomposed logically into Target Management, Collector Framework, Scheduler, Execution Engine, and Evidence Repository.
+- Engineering Intelligence is asynchronous from Presentation. Reusable derived evidence and engineering results should be persisted rather than recomputed from all historical telemetry for every user request.
+- The engineering chain evolved to **Raw Evidence → Derived Evidence → Assessment → Finding → RCA → Recommendation → Proposed Action**.
+- An assessment can explicitly be healthy, attention-required, or not assessed / insufficient evidence. Zero findings is not proof of complete health.
+- RCA is distinct from finding detection. It evaluates hypotheses using supporting, contradicting, and missing evidence. Finding confidence, RCA confidence, and recommendation confidence are separate concepts.
+- Collector design should gather enough evidence, where practical, to investigate likely causes rather than only detect conditions. Missing RCA evidence becomes an explicit collector/evidence gap.
+- Findings and Recommendations are separate domain concepts. One Finding may have multiple Recommendations; Recommendations may contain ordered steps and may reuse Proposed Actions.
+- The **Keystone Dictionary** was introduced as the engineering knowledge base containing generic engineering concepts plus provider-specific assessments, analyses, finding definitions, RCA models/evidence requirements, hypotheses, recommendations, and reusable action definitions.
+- Provider knowledge remains provider-specific. Generic concepts may connect comparable concerns across PostgreSQL, SQL Server, MySQL, MongoDB, and future providers without forcing provider-native concepts into a false common model.
+- AI Engineering Assistant reasoning should be grounded first in Keystone evidence, derived evidence, persisted engineering results, Dictionary knowledge, and history. AI may suggest additional hypotheses but must not invent missing evidence. AI-suggested hypotheses remain distinguishable from Dictionary-defined knowledge.
+- Presentation was reframed as an engineering workspace rather than a raw telemetry dashboard. Candidate views are Estate Overview, System Engineering View, Finding / Investigation Workspace, and Change & History Explorer.
+- Action execution was intentionally deferred until the Presentation model is established. The previously defined human decision boundary remains unchanged.
+- One-off Health Check and continuous Keystone operation should not become separate engineering engines. The same platform supports **Snapshot Assessment**, **Temporary Observation**, and **Continuous Engineering** modes. Assessment Profiles determine required checks, evidence, and collector coverage.
+
+This discussion also changed the preferred development-planning method. Instead of extending collector count sequentially without reference to engineering outcomes, V1 should be designed backward from **Assessment Catalogue → Findings/RCA → Required Evidence → Evidence Coverage → Collector Gaps**.
+
 ## Open Design Work
 
 The following areas remain intentionally open until module design is completed:
 
 - scheduler implementation and scheduling policy,
-- final technical module boundaries inside Automation, Engineering Intelligence, and Presentation,
-- customer-facing product/capability module boundaries,
-- V1 scope for each module,
-- development order after the current collection foundation,
+- finalize technical module boundaries where implementation requires stronger separation,
+- define the PostgreSQL V1 Assessment Catalogue,
+- define the V1 Findings and RCA catalogue,
+- build the Evidence Coverage Matrix against implemented collectors,
+- identify collector gaps and derive the next collector roadmap from evidence needs,
+- define V1 scope for each module,
+- determine development order after the assessment/evidence gap analysis,
 - concrete AI Engineering Assistant implementation architecture and model/tool boundaries.
 
 When decisions are made, they should be captured in current architecture documents and, where significant, new ADRs. This history should remain as context rather than being rewritten to make the past look identical to the final design.
