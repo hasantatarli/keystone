@@ -69,7 +69,11 @@ A successfully queried database still counts as successful when the collector le
 
 The runtime flow is intentionally generic:
 
-**Assignment → Queue → Worker → Collector → Provider Repository → Run History**
+**Collection Request → Queue → Worker → Collector → Provider Repository → Run History**
+
+A recurring collector assignment becoming due is one source of a Collection Request. Other valid sources include an Assessment Run and an explicit user request for an approved collector.
+
+Assignments continue to represent recurring target/collector configuration; queue tasks represent individual executions.
 
 Workers claim eligible tasks, validate the registered collector, execute according to its declared scope, persist provider-specific results, and record the execution outcome.
 
@@ -87,7 +91,9 @@ Stable collector keys are used to route collected results to the appropriate pro
 
 Collectors collect facts. Execution scope determines where those facts must be collected.
 
-Neither topology nor collector execution should contain finding or recommendation logic. Interpretation belongs to higher layers of Keystone so the same collected evidence can support health checks, trend analysis, recommendations, and future automated actions.
+Neither topology nor collector execution should contain assessment, finding, RCA, or recommendation logic. Interpretation belongs to higher layers of Keystone so the same collected evidence can support snapshot assessments, continuous engineering, trend analysis, RCA, recommendations, and other capabilities.
+
+Collector design should nevertheless be driven by engineering evidence requirements. Where practical, collection coverage should provide enough evidence to investigate likely causes of important findings, not only enough data to detect that a condition exists. This does not move interpretation into the collector; it ensures the higher layers have the evidence they require.
 
 ## Design Principles
 
@@ -97,3 +103,5 @@ Neither topology nor collector execution should contain finding or recommendatio
 - Treat a multi-database execution as one logical snapshot.
 - Allow partial database collection without hiding failures.
 - Keep collection separate from interpretation.
+- Allow scheduling, assessment runs, and explicit user requests to reuse the same execution path.
+- Design collector coverage from assessment and RCA evidence requirements.
