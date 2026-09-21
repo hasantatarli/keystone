@@ -127,3 +127,53 @@ The following areas remain intentionally open until module design is completed:
 - concrete AI Engineering Assistant implementation architecture and model/tool boundaries.
 
 When decisions are made, they should be captured in current architecture documents and, where significant, new ADRs. This history should remain as context rather than being rewritten to make the past look identical to the final design.
+
+
+## 2026-09-21 — PostgreSQL MVP Evidence Coverage and Scope Freeze
+
+The PostgreSQL MVP was narrowed to one concrete product outcome:
+
+> Connect Keystone to a PostgreSQL system and automatically produce an evidence-backed database health assessment with actionable findings and recommendations.
+
+The implementation focus is therefore **Evidence → Assessment → Finding → Recommendation**. Advanced AI, Continuous Engineering, advanced RCA, confidence scoring, full generic multi-provider abstraction, advanced Dictionary work, action execution, and perfect capability taxonomy are not MVP blockers.
+
+The implemented PostgreSQL functional collectors PG-001 through PG-008 were reviewed backward from potential Health Check outcomes. The resulting evidence-to-finding matrix is:
+
+| Functional collector | Primary evidence | MVP assessment / check candidates | Finding candidates / interpretation |
+| --- | --- | --- | --- |
+| PG-001 — Instance Inventory | Version, address/port, recovery state, postmaster start, system identifier | Instance identity, role/state, restart context | Unexpected recovery/role state or relevant instance-state observations when sufficient context exists |
+| PG-002 — Configuration Snapshot | Complete `pg_settings` snapshot including value, unit, context, source, pending restart | Pending configuration changes; connection capacity configuration; autovacuum configuration; replication configuration; diagnostic/statistics and timeout/safety configuration | Pending restart configuration; configuration evidence used jointly by connection, vacuum, replication and other assessments. A setting value alone is not automatically a finding |
+| PG-003 — Database Inventory & Capacity | Database identity, owner, encoding/collation, connection limit, accessibility, size, tablespace | Database accessibility; database connection limits; current database capacity; ownership/security context | Inaccessible/restricted database where relevant; database-level connection pressure when combined with activity; capacity observations. Large size alone is not a problem |
+| PG-004 — Table & Index Capacity | Logical object/partition identity, data/index/TOAST/total size, estimated rows, index count, tablespaces | Large-object concentration; object/database composition; index-to-data and TOAST-to-data ratios; historical growth when history exists | Capacity/concentration observations. Index count alone must not be interpreted as a missing-index finding, and size alone is not evidence of bloat |
+| PG-005 — Vacuum & Analyze Statistics | Live/dead tuples, modifications since analyze, inserts since vacuum, maintenance timestamps and counts | Dead tuple pressure; analyze freshness; vacuum/analyze activity; autovacuum effectiveness when combined with configuration | Dead Tuple Pressure; Analyze Freshness; maintenance effectiveness findings when evidence supports them. Null last-autovacuum alone does not mean autovacuum is broken |
+| PG-006 — Transaction / Wraparound Health | Database/relation XID and MultiXact ages and frozen identifiers | XID/MultiXact consumption relative to configured freeze limits; database and relation-level wraparound risk | Transaction ID / MultiXact wraparound risk with severity derived from age versus effective configuration |
+| PG-007 — Replication & Slot Health | Connected replicas, streaming state, LSN positions/lags, reply time, backend_xmin, slot state, restart LSN, WAL status/safety/invalidation | Replica connectivity/state; replication lag; WAL gap; replica responsiveness; xmin retention; inactive slots; retained WAL; slot safety/invalidation | Replication unavailable/degraded; lagging replica; inactive/stale slot; excessive WAL retention; unsafe/invalidated slot. Status + slots + history can identify topology loss without requiring an explicit expected-topology model for MVP |
+| PG-008 — Session & Connection Activity | System/database connection counts and states, idle-in-transaction state, cumulative session statistics, user/application breakdown | Connection utilization versus configured limits; DB connection limit; idle/idle-in-transaction pressure; aborted transactions; session churn and abnormal termination with history | Connection Capacity; Idle-in-Transaction; abnormal session/termination patterns when sufficient evidence/history exists. User/application concentration alone is not proof of pooling misconfiguration |
+
+The review established several interpretation constraints: collectors persist observable facts; findings must be based on sufficient context; a large database/table, a configuration value, an absent index, a null maintenance timestamp, or a connection breakdown must not independently be promoted to a health problem without supporting evidence.
+
+The matrix exposed the following MVP evidence gaps:
+
+- **High priority:** host/OS evidence; long-running transactions; long-running queries.
+- **Review during MVP:** table-level autovacuum overrides and TOAST wraparound coverage.
+- **Later:** deep query-performance analysis, bloat analysis, advanced forecasting, full security assessment, advanced RCA, and Continuous Engineering.
+
+Explicit expected replication topology was considered but is not required for MVP. Existing replication-status, replication-slot, and historical evidence can detect meaningful changes such as previously active physical slots/replicas becoming inactive or disconnected. On a first observation without history or declared expectation, Keystone should report the observed state rather than assert that HA has failed.
+
+Optional PostgreSQL extensions are treated as evidence capabilities rather than mandatory collector prerequisites. Missing extensions, insufficient privileges, or unsupported capabilities must not automatically fail the whole Health Check. Assessments dependent on unavailable evidence may return **INSUFFICIENT_EVIDENCE**.
+
+### Host Evidence Direction
+
+Host evidence is part of provider-owned Health Check telemetry. For PostgreSQL it will be persisted under the `postgresql` schema rather than introducing a central host entity or a separate host telemetry schema.
+
+The initial repository direction is:
+
+- `postgresql.host_snapshot` for hostname/OS identity, uptime, logical CPU, memory, and swap/pagefile evidence.
+- `postgresql.storage_snapshot` for filesystem/volume capacity evidence.
+- Host evidence is associated with the existing NODE target.
+- Evidence may be `AUTOMATED` or `MANUAL`.
+- Lack of OS access does not fail the PostgreSQL Health Check; assessments requiring host evidence become **INSUFFICIENT_EVIDENCE** where necessary.
+- Automated Linux/Windows collection mechanisms are deliberately deferred until the repository evidence model is established.
+- If multiple database providers run on the same physical host, each provider may independently persist its own host evidence. Cross-provider physical-host deduplication and correlation are outside MVP scope.
+
+The next implementation step is the PostgreSQL host telemetry repository migration, planned as `PG012__create_host_snapshots.sql`, followed by collection design. Long-running transaction/query evidence remains the other high-priority collector gap after host evidence.
