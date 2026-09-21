@@ -212,6 +212,12 @@ def parse_collector_metadata(file_path):
         re.MULTILINE | re.DOTALL | re.IGNORECASE
     )
 
+    if not description_match:
+        raise RuntimeError(
+            f"Required collector metadata field "
+            f"'Description' not found in {file_path.name}"
+        )
+
     description = description_match.group(1).strip()
 
     description = re.sub(
@@ -221,11 +227,7 @@ def parse_collector_metadata(file_path):
         flags=re.MULTILINE
     ).strip()
 
-    if not description_match:
-        raise RuntimeError(
-            f"Required collector metadata field "
-            f"'Description' not found in {file_path.name}"
-        )
+    
 
     return {
         "collector_key": get_value("Key"),

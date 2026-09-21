@@ -510,6 +510,170 @@ def execute_collector(task, target_conn):
         cur.execute(sql)
         return cur.fetchall()
 
+def parse_host_snapshot_output(output):
+    sections = {}
+    current_section = None
+
+    for line in output.splitlines():
+        line = line.rstrip()
+
+        if line.startswith("===") and line.endswith("==="):
+            current_section = line.strip("=")
+            sections[current_section] = []
+            continue
+
+        if current_section is not None:
+            sections[current_section].append(line)
+
+    required_sections = {
+        "HOSTNAME",
+        "OS_RELEASE",
+        "UPTIME",
+        "CPU",
+        "MEMORY",
+        "FILESYSTEMS",
+    }
+
+    missing_sections = required_sections - sections.keys()
+
+    if missing_sections:
+        raise RuntimeError(
+            "Host snapshot output is missing section(s): "
+            + ", ".join(sorted(missing_sections))
+        )
+
+    # Hostname
+    hostname = "\n".join(
+        sections["HOSTNAME"]
+    ).strip()
+
+    # OS
+    os_release = {}
+
+    for line in sections["OS_RELEASE"]:
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+
+        os_release[key.strip()] = (
+            value.strip().strip('"')
+        )
+
+    # Uptime
+    uptime_text = " ".join(
+        sections["UPTIME"]
+    ).strip()
+
+    uptime_seconds = int(
+        float(uptime_text.split()[0])
+    )
+
+    # CPU
+    logical_cpu_count = int(
+        " ".join(sections["CPU"]).strip()
+    )
+
+    # Memory
+    meminfo = {}
+
+    for line in sections["MEMORY"]:
+        if ":" not in line:
+            continue
+
+        key, value = line.split(":", 1)
+        parts = value.strip().split()
+
+        if not parts:
+            continue
+
+        # /proc/meminfo values are reported in kB.
+        meminfo[key.strip()] = int(parts[0]) * 1024
+
+    memory_total_bytes = meminfo.get("MemTotal")
+    memory_available_bytes = meminfo.get("MemAvailable")
+
+    memory_used_bytes = None
+
+    if (
+        memory_total_bytes is not None
+        and memory_available_bytes is not None
+    ):
+        memory_used_bytes = (
+            memory_total_bytes
+            - memory_available_bytes
+        )
+
+    swap_total_bytes = meminfo.get("SwapTotal")
+    swap_free_bytes = meminfo.get("SwapFree")
+
+    swap_used_bytes = None
+
+    if (
+        swap_total_bytes is not None
+        and swap_free_bytes is not None
+    ):
+        swap_used_bytes = (
+            swap_total_bytes
+            - swap_free_bytes
+        )
+
+    captured_at = datetime.now(timezone.utc)
+
+    rows = [
+        {
+            "record_type": "HOST",
+            "captured_at": captured_at,
+            "source_type": "AUTOMATED",
+            "hostname": hostname,
+            "os_family": "LINUX",
+            "os_name": os_release.get(
+                "PRETTY_NAME",
+                os_release.get("NAME"),
+            ),
+            "os_version": os_release.get("VERSION_ID"),
+            "uptime_seconds": uptime_seconds,
+            "logical_cpu_count": logical_cpu_count,
+            "memory_total_bytes": memory_total_bytes,
+            "memory_available_bytes": memory_available_bytes,
+            "memory_used_bytes": memory_used_bytes,
+            "swap_total_bytes": swap_total_bytes,
+            "swap_used_bytes": swap_used_bytes,
+        }
+    ]
+
+    # Filesystems
+    for line in sections["FILESYSTEMS"]:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if line.lower().startswith("filesystem"):
+            continue
+
+        parts = line.split(maxsplit=5)
+
+        if len(parts) != 6:
+            continue
+
+        device, total, used, available, _, mount_point = parts
+
+        rows.append(
+            {
+                "record_type": "STORAGE",
+                "captured_at": captured_at,
+                "source_type": "AUTOMATED",
+                "device": device,
+                "mount_point": mount_point,
+                "total_bytes": int(total),
+                "used_bytes": int(used),
+                "available_bytes": int(available),
+            }
+        )
+
+    return rows
+
 
 def execute_ssh_collector(task):
     script_path = PROJECT_ROOT / task["script_file"]
@@ -538,7 +702,7 @@ def execute_ssh_collector(task):
             timeout=60
         )
 
-        exit_status = stdout.channel.recv_exit_status()
+        
 
         output = stdout.read().decode(
             "utf-8",
@@ -550,13 +714,21 @@ def execute_ssh_collector(task):
             errors="replace"
         )
 
+        exit_status = stdout.channel.recv_exit_status()
+
         if exit_status != 0:
             raise RuntimeError(
                 f"SSH collector failed with exit status "
                 f"{exit_status}: {error_output.strip()}"
             )
 
-        return output
+        if task["collector_key"] == "PG_HOST_SNAPSHOT":
+            return parse_host_snapshot_output(output)
+
+        raise RuntimeError(
+            f"No SSH output parser registered for collector: "
+            f"{task['collector_key']}"
+        )
 
     finally:
         client.close()
@@ -1649,6 +1821,105 @@ def save_connection_activity_snapshot(conn, task, rows):
                 ),
             )        
 
+def save_host_snapshot(conn, task, rows):
+    host_rows = [
+        row
+        for row in rows
+        if row["record_type"] == "HOST"
+    ]
+
+    storage_rows = [
+        row
+        for row in rows
+        if row["record_type"] == "STORAGE"
+    ]
+
+    if len(host_rows) != 1:
+        raise RuntimeError(
+            f"Host Snapshot collector returned "
+            f"{len(host_rows)} HOST rows; expected 1."
+        )
+
+    host = host_rows[0]
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO postgresql.host_snapshot
+            (
+                target_id,
+                captured_at,
+                source_type,
+                hostname,
+                os_family,
+                os_name,
+                os_version,
+                uptime_seconds,
+                logical_cpu_count,
+                memory_total_bytes,
+                memory_available_bytes,
+                memory_used_bytes,
+                swap_total_bytes,
+                swap_used_bytes
+            )
+            VALUES
+            (
+                %(target_id)s,
+                %(captured_at)s,
+                %(source_type)s,
+                %(hostname)s,
+                %(os_family)s,
+                %(os_name)s,
+                %(os_version)s,
+                %(uptime_seconds)s,
+                %(logical_cpu_count)s,
+                %(memory_total_bytes)s,
+                %(memory_available_bytes)s,
+                %(memory_used_bytes)s,
+                %(swap_total_bytes)s,
+                %(swap_used_bytes)s
+            );
+            """,
+            {
+                "target_id": task["target_id"],
+                **host,
+            },
+        )
+
+        for storage in storage_rows:
+            cur.execute(
+                """
+                INSERT INTO postgresql.storage_snapshot
+                (
+                    target_id,
+                    captured_at,
+                    source_type,
+                    device,
+                    mount_point,
+                    total_bytes,
+                    used_bytes,
+                    available_bytes
+                )
+                VALUES
+                (
+                    %(target_id)s,
+                    %(captured_at)s,
+                    %(source_type)s,
+                    %(device)s,
+                    %(mount_point)s,
+                    %(total_bytes)s,
+                    %(used_bytes)s,
+                    %(available_bytes)s
+                );
+                """,
+                {
+                    "target_id": task["target_id"],
+                    **storage,
+                },
+            )
+
+
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -1659,6 +1930,7 @@ COLLECTOR_HANDLERS = {
     "PG_REPLICATION_STATUS": save_replication_status_snapshot,
     "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
+    "PG_HOST_SNAPSHOT": save_host_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):
