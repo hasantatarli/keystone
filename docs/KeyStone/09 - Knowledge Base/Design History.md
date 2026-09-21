@@ -177,3 +177,26 @@ The initial repository direction is:
 - If multiple database providers run on the same physical host, each provider may independently persist its own host evidence. Cross-provider physical-host deduplication and correlation are outside MVP scope.
 
 The next implementation step is the PostgreSQL host telemetry repository migration, planned as `PG012__create_host_snapshots.sql`, followed by collection design. Long-running transaction/query evidence remains the other high-priority collector gap after host evidence.
+
+
+## 2026-09-21 — Linux Host Evidence Implementation Completed
+
+The PostgreSQL MVP host-evidence gap moved from design direction to a working end-to-end implementation.
+
+The implemented execution and persistence model is:
+
+- Core migration `V015__add_collector_execution_type.sql` adds `execution_type` to collector definitions. The initial execution types are `SQL` and `SSH`. `execution_scope` continues to describe **where** a collector runs (SYSTEM / NODE / DATABASE), while `execution_type` describes **how** it runs.
+- PostgreSQL provider migration `PG012__create_host_snapshots.sql` creates `postgresql.host_snapshot` and `postgresql.storage_snapshot`.
+- `PG_HOST_SNAPSHOT` is a NODE-scoped, SSH-executed Linux collector.
+- Host access reuses the existing NODE target and `keystone.target_connection` model. SSH connections use `connection_purpose = 'HOST'`; SQL collectors continue to use non-HOST database connections.
+- SSH password authentication reuses Keystone's existing encrypted credential mechanism. Target credentials remain encrypted in `credential_data` and are decrypted by the worker using `KEYSTONE_MASTER_KEY`.
+- The worker executes the shell collector through SSH, parses the sectioned output into structured HOST and STORAGE evidence, and persists it through the normal collector result-handling path.
+- Host evidence provenance is persisted as `AUTOMATED` or `MANUAL`, allowing manually supplied evidence to coexist with automatically collected snapshots.
+
+The first end-to-end automated test against the Linux NODE target `postgre-1` completed successfully. The collector returned one HOST record and two STORAGE records (`/` and `/boot`), persisted all three records, and recorded the collector run as `SUCCESS` with three rows collected. This validated the complete path:
+
+**Queue → Assignment → SSH execution type → HOST connection → encrypted credential → SSH collector → parser → provider repository persistence → run history**
+
+The Linux host collector intentionally remains a minimum Health Check evidence collector rather than a general-purpose operating-system monitoring agent. CPU utilization, IOPS, disk latency, network throughput, richer OS monitoring, and production-grade SSH host-key management are outside the current MVP implementation scope. Windows host collection remains required for broader cross-platform coverage but is not part of this Linux implementation milestone.
+
+With Linux host evidence operational, the remaining high-priority PostgreSQL MVP evidence gaps are **long-running transactions** and **long-running queries**. Their collector/persistence design is the next planned evidence-coverage step.
