@@ -1,3 +1,12 @@
 docs/KeyStone/.obsidian/workspace.json
 docs/KeyStone/.obsidian/workspace-mobile.json
 docs/KeyStone/.obsidian/app.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local environment / secrets
+.env
+.env.*
