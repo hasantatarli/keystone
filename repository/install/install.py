@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 import sys
 import hashlib
+import os
 import psycopg
 import time
 
@@ -11,11 +12,11 @@ import time
 # -----------------------------------------------------------------------------
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "keystone_lab",
-    "user": "postgres",
-    "password": "3746"
+    "host": os.getenv("KEYSTONE_REPOSITORY_HOST", "localhost"),
+    "port": int(os.getenv("KEYSTONE_REPOSITORY_PORT", "5432")),
+    "dbname": os.getenv("KEYSTONE_REPOSITORY_DB", "keystone_lab"),
+    "user": os.getenv("KEYSTONE_REPOSITORY_USER", "postgres"),
+    "password": os.getenv("KEYSTONE_REPOSITORY_PASSWORD")
 }
 
 
