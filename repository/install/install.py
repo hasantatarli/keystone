@@ -166,7 +166,11 @@ def parse_collector_metadata(file_path):
     content = file_path.read_text(encoding="utf-8")
 
     def get_value(field_name):
-        pattern = rf"^{re.escape(field_name)}\s*:\s*(.+)$"
+        pattern = (
+            rf"^\s*(?:#\s*)?"
+            rf"{re.escape(field_name)}\s*:\s*(.+)$"
+        )
+
         match = re.search(
             pattern,
             content,
@@ -181,11 +185,41 @@ def parse_collector_metadata(file_path):
 
         return match.group(1).strip()
 
+
+    def get_optional_value(field_name, default=None):
+        pattern = (
+            rf"^\s*(?:#\s*)?"
+            rf"{re.escape(field_name)}\s*:\s*(.+)$"
+        )
+
+        match = re.search(
+            pattern,
+            content,
+            re.MULTILINE | re.IGNORECASE
+        )
+
+        if not match:
+            return default
+
+        return match.group(1).strip()
+
     description_match = re.search(
-        r"Description\s*\n-+\s*\n(.*?)(?=\n={5,}|\*/)",
+        r"^\s*(?:#\s*)?Description\s*$"
+        r"\n^\s*(?:#\s*)?-+\s*$"
+        r"\n(.*?)"
+        r"(?=^\s*(?:#\s*)?={5,}\s*$|\*/)",
         content,
-        re.DOTALL | re.IGNORECASE
+        re.MULTILINE | re.DOTALL | re.IGNORECASE
     )
+
+    description = description_match.group(1).strip()
+
+    description = re.sub(
+        r"^\s*#\s?",
+        "",
+        description,
+        flags=re.MULTILINE
+    ).strip()
 
     if not description_match:
         raise RuntimeError(
@@ -199,7 +233,11 @@ def parse_collector_metadata(file_path):
         "component": get_value("Component"),
         "applies_to": get_value("Applies To"),
         "execution_scope": get_value("Execution Scope"),
-        "description": description_match.group(1).strip()
+        "execution_type": get_optional_value(
+            "Execution Type",
+            "SQL"
+        ),
+        "description": description
     }
 
 def discover_collectors():
@@ -211,7 +249,13 @@ def discover_collectors():
             f"{POSTGRESQL_COLLECTORS_DIR}"
         )
 
-    for file_path in POSTGRESQL_COLLECTORS_DIR.glob("*.sql"):
+    for file_path in POSTGRESQL_COLLECTORS_DIR.iterdir():
+
+        if not file_path.is_file():
+            continue
+
+        if file_path.suffix.lower() not in (".sql", ".sh"):
+            continue
 
         metadata = parse_collector_metadata(file_path)
 
@@ -226,7 +270,8 @@ def discover_collectors():
                 ).replace("\\", "/"),
                 "checksum": calculate_checksum(file_path),
                 "description": metadata["description"],
-                "path": file_path
+                "path": file_path,
+                "execution_type": metadata["execution_type"],
             }
         )
 
@@ -531,6 +576,7 @@ def register_collectors(conn):
             script_file,
             checksum,
             execution_scope,
+            execution_type,
             is_active,
             description
         )
@@ -542,6 +588,7 @@ def register_collectors(conn):
             %(script_file)s,
             %(checksum)s,
             %(execution_scope)s,
+            %(execution_type)s,
             TRUE,
             %(description)s
         )
@@ -552,6 +599,7 @@ def register_collectors(conn):
             script_file = EXCLUDED.script_file,
             checksum    = EXCLUDED.checksum,
             execution_scope = EXCLUDED.execution_scope,
+            execution_type = EXCLUDED.execution_type,
             is_active   = TRUE,
             description = EXCLUDED.description;
     """

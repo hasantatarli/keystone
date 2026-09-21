@@ -9,6 +9,7 @@ import uuid
 import threading
 import psycopg
 import time
+import paramiko
 
 from psycopg.rows import dict_row
 from repository.common.credentials import decrypt_credential
@@ -76,6 +77,27 @@ def connect_target(task, database_name=None):
         )
 
     return conn
+
+def connect_ssh_target(task):
+    password = resolve_password(task)
+
+    client = paramiko.SSHClient()
+
+    client.set_missing_host_key_policy(
+        paramiko.AutoAddPolicy()
+    )
+
+    client.connect(
+        hostname=task["host"],
+        port=task["port"] or 22,
+        username=task["username"],
+        password=password,
+        timeout=15,
+        banner_timeout=15,
+        auth_timeout=15
+    )
+
+    return client
 
 # -----------------------------------------------------------------------------
 # Credential Management
@@ -172,6 +194,7 @@ def claim_tasks(conn, worker_id, limit=5):
                 cd.name AS collector_name,
                 cd.script_file,
                 cd.execution_scope,
+                cd.execution_type,
                 cd.checksum,
                 cd.component,
                 t.target_id,
@@ -199,7 +222,15 @@ def claim_tasks(conn, worker_id, limit=5):
 
             JOIN keystone.target_connection tc
                 ON tc.target_id = t.target_id
-               AND tc.is_active = TRUE
+            AND tc.is_active = TRUE
+            AND
+            (
+                (cd.execution_type = 'SQL'
+                    AND tc.connection_purpose <> 'HOST')
+                OR
+                (cd.execution_type = 'SSH'
+                    AND tc.connection_purpose = 'HOST')
+            )
 
             WHERE q.task_id = ANY(%s)
 
@@ -478,7 +509,58 @@ def execute_collector(task, target_conn):
         #cur.execute("SELECT pg_sleep(15);")
         cur.execute(sql)
         return cur.fetchall()
-    
+
+
+def execute_ssh_collector(task):
+    script_path = PROJECT_ROOT / task["script_file"]
+
+    if not script_path.exists():
+        raise RuntimeError(
+            f"Collector script not found: {script_path}"
+        )
+
+    actual_checksum = calculate_checksum(script_path)
+
+    if actual_checksum != task["checksum"]:
+        raise RuntimeError(
+            f"Collector checksum mismatch: {task['collector_key']}"
+        )
+
+    script = script_path.read_text(
+        encoding="utf-8"
+    )
+
+    client = connect_ssh_target(task)
+
+    try:
+        stdin, stdout, stderr = client.exec_command(
+            script,
+            timeout=60
+        )
+
+        exit_status = stdout.channel.recv_exit_status()
+
+        output = stdout.read().decode(
+            "utf-8",
+            errors="replace"
+        )
+
+        error_output = stderr.read().decode(
+            "utf-8",
+            errors="replace"
+        )
+
+        if exit_status != 0:
+            raise RuntimeError(
+                f"SSH collector failed with exit status "
+                f"{exit_status}: {error_output.strip()}"
+            )
+
+        return output
+
+    finally:
+        client.close()
+
 # -----------------------------------------------------------------------------
 # Database Discovery
 # -----------------------------------------------------------------------------
@@ -1703,8 +1785,12 @@ def process_task(task):
                 run_status = "SUCCESS"
                 status_message = None
 
-                if task["execution_scope"] == "DATABASE":
+                if task["execution_type"] == "SSH":
+                    rows = execute_ssh_collector(task)
+
+                elif task["execution_scope"] == "DATABASE":
                     rows, execution_info = execute_database_scoped_collector(task)
+
                 else:
                     with connect_target(task) as target_conn:
                         rows = execute_collector(
