@@ -2,6 +2,7 @@
 # Imports
 # -----------------------------------------------------------------------------
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import uuid
@@ -9,9 +10,7 @@ import threading
 import psycopg
 import time
 
-from datetime import datetime, timezone
 from psycopg.rows import dict_row
-from cryptography.fernet import Fernet, InvalidToken
 from repository.common.credentials import decrypt_credential
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg.errors import QueryCanceled
@@ -29,11 +28,11 @@ MAX_RETRY_COUNT = 3
 # Configuration
 # -----------------------------------------------------------------------------
 REPOSITORY_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "keystone_lab",
-    "user": "postgres",
-    "password": "3746"
+    "host": os.getenv("KEYSTONE_REPOSITORY_HOST", "localhost"),
+    "port": int(os.getenv("KEYSTONE_REPOSITORY_PORT", "5432")),
+    "dbname": os.getenv("KEYSTONE_REPOSITORY_DB", "keystone_lab"),
+    "user": os.getenv("KEYSTONE_REPOSITORY_USER", "postgres"),
+    "password": os.getenv("KEYSTONE_REPOSITORY_PASSWORD")
 }
 
 # -----------------------------------------------------------------------------
