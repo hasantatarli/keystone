@@ -1821,6 +1821,136 @@ def save_connection_activity_snapshot(conn, task, rows):
                 ),
             )        
 
+
+def save_activity_snapshot(conn, task, rows):
+    if not rows:
+        return
+
+    target_id = task["target_id"]
+
+    with conn.cursor() as cur:
+        for row in rows:
+            cur.execute(
+                """
+                INSERT INTO postgresql.activity_snapshot
+                (
+                    target_id,
+                    captured_at,
+
+                    database_oid,
+                    database_name,
+
+                    pid,
+                    leader_pid,
+
+                    user_oid,
+                    user_name,
+
+                    application_name,
+
+                    client_addr,
+                    client_hostname,
+                    client_port,
+
+                    backend_start,
+                    transaction_start,
+                    query_start,
+                    state_change,
+
+                    wait_event_type,
+                    wait_event,
+                    state,
+
+                    backend_xid,
+                    backend_xmin,
+
+                    query_id,
+                    query_text,
+
+                    backend_type
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s,
+                    %s,
+
+                    %s
+                )
+                """,
+                (
+                    target_id,
+                    row["captured_at"],
+
+                    row["database_oid"],
+                    row["database_name"],
+
+                    row["pid"],
+                    row["leader_pid"],
+
+                    row["user_oid"],
+                    row["user_name"],
+
+                    row["application_name"],
+
+                    row["client_addr"],
+                    row["client_hostname"],
+                    row["client_port"],
+
+                    row["backend_start"],
+                    row["transaction_start"],
+                    row["query_start"],
+                    row["state_change"],
+
+                    row["wait_event_type"],
+                    row["wait_event"],
+                    row["state"],
+
+                    row["backend_xid"],
+                    row["backend_xmin"],
+
+                    row["query_id"],
+                    row["query_text"],
+
+                    row["backend_type"],
+                ),
+            )
+
+
+
+# -----------------------------------------------------------------------------
+# Linux based coding
+# -----------------------------------------------------------------------------
+
 def save_host_snapshot(conn, task, rows):
     host_rows = [
         row
@@ -1931,6 +2061,7 @@ COLLECTOR_HANDLERS = {
     "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
+    "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):
