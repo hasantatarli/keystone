@@ -353,6 +353,7 @@ def discover_migrations():
 
     migrations.sort(
         key=lambda x: (
+            x["component"] != "Repository.Core",
             x["component"],
             x["migration_no"]
         )
@@ -684,19 +685,19 @@ def main():
                     print(f"    Applies To : {metadata['applies_to']}")
                     print(f"    Checksum   : {migration['checksum']}")
                     print()
-                    print("Executing pending migrations...")
+                print("Executing pending migrations...")
 
-                    for migration in pending:
-                        success = execute_migration(conn, migration)
+                for migration in pending:
+                    success = execute_migration(conn, migration)
 
-                        if not success:
-                            print()
-                            print(
-                                "Migration chain stopped because "
-                                f"{migration['version']} failed."
-                            )
+                    if not success:
+                        print()
+                        print(
+                            "Migration chain stopped because "
+                            f"{migration['version']} failed."
+                        )
 
-                            sys.exit(1)
+                        sys.exit(1)
 
             else:
                 print("No pending migrations.")
