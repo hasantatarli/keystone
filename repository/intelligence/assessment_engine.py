@@ -119,7 +119,115 @@ def load_evidence_requirements(conn, rule_id):
         )
 
         return cur.fetchall()
-    
+
+# -----------------------------------------------------------------------------
+# Assessment Persistence
+# -----------------------------------------------------------------------------
+def create_assessment_run(
+    conn,
+    assessment_id,
+    target_id,
+    started_at,
+):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO keystone.assessment_run
+            (
+                assessment_id,
+                target_id,
+                started_at,
+                status
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                'RUNNING'
+            )
+            RETURNING assessment_run_id
+            """,
+            (
+                assessment_id,
+                target_id,
+                started_at,
+            ),
+        )
+
+        return cur.fetchone()["assessment_run_id"]
+
+
+def complete_assessment_run(
+    conn,
+    assessment_run_id,
+    status,
+):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE keystone.assessment_run
+            SET
+                finished_at = clock_timestamp(),
+                status = %s
+            WHERE assessment_run_id = %s
+            """,
+            (
+                status,
+                assessment_run_id,
+            ),
+        )
+
+def insert_finding(
+    conn,
+    assessment_run_id,
+    rule,
+    finding,
+):
+    finding_text = rule["finding_template"].format(
+        pid=finding["pid"],
+        duration_seconds=f"{finding['duration_seconds']:.1f}",
+    )
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO keystone.finding
+            (
+                assessment_run_id,
+                rule_id,
+                severity,
+                title,
+                finding_text,
+                recommendation,
+                observed_value,
+                observed_unit,
+                subject_type,
+                subject_identifier
+            )
+            VALUES
+            (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
+            RETURNING finding_id
+            """,
+            (
+                assessment_run_id,
+                rule["rule_id"],
+                finding["severity"],
+                rule["name"],
+                finding_text,
+                rule["recommendation"],
+                finding["duration_seconds"],
+                "SECOND",
+                "SESSION",
+                str(finding["pid"]),
+            ),
+        )
+
+        return cur.fetchone()["finding_id"]
+
 # -----------------------------------------------------------------------------
 # Evidence
 # -----------------------------------------------------------------------------
@@ -157,6 +265,7 @@ def load_latest_activity_snapshot(conn, target_id):
         )
 
         return cur.fetchall()
+
 
 
 # -----------------------------------------------------------------------------
@@ -261,6 +370,15 @@ def main():
         print("Assessment:")
         print(assessment)
 
+        assessment_run_id = create_assessment_run(
+            conn,
+            assessment["assessment_id"],
+            target_id,
+            evaluation_time,
+        )
+
+        print(f"Assessment Run ID: {assessment_run_id}")
+
         rules = load_rules(
             conn,
             assessment["assessment_id"],
@@ -331,7 +449,26 @@ def main():
                         print("No findings.")
 
                     for finding in findings:
-                        print(finding)
+                        finding_id = insert_finding(
+                            conn,
+                            assessment_run_id,
+                            rule,
+                            finding,
+                        )
 
+                        print(
+                            f"Finding {finding_id}: "
+                            f"{finding['severity']} - "
+                            f"PID {finding['pid']} - "
+                            f"{finding['duration_seconds']:.1f}s"
+                        )
+
+        complete_assessment_run(
+            conn,
+            assessment_run_id,
+            "SUCCESS",
+        )
+
+        print(f"Assessment Run {assessment_run_id} completed successfully.")
 if __name__ == "__main__":
     main()
