@@ -372,7 +372,7 @@ def load_latest_connection_activity_snapshot(conn, target_id):
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
-def evaluate_long_idle_transaction(rows, thresholds):
+def evaluate_long_idle_transaction(rows, rule, thresholds):
     findings = []
 
     for row in rows:
@@ -422,7 +422,7 @@ def evaluate_long_idle_transaction(rows, thresholds):
     return findings
 
 
-def evaluate_database_xid_wraparound(rows, thresholds):
+def evaluate_database_xid_wraparound(rows, rule, thresholds):
     findings = []
 
     for row in rows:
@@ -475,7 +475,7 @@ def evaluate_replication_slot_wal_retention_pressure(
             {
                 "slot_name": row["slot_name"],
                 "wal_status": row["wal_status"],
-                "severity": default_severity,
+                "severity": rule["default_severity"],
                 "snapshot_id": row["snapshot_id"],
                 "template_values": {
                     "slot_name": row["slot_name"],
@@ -521,7 +521,7 @@ def evaluate_replication_slot_wal_unavailable(
     return findings
 
 
-def evaluate_aborted_idle_transaction_connections(rows, thresholds):
+def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
     findings = []
 
     for row in rows:
@@ -959,4 +959,135 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(def run_assessment(
+    conn,
+    assessment_key,
+    target_id,
+):
+    """Run enabled rules for one assessment against one target.
+
+    The orchestration is intentionally rule-agnostic: Dictionary metadata tells
+    the engine which evidence is required, registries resolve evidence loaders
+    and evaluators, and rule-specific engineering logic stays in evaluators.
+    """
+    evaluation_time = datetime.now(timezone.utc)
+
+    assessment = load_assessment(conn, assessment_key)
+    print("Assessment:")
+    print(assessment)
+
+    assessment_run_id = create_assessment_run(
+        conn,
+        assessment["assessment_id"],
+        target_id,
+        evaluation_time,
+    )
+    print(f"Assessment Run ID: {assessment_run_id}")
+
+    rules = load_rules(conn, assessment["assessment_id"])
+
+    # Cache evidence per source for this assessment run. Multiple rules can use
+    # the same source without querying the repository repeatedly.
+    evidence_cache = {}
+
+    for rule in rules:
+        print()
+        print(f"Evaluating {rule['rule_key']} - {rule['name']}")
+
+        evaluator = RULE_EVALUATORS.get(rule["rule_key"])
+        if evaluator is None:
+            raise RuntimeError(
+                f"No evaluator registered for rule: {rule['rule_key']}"
+            )
+
+        thresholds = load_thresholds(conn, rule["rule_id"])
+        evidence_requirements = load_evidence_requirements(
+            conn,
+            rule["rule_id"],
+        )
+
+        if not evidence_requirements:
+            raise RuntimeError(
+                f"No evidence requirements defined for rule: {rule['rule_key']}"
+            )
+
+        print("Evidence requirements:")
+        for requirement in evidence_requirements:
+            print(requirement)
+
+        # MVP evaluators currently consume one evidence row-set. Keep the
+        # requirement loop generic so freshness and loading do not become
+        # rule-specific again. Multi-source evaluator input will be introduced
+        # only when a real rule requires it.
+        evidence_sets = []
+        evidence_valid = True
+
+        for requirement in evidence_requirements:
+            evidence_source = requirement["evidence_source"]
+            loader = EVIDENCE_LOADERS.get(evidence_source)
+
+            if loader is None:
+                raise RuntimeError(
+                    f"No evidence loader registered for source: {evidence_source}"
+                )
+
+            if evidence_source not in evidence_cache:
+                evidence_cache[evidence_source] = loader(conn, target_id)
+
+            rows = evidence_cache[evidence_source]
+            valid, reason = validate_evidence_freshness(
+                rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not valid:
+                print(
+                    f"Evaluation skipped for {evidence_source}: {reason}"
+                )
+                evidence_valid = False
+                break
+
+            evidence_sets.append(rows)
+
+        if not evidence_valid:
+            continue
+
+        if len(evidence_sets) != 1:
+            raise RuntimeError(
+                f"Rule {rule['rule_key']} has {len(evidence_sets)} evidence "
+                "sources; MVP evaluators currently support exactly one."
+            )
+
+        findings = evaluator(
+            evidence_sets[0],
+            rule,
+            thresholds,
+        )
+
+        if not findings:
+            print("No findings.")
+            continue
+
+        for finding in findings:
+            finding_id = insert_finding(
+                conn,
+                assessment_run_id,
+                rule,
+                finding,
+            )
+            print(
+                f"Finding {finding_id}: "
+                f"{finding['severity']} - {rule['name']}"
+            )
+
+    complete_assessment_run(
+        conn,
+        assessment_run_id,
+        "SUCCESS",
+    )
+
+    print(
+        f"Assessment Run {assessment_run_id} "
+        f"completed successfully."
+    ))
