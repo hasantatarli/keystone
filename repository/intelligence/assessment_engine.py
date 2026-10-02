@@ -336,6 +336,39 @@ def load_latest_replication_slot_snapshot(conn, target_id):
 
         return cur.fetchall()
 
+
+def load_latest_connection_activity_snapshot(conn, target_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                snapshot_id,
+                target_id,
+                captured_at,
+                total_client_connections,
+                active_connections,
+                idle_connections,
+                idle_in_transaction_connections,
+                idle_in_transaction_aborted_connections,
+                oldest_idle_state_change,
+                oldest_idle_in_transaction_state_change,
+                oldest_idle_in_transaction_aborted_state_change
+            FROM postgresql.connection_activity_snapshot
+            WHERE target_id = %s
+            ORDER BY captured_at DESC
+            LIMIT 1
+            """,
+            (target_id,),
+        )
+
+        row = cur.fetchone()
+
+    if row is None:
+        return []
+
+    return [row]
+
+
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
@@ -487,6 +520,44 @@ def evaluate_replication_slot_wal_unavailable(
 
     return findings
 
+
+def evaluate_aborted_idle_transaction_connections(rows, thresholds):
+    findings = []
+
+    for row in rows:
+        connection_count = row["idle_in_transaction_aborted_connections"]
+
+        matched_threshold = None
+
+        for threshold in thresholds:
+            if threshold["threshold_unit"] != "CONNECTION":
+                continue
+
+            if connection_count >= float(threshold["threshold_value"]):
+                matched_threshold = threshold
+                break
+
+        if matched_threshold is None:
+            continue
+
+        findings.append(
+            {
+                "connection_count": connection_count,
+                "severity": matched_threshold["severity"],
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "connection_count": connection_count,
+                },
+                "observed_value": connection_count,
+                "observed_unit": "CONNECTION",
+                "subject_type": "SYSTEM",
+                "subject_identifier": str(row["target_id"]),
+            }
+        )
+
+    return findings
+
+
 # -----------------------------------------------------------------------------
 # Freshness Validation
 # -----------------------------------------------------------------------------
@@ -589,6 +660,16 @@ def run_assessment(
     print(
         f"Latest replication slot snapshot contains "
         f"{len(replication_slot_rows)} row(s)."
+    )
+
+    connection_activity_rows = load_latest_connection_activity_snapshot(
+        conn,
+        target_id,
+    )
+
+    print(
+        f"Latest connection activity snapshot contains "
+        f"{len(connection_activity_rows)} row(s)."
     )
 
     for rule in rules:
@@ -804,6 +885,56 @@ def run_assessment(
                     f"Slot {finding['slot_name']} - "
                     f"WAL status {finding['wal_status']}"
                 )
+
+        elif rule["rule_key"] == "PG-CONN-001":
+            requirement = next(
+                (
+                    item
+                    for item in evidence_requirements
+                    if item["evidence_source"] == "PG_CONNECTION_ACTIVITY"
+                ),
+                None,
+            )
+
+            if requirement is None:
+                raise RuntimeError(
+                    "PG-CONN-001 requires PG_CONNECTION_ACTIVITY "
+                    "but no evidence requirement is defined."
+                )
+
+            evidence_valid, reason = validate_evidence_freshness(
+                connection_activity_rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not evidence_valid:
+                print(f"Evaluation skipped: {reason}")
+                continue
+
+            findings = evaluate_aborted_idle_transaction_connections(
+                connection_activity_rows,
+                thresholds,
+            )
+
+            if not findings:
+                print("No findings.")
+
+            for finding in findings:
+                finding_id = insert_finding(
+                    conn,
+                    assessment_run_id,
+                    rule,
+                    finding,
+                )
+
+                print(
+                    f"Finding {finding_id}: "
+                    f"{finding['severity']} - "
+                    f"{finding['connection_count']} aborted idle "
+                    f"transaction connection(s)"
+                )
+
     complete_assessment_run(
         conn,
         assessment_run_id,
@@ -822,7 +953,7 @@ def main():
     with connect_repository() as conn:
         run_assessment(
             conn,
-            "PG_REPLICATION_HEALTH",
+            "PG_CONNECTION_HEALTH",
             target_id,
         )
 
