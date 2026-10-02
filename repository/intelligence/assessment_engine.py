@@ -505,7 +505,7 @@ def evaluate_replication_slot_wal_unavailable(
             {
                 "slot_name": row["slot_name"],
                 "wal_status": row["wal_status"],
-                "severity": default_severity,
+                "severity": rule["default_severity"],
                 "snapshot_id": row["snapshot_id"],
                 "template_values": {
                     "slot_name": row["slot_name"],
