@@ -463,7 +463,8 @@ def evaluate_database_xid_wraparound(rows, rule, thresholds):
 
 def evaluate_replication_slot_wal_retention_pressure(
     rows,
-    default_severity,
+    rule,
+    thresholds,
 ):
     findings = []
 
@@ -493,7 +494,8 @@ def evaluate_replication_slot_wal_retention_pressure(
 
 def evaluate_replication_slot_wal_unavailable(
     rows,
-    default_severity,
+    rule,
+    thresholds,
 ):
     findings = []
 
@@ -556,6 +558,31 @@ def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
         )
 
     return findings
+
+
+# -----------------------------------------------------------------------------
+# Evaluation Registry
+# -----------------------------------------------------------------------------
+# Evidence loaders translate Dictionary evidence_source keys into repository
+# queries. Keeping this mapping here lets run_assessment() load only the evidence
+# declared by each rule without knowing PostgreSQL table/query details.
+EVIDENCE_LOADERS = {
+    "PG_ACTIVITY_SNAPSHOT": load_latest_activity_snapshot,
+    "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
+    "PG_REPLICATION_SLOTS": load_latest_replication_slot_snapshot,
+    "PG_CONNECTION_ACTIVITY": load_latest_connection_activity_snapshot,
+}
+
+# Evaluators contain the rule-specific PostgreSQL engineering logic. All
+# evaluators use the same (rows, rule, thresholds) contract so run_assessment()
+# can dispatch rules generically instead of growing a rule-specific if/elif tree.
+RULE_EVALUATORS = {
+    "PG-TRAN-001": evaluate_long_idle_transaction,
+    "PG-TRAN-002": evaluate_database_xid_wraparound,
+    "PG-REP-001": evaluate_replication_slot_wal_retention_pressure,
+    "PG-REP-002": evaluate_replication_slot_wal_unavailable,
+    "PG-CONN-001": evaluate_aborted_idle_transaction_connections,
+}
 
 
 # -----------------------------------------------------------------------------
