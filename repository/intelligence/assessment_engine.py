@@ -296,6 +296,45 @@ def load_latest_transaction_wraparound_snapshot(conn, target_id):
         return cur.fetchall()
 
 
+def load_latest_replication_slot_snapshot(conn, target_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                snapshot_id,
+                target_id,
+                captured_at,
+                slot_name,
+                plugin,
+                slot_type,
+                database_name,
+                temporary,
+                active,
+                active_pid,
+                slot_xmin,
+                catalog_xmin,
+                restart_lsn,
+                confirmed_flush_lsn,
+                wal_status,
+                safe_wal_size,
+                two_phase,
+                conflicting,
+                invalidation_reason,
+                failover
+            FROM postgresql.replication_slot_snapshot
+            WHERE target_id = %s
+              AND captured_at =
+              (
+                  SELECT MAX(captured_at)
+                  FROM postgresql.replication_slot_snapshot
+                  WHERE target_id = %s
+              )
+            ORDER BY slot_name
+            """,
+            (target_id, target_id),
+        )
+
+        return cur.fetchall()
 
 # -----------------------------------------------------------------------------
 # Rule Evaluation
@@ -388,6 +427,66 @@ def evaluate_database_xid_wraparound(rows, thresholds):
 
     return findings
 
+
+def evaluate_replication_slot_wal_retention_pressure(
+    rows,
+    default_severity,
+):
+    findings = []
+
+    for row in rows:
+        if row["wal_status"] != "extended":
+            continue
+
+        findings.append(
+            {
+                "slot_name": row["slot_name"],
+                "wal_status": row["wal_status"],
+                "severity": default_severity,
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "slot_name": row["slot_name"],
+                    "wal_status": row["wal_status"],
+                },
+                "observed_value": None,
+                "observed_unit": None,
+                "subject_type": "REPLICATION_SLOT",
+                "subject_identifier": row["slot_name"],
+            }
+        )
+
+    return findings
+
+
+def evaluate_replication_slot_wal_unavailable(
+    rows,
+    default_severity,
+):
+    findings = []
+
+    for row in rows:
+        if row["wal_status"] not in ("unreserved", "lost"):
+            continue
+
+        findings.append(
+            {
+                "slot_name": row["slot_name"],
+                "wal_status": row["wal_status"],
+                "severity": default_severity,
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "slot_name": row["slot_name"],
+                    "wal_status": row["wal_status"],
+                },
+                "observed_value": None,
+                "observed_unit": None,
+                "subject_type": "REPLICATION_SLOT",
+                "subject_identifier": row["slot_name"],
+            }
+        )
+
+    return findings
+
 # -----------------------------------------------------------------------------
 # Freshness Validation
 # -----------------------------------------------------------------------------
@@ -432,176 +531,301 @@ def validate_evidence_freshness(
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-def main():
-    target_id = 1
+def run_assessment(
+    conn,
+    assessment_key,
+    target_id,
+):
     evaluation_time = datetime.now(timezone.utc)
 
-    with connect_repository() as conn:
-        assessment = load_assessment(
-            conn,
-            "PG_TRANSACTION_HEALTH",
-        )
+    assessment = load_assessment(
+        conn,
+        assessment_key,
+    )
 
-        print("Assessment:")
-        print(assessment)
+    print("Assessment:")
+    print(assessment)
 
-        assessment_run_id = create_assessment_run(
-            conn,
-            assessment["assessment_id"],
-            target_id,
-            evaluation_time,
-        )
+    assessment_run_id = create_assessment_run(
+        conn,
+        assessment["assessment_id"],
+        target_id,
+        evaluation_time,
+    )
 
-        print(f"Assessment Run ID: {assessment_run_id}")
+    print(f"Assessment Run ID: {assessment_run_id}")
 
-        rules = load_rules(
-            conn,
-            assessment["assessment_id"],
-        )
+    rules = load_rules(
+        conn,
+        assessment["assessment_id"],
+    )
 
-        activity_rows = load_latest_activity_snapshot(
-            conn,
-            target_id,
-        )
+    activity_rows = load_latest_activity_snapshot(
+        conn,
+        target_id,
+    )
 
+    print()
+    print(
+        f"Latest activity snapshot contains "
+        f"{len(activity_rows)} row(s)."
+    )
+
+    wraparound_rows = load_latest_transaction_wraparound_snapshot(
+        conn,
+        target_id,
+    )
+
+    print(
+        f"Latest transaction wraparound snapshot contains "
+        f"{len(wraparound_rows)} row(s)."
+    )
+
+    replication_slot_rows = load_latest_replication_slot_snapshot(
+        conn,
+        target_id,
+    )
+
+    print(
+        f"Latest replication slot snapshot contains "
+        f"{len(replication_slot_rows)} row(s)."
+    )
+
+    for rule in rules:
         print()
-        print(
-            f"Latest activity snapshot contains "
-            f"{len(activity_rows)} row(s)."
+        print(f"Evaluating {rule['rule_key']} - {rule['name']}")
+
+        thresholds = load_thresholds(
+            conn,
+            rule["rule_id"],
         )
 
-        wraparound_rows = load_latest_transaction_wraparound_snapshot(
+        evidence_requirements = load_evidence_requirements(
             conn,
+            rule["rule_id"],
+        )
+
+        print("Evidence requirements:")
+        for requirement in evidence_requirements:
+            print(requirement)
+
+        if rule["rule_key"] == "PG-TRAN-001":
+            requirement = next(
+                (
+                    item
+                    for item in evidence_requirements
+                    if item["evidence_source"] == "PG_ACTIVITY_SNAPSHOT"
+                ),
+                None,
+            )
+
+            if requirement is None:
+                raise RuntimeError(
+                    "PG-TRAN-001 requires PG_ACTIVITY_SNAPSHOT "
+                    "but no evidence requirement is defined."
+                )
+
+            evidence_valid, reason = validate_evidence_freshness(
+                activity_rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not evidence_valid:
+                print(f"Evaluation skipped: {reason}")
+                continue
+
+            findings = evaluate_long_idle_transaction(
+                activity_rows,
+                thresholds,
+            )
+
+            if not findings:
+                print("No findings.")
+
+            for finding in findings:
+                finding_id = insert_finding(
+                    conn,
+                    assessment_run_id,
+                    rule,
+                    finding,
+                )
+
+                print(
+                    f"Finding {finding_id}: "
+                    f"{finding['severity']} - "
+                    f"PID {finding['pid']} - "
+                    f"{finding['duration_seconds']:.1f}s"
+                )
+
+        elif rule["rule_key"] == "PG-TRAN-002":
+            requirement = next(
+                (
+                    item
+                    for item in evidence_requirements
+                    if item["evidence_source"]
+                    == "PG_TRANSACTION_WRAPAROUND"
+                ),
+                None,
+            )
+
+            if requirement is None:
+                raise RuntimeError(
+                    "PG-TRAN-002 requires PG_TRANSACTION_WRAPAROUND "
+                    "but no evidence requirement is defined."
+                )
+
+            evidence_valid, reason = validate_evidence_freshness(
+                wraparound_rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not evidence_valid:
+                print(f"Evaluation skipped: {reason}")
+                continue
+
+            findings = evaluate_database_xid_wraparound(
+                wraparound_rows,
+                thresholds,
+            )
+
+            if not findings:
+                print("No findings.")
+
+            for finding in findings:
+                finding_id = insert_finding(
+                    conn,
+                    assessment_run_id,
+                    rule,
+                    finding,
+                )
+
+                print(
+                    f"Finding {finding_id}: "
+                    f"{finding['severity']} - "
+                    f"Database {finding['database_name']} - "
+                    f"XID age {finding['xid_age']}"
+                )
+        elif rule["rule_key"] == "PG-REP-001":
+            requirement = next(
+                (
+                    item
+                    for item in evidence_requirements
+                    if item["evidence_source"] == "PG_REPLICATION_SLOTS"
+                ),
+                None,
+            )
+
+            if requirement is None:
+                raise RuntimeError(
+                    "PG-REP-001 requires PG_REPLICATION_SLOTS "
+                    "but no evidence requirement is defined."
+                )
+
+            evidence_valid, reason = validate_evidence_freshness(
+                replication_slot_rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not evidence_valid:
+                print(f"Evaluation skipped: {reason}")
+                continue
+
+            findings = evaluate_replication_slot_wal_retention_pressure(
+                replication_slot_rows,
+                rule["default_severity"],
+            )
+
+            if not findings:
+                print("No findings.")
+
+            for finding in findings:
+                finding_id = insert_finding(
+                    conn,
+                    assessment_run_id,
+                    rule,
+                    finding,
+                )
+
+                print(
+                    f"Finding {finding_id}: "
+                    f"{finding['severity']} - "
+                    f"Slot {finding['slot_name']} - "
+                    f"WAL status {finding['wal_status']}"
+                )
+
+        elif rule["rule_key"] == "PG-REP-002":
+            requirement = next(
+                (
+                    item
+                    for item in evidence_requirements
+                    if item["evidence_source"] == "PG_REPLICATION_SLOTS"
+                ),
+                None,
+            )
+
+            if requirement is None:
+                raise RuntimeError(
+                    "PG-REP-002 requires PG_REPLICATION_SLOTS "
+                    "but no evidence requirement is defined."
+                )
+
+            evidence_valid, reason = validate_evidence_freshness(
+                replication_slot_rows,
+                requirement,
+                evaluation_time,
+            )
+
+            if not evidence_valid:
+                print(f"Evaluation skipped: {reason}")
+                continue
+
+            findings = evaluate_replication_slot_wal_unavailable(
+                replication_slot_rows,
+                rule["default_severity"],
+            )
+
+            if not findings:
+                print("No findings.")
+
+            for finding in findings:
+                finding_id = insert_finding(
+                    conn,
+                    assessment_run_id,
+                    rule,
+                    finding,
+                )
+
+                print(
+                    f"Finding {finding_id}: "
+                    f"{finding['severity']} - "
+                    f"Slot {finding['slot_name']} - "
+                    f"WAL status {finding['wal_status']}"
+                )
+    complete_assessment_run(
+        conn,
+        assessment_run_id,
+        "SUCCESS",
+    )
+
+    print(
+        f"Assessment Run {assessment_run_id} "
+        f"completed successfully."
+    )
+
+
+def main():
+    target_id = 1
+
+    with connect_repository() as conn:
+        run_assessment(
+            conn,
+            "PG_REPLICATION_HEALTH",
             target_id,
         )
 
-        print(
-            f"Latest transaction wraparound snapshot contains "
-            f"{len(wraparound_rows)} row(s)."
-        )
 
-        for rule in rules:
-            print()
-            print(f"Evaluating {rule['rule_key']} - {rule['name']}")
-
-            thresholds = load_thresholds(
-                conn,
-                rule["rule_id"],
-            )
-
-            evidence_requirements = load_evidence_requirements(
-                conn,
-                rule["rule_id"],
-            )
-
-            print("Evidence requirements:")
-            for requirement in evidence_requirements:
-                print(requirement)
-
-            if rule["rule_key"] == "PG-TRAN-001":
-                requirement = next(
-                    (
-                        item
-                        for item in evidence_requirements
-                        if item["evidence_source"] == "PG_ACTIVITY_SNAPSHOT"
-                    ),
-                    None,
-                )
-
-                if requirement is None:
-                    raise RuntimeError(
-                        "PG-TRAN-001 requires PG_ACTIVITY_SNAPSHOT "
-                        "but no evidence requirement is defined."
-                    )
-
-                evidence_valid, reason = validate_evidence_freshness(
-                    activity_rows,
-                    requirement,
-                    evaluation_time,
-                )
-
-                if not evidence_valid:
-                    print(f"Evaluation skipped: {reason}")
-                    continue
-
-                findings = evaluate_long_idle_transaction(
-                    activity_rows,
-                    thresholds,
-                )
-
-                if not findings:
-                    print("No findings.")
-
-                for finding in findings:
-                    finding_id = insert_finding(
-                        conn,
-                        assessment_run_id,
-                        rule,
-                        finding,
-                    )
-
-                    print(
-                        f"Finding {finding_id}: "
-                        f"{finding['severity']} - "
-                        f"PID {finding['pid']} - "
-                        f"{finding['duration_seconds']:.1f}s"
-                    )
-
-            elif rule["rule_key"] == "PG-TRAN-002":
-                requirement = next(
-                    (
-                        item
-                        for item in evidence_requirements
-                        if item["evidence_source"] == "PG_TRANSACTION_WRAPAROUND"
-                    ),
-                    None,
-                )
-
-                if requirement is None:
-                    raise RuntimeError(
-                        "PG-TRAN-002 requires PG_TRANSACTION_WRAPAROUND "
-                        "but no evidence requirement is defined."
-                    )
-
-                evidence_valid, reason = validate_evidence_freshness(
-                    wraparound_rows,
-                    requirement,
-                    evaluation_time,
-                )
-
-                if not evidence_valid:
-                    print(f"Evaluation skipped: {reason}")
-                    continue
-
-                findings = evaluate_database_xid_wraparound(
-                    wraparound_rows,
-                    thresholds,
-                )
-
-                if not findings:
-                    print("No findings.")
-
-                for finding in findings:
-                    finding_id = insert_finding(
-                        conn,
-                        assessment_run_id,
-                        rule,
-                        finding,
-                    )
-
-                    print(
-                        f"Finding {finding_id}: "
-                        f"{finding['severity']} - "
-                        f"Database {finding['database_name']} - "
-                        f"XID age {finding['xid_age']}"
-                    )
-
-        complete_assessment_run(
-            conn,
-            assessment_run_id,
-            "SUCCESS",
-        )
-
-        print(f"Assessment Run {assessment_run_id} completed successfully.")
 if __name__ == "__main__":
     main()
