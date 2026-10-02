@@ -185,8 +185,7 @@ def insert_finding(
     finding,
 ):
     finding_text = rule["finding_template"].format(
-        pid=finding["pid"],
-        duration_seconds=f"{finding['duration_seconds']:.1f}",
+        **finding["template_values"]
     )
 
     with conn.cursor() as cur:
@@ -219,10 +218,10 @@ def insert_finding(
                 rule["name"],
                 finding_text,
                 rule["recommendation"],
-                finding["duration_seconds"],
-                "SECOND",
-                "SESSION",
-                str(finding["pid"]),
+                finding["observed_value"],
+                finding["observed_unit"],
+                finding["subject_type"],
+                finding["subject_identifier"],
             ),
         )
 
@@ -260,6 +259,36 @@ def load_latest_activity_snapshot(conn, target_id):
                   WHERE target_id = %s
               )
             ORDER BY pid
+            """,
+            (target_id, target_id),
+        )
+
+        return cur.fetchall()
+
+
+def load_latest_transaction_wraparound_snapshot(conn, target_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                snapshot_id,
+                target_id,
+                captured_at,
+                database_oid,
+                database_name,
+                frozen_xid,
+                xid_age,
+                min_mxid,
+                mxid_age
+            FROM postgresql.transaction_wraparound_snapshot
+            WHERE target_id = %s
+              AND captured_at =
+              (
+                  SELECT MAX(captured_at)
+                  FROM postgresql.transaction_wraparound_snapshot
+                  WHERE target_id = %s
+              )
+            ORDER BY database_name
             """,
             (target_id, target_id),
         )
@@ -307,11 +336,57 @@ def evaluate_long_idle_transaction(rows, thresholds):
                 "duration_seconds": duration_seconds,
                 "severity": matched_threshold["severity"],
                 "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "pid": row["pid"],
+                    "duration_seconds": f"{duration_seconds:.1f}",
+                },
+                "observed_value": duration_seconds,
+                "observed_unit": "SECOND",
+                "subject_type": "SESSION",
+                "subject_identifier": str(row["pid"]),
             }
         )
 
     return findings
 
+
+def evaluate_database_xid_wraparound(rows, thresholds):
+    findings = []
+
+    for row in rows:
+        xid_age = row["xid_age"]
+
+        matched_threshold = None
+
+        for threshold in thresholds:
+            if threshold["threshold_unit"] != "TRANSACTION":
+                continue
+
+            if xid_age >= float(threshold["threshold_value"]):
+                matched_threshold = threshold
+                break
+
+        if matched_threshold is None:
+            continue
+
+        findings.append(
+            {
+                "database_name": row["database_name"],
+                "xid_age": xid_age,
+                "severity": matched_threshold["severity"],
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "database_name": row["database_name"],
+                    "xid_age": xid_age,
+                },
+                "observed_value": xid_age,
+                "observed_unit": "TRANSACTION",
+                "subject_type": "DATABASE",
+                "subject_identifier": row["database_name"],
+            }
+        )
+
+    return findings
 
 # -----------------------------------------------------------------------------
 # Freshness Validation
@@ -395,6 +470,16 @@ def main():
             f"{len(activity_rows)} row(s)."
         )
 
+        wraparound_rows = load_latest_transaction_wraparound_snapshot(
+            conn,
+            target_id,
+        )
+
+        print(
+            f"Latest transaction wraparound snapshot contains "
+            f"{len(wraparound_rows)} row(s)."
+        )
+
         for rule in rules:
             print()
             print(f"Evaluating {rule['rule_key']} - {rule['name']}")
@@ -413,55 +498,103 @@ def main():
             for requirement in evidence_requirements:
                 print(requirement)
 
-                if rule["rule_key"] == "PG-TRAN-001":
+            if rule["rule_key"] == "PG-TRAN-001":
+                requirement = next(
+                    (
+                        item
+                        for item in evidence_requirements
+                        if item["evidence_source"] == "PG_ACTIVITY_SNAPSHOT"
+                    ),
+                    None,
+                )
 
-                    requirement = next(
-                        (
-                            item
-                            for item in evidence_requirements
-                            if item["evidence_source"] == "PG_ACTIVITY_SNAPSHOT"
-                        ),
-                        None,
+                if requirement is None:
+                    raise RuntimeError(
+                        "PG-TRAN-001 requires PG_ACTIVITY_SNAPSHOT "
+                        "but no evidence requirement is defined."
                     )
 
-                    if requirement is None:
-                        raise RuntimeError(
-                            "PG-TRAN-001 requires PG_ACTIVITY_SNAPSHOT "
-                            "but no evidence requirement is defined."
-                        )
+                evidence_valid, reason = validate_evidence_freshness(
+                    activity_rows,
+                    requirement,
+                    evaluation_time,
+                )
 
-                    evidence_valid, reason = validate_evidence_freshness(
-                        activity_rows,
-                        requirement,
-                        evaluation_time,
+                if not evidence_valid:
+                    print(f"Evaluation skipped: {reason}")
+                    continue
+
+                findings = evaluate_long_idle_transaction(
+                    activity_rows,
+                    thresholds,
+                )
+
+                if not findings:
+                    print("No findings.")
+
+                for finding in findings:
+                    finding_id = insert_finding(
+                        conn,
+                        assessment_run_id,
+                        rule,
+                        finding,
                     )
 
-                    if not evidence_valid:
-                        print(f"Evaluation skipped: {reason}")
-                        continue
-
-                    findings = evaluate_long_idle_transaction(
-                        activity_rows,
-                        thresholds,
+                    print(
+                        f"Finding {finding_id}: "
+                        f"{finding['severity']} - "
+                        f"PID {finding['pid']} - "
+                        f"{finding['duration_seconds']:.1f}s"
                     )
 
-                    if not findings:
-                        print("No findings.")
+            elif rule["rule_key"] == "PG-TRAN-002":
+                requirement = next(
+                    (
+                        item
+                        for item in evidence_requirements
+                        if item["evidence_source"] == "PG_TRANSACTION_WRAPAROUND"
+                    ),
+                    None,
+                )
 
-                    for finding in findings:
-                        finding_id = insert_finding(
-                            conn,
-                            assessment_run_id,
-                            rule,
-                            finding,
-                        )
+                if requirement is None:
+                    raise RuntimeError(
+                        "PG-TRAN-002 requires PG_TRANSACTION_WRAPAROUND "
+                        "but no evidence requirement is defined."
+                    )
 
-                        print(
-                            f"Finding {finding_id}: "
-                            f"{finding['severity']} - "
-                            f"PID {finding['pid']} - "
-                            f"{finding['duration_seconds']:.1f}s"
-                        )
+                evidence_valid, reason = validate_evidence_freshness(
+                    wraparound_rows,
+                    requirement,
+                    evaluation_time,
+                )
+
+                if not evidence_valid:
+                    print(f"Evaluation skipped: {reason}")
+                    continue
+
+                findings = evaluate_database_xid_wraparound(
+                    wraparound_rows,
+                    thresholds,
+                )
+
+                if not findings:
+                    print("No findings.")
+
+                for finding in findings:
+                    finding_id = insert_finding(
+                        conn,
+                        assessment_run_id,
+                        rule,
+                        finding,
+                    )
+
+                    print(
+                        f"Finding {finding_id}: "
+                        f"{finding['severity']} - "
+                        f"Database {finding['database_name']} - "
+                        f"XID age {finding['xid_age']}"
+                    )
 
         complete_assessment_run(
             conn,
