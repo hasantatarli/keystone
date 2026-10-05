@@ -201,11 +201,17 @@ Detect client connections left in a failed transaction that was never rolled bac
 **Design notes**
 
 - A single occurrence is actionable, therefore the threshold is 1.
-- The rule measures presence, not duration. In a top-level failed transaction PostgreSQL has already released locks and the snapshot; the session only waits for ROLLBACK. The risk is application correctness rather than growing database impact, so duration does not raise severity.
+- The rule measures presence, not duration. In a top-level failed transaction PostgreSQL has already released locks and the snapshot; the session only waits for ROLLBACK. It does not hold back VACUUM.
+- The cost is **connection capacity and application correctness**:
+  - the backend still occupies a `max_connections` slot;
+  - behind a transaction-pooling proxy (for example PgBouncer in transaction mode) the server connection cannot be handed to another client until the transaction ends, so an aborted session pins a pool connection;
+  - in an application-side pool, the same broken connection may be handed to another request, which then fails with "current transaction is aborted".
+- Aggregate capacity impact belongs to the Connection Capacity candidate rule; this rule reports that the defect exists.
 
 **Known limitations**
 
 - Reports a count for the whole system, not the individual sessions. Session details are available in `PG_ACTIVITY_SNAPSHOT`.
+- The finding does not say how long the oldest aborted session has been waiting, although the evidence contains it (`oldest_idle_in_transaction_aborted_state_change`). Candidate improvement: add it to the finding text without changing severity, so the engineer can tell a new occurrence from one that has been pinning a connection for hours.
 - Savepoint case: see PG-TRAN-001 limitations and the Long Resource-Retaining Aborted Transaction candidate.
 
 **Verification**  
