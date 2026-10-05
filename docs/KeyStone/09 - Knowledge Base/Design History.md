@@ -200,3 +200,24 @@ The first end-to-end automated test against the Linux NODE target `postgre-1` co
 The Linux host collector intentionally remains a minimum Health Check evidence collector rather than a general-purpose operating-system monitoring agent. CPU utilization, IOPS, disk latency, network throughput, richer OS monitoring, and production-grade SSH host-key management are outside the current MVP implementation scope. Windows host collection remains required for broader cross-platform coverage but is not part of this Linux implementation milestone.
 
 With Linux host evidence operational, the remaining high-priority PostgreSQL MVP evidence gaps are **long-running transactions** and **long-running queries**. Their collector/persistence design is the next planned evidence-coverage step.
+
+
+## 2026-09-22 to 2026-10-05 — Engineering Intelligence Foundation
+
+Engineering Intelligence moved from design direction to a working, deterministic implementation.
+
+- **Minimum Dictionary** (V016–V017): `assessment_definition`, `rule_definition`, `rule_threshold`, `rule_evidence_requirement`; runtime results in `assessment_run` and `finding`. Rule metadata, thresholds, evidence requirements, finding templates and recommendations are data; rule conditions remain Python.
+- **Direction:** data-driven rule configuration plus code-driven engineering logic. A generic rule DSL was explicitly rejected until real rules prove the need.
+- **Collection frequency and evidence freshness are separate concepts.** Each rule declares how old its evidence may be (`max_age_seconds`). Missing or stale required evidence must never silently mean healthy.
+- **Five rules** in three assessments: PG-TRAN-001 Long Idle Transaction, PG-TRAN-002 Database XID Wraparound Risk, PG-REP-001 Replication Slot WAL Retention Pressure, PG-REP-002 Replication Slot WAL Unavailable, PG-CONN-001 Aborted Idle Transaction Connections.
+- `PG_ACTIVITY_SNAPSHOT` (PG013) added per-session activity evidence, closing the long-running transaction evidence gap identified on 2026-09-21. Locking evidence remains open.
+- **Engine refactor:** a growing rule-specific `if/elif` dispatch was replaced by an evidence-loader registry and an evaluator registry with one evaluator contract. Evidence is loaded on demand from rule requirements and cached per run.
+
+### 2026-10-05 — Stabilisation, workflow and product direction
+
+- **Workflow change:** design is agreed first, then the AI development partner implements on a branch, runs automated tests, opens a pull request, and the founder verifies in the lab before merging. Unverified code is not pushed to main.
+- **Clean-install defect:** PG_TRANSACTION_HEALTH and PG-TRAN-001 had been inserted manually into the development repository and never migrated, so a clean install silently produced three of five rules. Fixed forward with V021 (idempotent, a no-op on existing repositories). Rule established: Dictionary changes go through migrations only. Clean-install Dictionary contract tests now guard this.
+- **Threshold matching** was made independent of threshold order after tests showed that an unexpected order silently downgraded CRITICAL to WARNING.
+- All five rules were regression-tested in the lab in clean, problem and recovery states.
+- PG-TRAN-001 intentionally covers `idle in transaction` only; aborted sessions belong to PG-CONN-001. Aborted subtransactions that keep the outer transaction's resources (savepoints) are a documented limitation and a post-MVP rule candidate.
+- **Product direction clarified** (Product Strategy → Usage Scenarios, ADR-0013, MVP Plan): continuous, unattended assessment in long-term DBA engagements is the core scenario; manual (engineer-started) assessment serves prospective customers; Keystone notifies on findings, not raw metrics; the outcome model HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE, already defined in the architecture, is the next implementation step.

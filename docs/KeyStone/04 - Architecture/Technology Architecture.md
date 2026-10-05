@@ -112,7 +112,7 @@ RCA evaluates predefined and, where appropriate, AI-suggested hypotheses using s
 
 AI is not mandatory for analysis that can be performed more reliably by deterministic or statistical techniques. Collected evidence remains the source of truth.
 
-The PostgreSQL provider currently implements the functional collector baseline through PG-008 — Session & Connection Activity. Engineering Intelligence is the next higher-level foundation that will be developed on top of the evidence repository.
+The PostgreSQL provider implements the functional collector baseline through PG-008 — Session & Connection Activity, plus host and per-session activity evidence. A deterministic Engineering Intelligence foundation is implemented on top of the evidence repository: Dictionary-driven rules, an assessment engine with evidence and evaluator registries, evidence freshness validation, and persisted findings with recommendations (see the Engineering Intelligence Rule Catalog and the MVP Plan).
 
 ## Keystone Dictionary
 

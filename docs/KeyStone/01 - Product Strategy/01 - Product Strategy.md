@@ -84,6 +84,40 @@ Organizations that do not engage DataWiser consulting services may use Keystone 
 In this scenario, Keystone serves database administrators, database reliability engineers, and engineering teams who wish to execute assessments and automation independently.
 
 ---
+# Usage Scenarios
+
+> How is Keystone used in practice? (Added 2026-10-05)
+
+Keystone supports two primary usage scenarios. Both use the same evidence, Dictionary, rules and findings; they differ only in how evidence is acquired and how results are delivered.
+
+### Continuous Assessment — long-term DBA engagements
+
+DataWiser provides long-term DBA consulting to customers. In these engagements Keystone is installed in or near the customer environment and continuously collects evidence, evaluates it and maintains the engineering state of the systems.
+
+Keystone must be able to operate **unattended**: it must keep collecting and assessing when the engineer is not actively using it, and it must notify the engineer when its engineering conclusions change (see ADR-0013). Nobody should have to run assessments repeatedly to discover that something needs attention.
+
+Its value over time comes from history: recurring patterns, behaviour changes and outliers that a single snapshot cannot show.
+
+This is the core usage scenario and corresponds to the Continuous Engineering operating mode.
+
+### Manual Assessment — prospective customers and one-off health checks
+
+A prospective customer asks for a health check. The engineer installs Keystone, collects evidence either once (snapshot) or over a short observation window such as one or two days, and delivers a report.
+
+"Manual" means the assessment is started by the engineer rather than by a scheduler. It corresponds to the Snapshot Assessment and Temporary Observation operating modes.
+
+### Positioning against one-off health check tools
+
+Free one-off tools already exist. For example, `awslabs/pg-collector` is a single SQL script that produces a point-in-time HTML report with automated observations across roughly 19 categories, without history, trends or alerts.
+
+- For Manual Assessment, such tools define the **minimum coverage bar**: a Keystone report should not cover less.
+- Keystone's differentiation is continuity and engineering meaning: history, recurring patterns, outliers, a Finding lifecycle and finding-driven notification. Even a one- or two-day observation can reveal behaviour a single snapshot cannot.
+
+### Independence from the founder
+
+Keystone is first used by DataWiser in its own engagements. It must nevertheless be built to work without the founder present: installable from documentation, operable without hand-written SQL, and producing outputs that a customer or another engineer can understand. This is the prerequisite for later commercialisation.
+
+---
 # Customer Problems
 
 > Which real-world problems does Keystone solve?
