@@ -1,6 +1,7 @@
 # -----------------------------------------------------------------------------
 # Imports
 # -----------------------------------------------------------------------------
+import argparse
 import os
 from datetime import datetime, timezone
 
@@ -761,14 +762,48 @@ def run_assessment(
     )
 
 
-def main():
-    target_id = 1
+# Development defaults. They keep `python -m repository.intelligence.assessment_engine`
+# without arguments behaving exactly as before the CLI was introduced.
+DEFAULT_ASSESSMENT_KEY = "PG_CONNECTION_HEALTH"
+DEFAULT_TARGET_ID = 1
+
+
+def parse_args(argv=None):
+    """Parse which assessment to run against which target.
+
+    Intentionally minimal: the CLI only selects an assessment and a target.
+    Rule behaviour (thresholds, evidence, multi-criteria logic) is configured
+    in the Dictionary and evaluators, never through command-line options.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m repository.intelligence.assessment_engine",
+        description="Run one Keystone assessment against one target.",
+    )
+    parser.add_argument(
+        "--assessment",
+        default=DEFAULT_ASSESSMENT_KEY,
+        help=(
+            "assessment_key from keystone.assessment_definition "
+            f"(default: {DEFAULT_ASSESSMENT_KEY})"
+        ),
+    )
+    parser.add_argument(
+        "--target",
+        type=int,
+        default=DEFAULT_TARGET_ID,
+        help=f"target_id from keystone.target (default: {DEFAULT_TARGET_ID})",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
 
     with connect_repository() as conn:
         run_assessment(
             conn,
-            "PG_CONNECTION_HEALTH",
-            target_id,
+            args.assessment,
+            args.target,
         )
 
 
