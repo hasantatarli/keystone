@@ -407,6 +407,14 @@ def match_threshold(observed_value, thresholds, unit):
 
 
 def evaluate_long_idle_transaction(rows, rule, thresholds):
+    """PG-TRAN-001: client sessions idle inside an open transaction.
+
+    The metric is how long the session has been idle, measured from
+    state_change (the moment it entered 'idle in transaction'), not from
+    transaction_start. A transaction that worked for ten minutes and has been
+    idle for one minute is idle for one minute. Transaction age regardless of
+    state is a separate concern (long-running transaction).
+    """
     findings = []
 
     for row in rows:
@@ -416,11 +424,11 @@ def evaluate_long_idle_transaction(rows, rule, thresholds):
         if row["state"] != "idle in transaction":
             continue
 
-        if row["transaction_start"] is None:
+        if row["state_change"] is None:
             continue
 
         duration_seconds = (
-            row["captured_at"] - row["transaction_start"]
+            row["captured_at"] - row["state_change"]
         ).total_seconds()
 
         matched_threshold = match_threshold(

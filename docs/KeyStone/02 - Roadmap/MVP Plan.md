@@ -53,7 +53,7 @@ The threshold model limitation (one value per severity) is revisited when the fi
 
 - Web interface on top of the same service layer as the command line (ADR-0002: CLI and automation first).
 - Real replication slot tests on lab VM snapshots.
-- PG-TRAN-003 candidate (resource-retaining aborted transactions), migration checksum verification, advanced RCA, AI Engineering Assistant, commercial packaging.
+- Resource-retaining aborted transaction rule candidate, migration checksum verification, advanced RCA, AI Engineering Assistant, commercial packaging.
 
 ## Readiness Criteria for a First Real Engagement
 
