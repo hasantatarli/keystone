@@ -59,14 +59,18 @@ ABORTED_CONNECTION_THRESHOLDS = [
 class LongIdleTransactionTests(unittest.TestCase):
     """PG-TRAN-001"""
 
-    def session(self, idle_seconds, **overrides):
+    def session(self, idle_seconds, transaction_age_seconds=None, **overrides):
+        # By default the transaction became idle right after it started.
+        if transaction_age_seconds is None:
+            transaction_age_seconds = idle_seconds
         row = {
             "snapshot_id": 1,
             "captured_at": NOW,
             "pid": 4242,
             "backend_type": "client backend",
             "state": "idle in transaction",
-            "transaction_start": NOW - timedelta(seconds=idle_seconds),
+            "transaction_start": NOW - timedelta(seconds=transaction_age_seconds),
+            "state_change": NOW - timedelta(seconds=idle_seconds),
         }
         row.update(overrides)
         return row
@@ -125,9 +129,20 @@ class LongIdleTransactionTests(unittest.TestCase):
         row = self.session(950, state="idle in transaction (aborted)")
         self.assertEqual(self.evaluate(row), [])
 
-    def test_missing_transaction_start_is_ignored(self):
-        row = self.session(950, transaction_start=None)
+    def test_missing_state_change_is_ignored(self):
+        row = self.session(950, state_change=None)
         self.assertEqual(self.evaluate(row), [])
+
+    def test_duration_is_idle_time_not_transaction_age(self):
+        # Worked for ten minutes, idle for one minute: idle for one minute.
+        row = self.session(60, transaction_age_seconds=660)
+        self.assertEqual(self.evaluate(row), [])
+
+    def test_long_idle_after_long_work_uses_idle_time_for_severity(self):
+        # Idle for 400 s inside a 2000 s old transaction: WARNING, not CRITICAL.
+        finding = self.evaluate(self.session(400, transaction_age_seconds=2000))[0]
+        self.assertEqual(finding["severity"], "WARNING")
+        self.assertAlmostEqual(finding["observed_value"], 400)
 
     def test_each_matching_session_produces_its_own_finding(self):
         findings = self.evaluate(

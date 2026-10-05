@@ -73,8 +73,8 @@ Detect client sessions that keep a transaction open while doing nothing. Such se
 | --- | --- |
 | Evidence | `PG_ACTIVITY_SNAPSHOT` (`postgresql.activity_snapshot`), required |
 | Freshness | 600 seconds |
-| Condition | `backend_type = 'client backend'` and `state = 'idle in transaction'` and `transaction_start` is not null |
-| Metric | `captured_at - transaction_start`, in seconds |
+| Condition | `backend_type = 'client backend'` and `state = 'idle in transaction'` and `state_change` is not null |
+| Metric | `captured_at - state_change`: how long the session has been idle, in seconds |
 | Thresholds | WARNING ≥ 300 s, CRITICAL ≥ 900 s |
 | Subject | SESSION (pid) |
 | Finding | Session {pid} has been idle in transaction for {duration_seconds} seconds. |
@@ -82,17 +82,19 @@ Detect client sessions that keep a transaction open while doing nothing. Such se
 
 **Design notes**
 
-- The metric is the **age of the transaction**, measured while the session is idle, not the time since it became idle. A transaction that ran a long statement and then went idle briefly is reported with its full transaction age. This is intentional: transaction age is what holds resources.
+- The metric is **idle time**, measured from `state_change` (the moment the session entered `idle in transaction`). A transaction that worked for ten minutes and has been idle for one minute is idle for one minute. The question this rule answers is "did the application leave a transaction open and stop talking to the database?"
+- Until 2026-10-05 the metric was transaction age (`captured_at - transaction_start`). It was changed because a long working transaction that had only just become idle was reported as a long idle transaction.
+- Transaction age regardless of state is a different engineering question (a transaction holding the xmin horizon for a long time, even if it keeps issuing short statements). It is a separate rule candidate: **Long-Running Transaction**.
 - Sessions in `idle in transaction (aborted)` are deliberately excluded. They are covered by PG-CONN-001 (see below).
 
 **Known limitations**
 
 - Only state at collection time is seen; a transaction that opens and closes between collections is invisible.
-- Aborted subtransactions inside a savepoint can keep the outer transaction's locks and xmin. Such sessions show `idle in transaction (aborted)`, are excluded here, and PG-CONN-001 reports them only as a count. Candidate post-MVP rule: **PG-TRAN-003 Long Resource-Retaining Aborted Transaction**, using `backend_xmin` / `backend_xid`, which `PG_ACTIVITY_SNAPSHOT` already collects.
+- Aborted subtransactions inside a savepoint can keep the outer transaction's locks and xmin. Such sessions show `idle in transaction (aborted)`, are excluded here, and PG-CONN-001 reports them only as a count. Candidate post-MVP rule: **Long Resource-Retaining Aborted Transaction**, using `backend_xmin` / `backend_xid`, which `PG_ACTIVITY_SNAPSHOT` already collects.
 - Connections through a transaction-pooling proxy may hide the client that owns the transaction.
 
 **Verification**  
-Lab 2026-10-05: WARNING at 372 s, CRITICAL at ~950 s, recovery after ROLLBACK. Unit tests cover boundaries (299.9 / 300 / 900 s), filters and aborted-session exclusion.
+Lab 2026-10-05 (with the earlier transaction-age metric; the test sessions became idle immediately after BEGIN, so idle time and transaction age were equal): WARNING at 372 s, CRITICAL at ~950 s, recovery after ROLLBACK. Unit tests cover boundaries (299.9 / 300 / 900 s), filters, aborted-session exclusion, and idle time versus transaction age.
 
 ---
 
@@ -204,7 +206,7 @@ Detect client connections left in a failed transaction that was never rolled bac
 **Known limitations**
 
 - Reports a count for the whole system, not the individual sessions. Session details are available in `PG_ACTIVITY_SNAPSHOT`.
-- Savepoint case: see PG-TRAN-001 limitations and the PG-TRAN-003 candidate.
+- Savepoint case: see PG-TRAN-001 limitations and the Long Resource-Retaining Aborted Transaction candidate.
 
 **Verification**  
 Lab 2026-10-05: no finding at 0, WARNING with one `BEGIN; SELECT 1/0;` session, no finding after ROLLBACK and fresh evidence. Unit tests cover 0 and 1.
@@ -227,7 +229,8 @@ Not implemented; recorded so they are not lost.
 
 | Candidate | Source | Evidence available |
 | --- | --- | --- |
-| PG-TRAN-003 Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
+| Long-Running Transaction (transaction age regardless of state) | PG-TRAN-001 design notes; 2026-09-21 evidence matrix | Yes (`PG_ACTIVITY_SNAPSHOT.transaction_start`) |
+| Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
 | MultiXact wraparound risk | PG-TRAN-002 limitation, roadmap PG-029 | Yes (`mxid_age`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
 | Inactive / stale replication slot | 2026-09-21 evidence matrix | Yes (`PG_REPLICATION_SLOTS`) |
