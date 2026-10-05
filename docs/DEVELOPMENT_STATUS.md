@@ -205,4 +205,13 @@ For architecture-sensitive changes:
 
 Implementation can be performed by the AI development partner after the design is agreed, but generated code is not considered complete merely because it was pushed. It must pass the available static/automated checks and then the relevant Keystone lab/E2E verification.
 
+### Branching rule (agreed 2026-10-05)
+
+- **Code changes** (Python, SQL migrations, collectors, tests): work on a branch, run the full automated test suite, open a pull request, verify in the lab when the change affects runtime behaviour, then merge. Unverified code is never pushed to `main`.
+- **Documentation-only changes** (this file, the documentation vault): may be committed directly to `main`. They need no lab verification and the branch/PR cycle adds no safety.
+
+Run the full test suite from the repository root before opening a code pull request:
+
+`python -B -m unittest discover -s tests -p "test_*.py" -v`
+
 Code should include concise comments/docstrings where they explain architectural intent, contracts, non-obvious behavior, or why a design choice exists. Avoid comments that merely restate obvious syntax.
