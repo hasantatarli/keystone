@@ -84,11 +84,21 @@ This keeps configuration data-driven while keeping engineering logic code-driven
 
 ### Verification status
 
-The refactored engine has been executed successfully through the registry-driven path for `PG_CONNECTION_HEALTH`.
+Verified in the lab on 2026-10-05 (target 1, Patroni cluster) after the registry refactor. Every rule was run in a clean state, a problem state and a recovery state with fresh evidence.
 
-The latest observed run reached PG-CONN-001, resolved its `PG_CONNECTION_ACTIVITY` requirement, performed the freshness check, and correctly skipped evaluation because the available evidence was older than the configured 600-second maximum age.
+| Rule | Clean | Problem | Recovery | How the problem was produced |
+| --- | --- | --- | --- | --- |
+| PG-CONN-001 | no finding (run 17) | WARNING (run 18) | no finding (run 20) | `BEGIN; SELECT 1/0;` left open on the primary |
+| PG-TRAN-001 | no finding (run 21) | WARNING at 372 s (run 22), CRITICAL at ~950 s (run 23) | no finding | `BEGIN; SELECT 1;` left open on the primary |
+| PG-TRAN-002 | no finding (runs 21-23 and recovery) | not produced | - | lab XID age cannot realistically reach the thresholds; covered by evaluator unit tests (planned) |
+| PG-REP-001 | no finding (run 25) | WARNING (run 26) | no finding | controlled evidence: test slot row with `wal_status = extended` |
+| PG-REP-002 | no finding (run 25) | CRITICAL (run 26) | no finding | controlled evidence: test slot row with `wal_status = lost` |
 
-This verifies the registry lookup, requirement-driven evidence loading, and freshness path. A fresh PG_CONNECTION_ACTIVITY collection is the next regression step so the evaluator itself can be exercised again after the refactor.
+Finding text, observed value/unit and subject were checked for each problem finding.
+
+Controlled evidence means rows named `keystone_test_*` were inserted into the latest real `postgresql.replication_slot_snapshot` (same `captured_at`) and deleted after the test. This verifies the engine, evidence loading, freshness and both evaluators, but not the collector reading a real `extended` or `lost` slot. A real slot test is planned on a snapshot of the lab VMs.
+
+Runs are started with `python -m repository.intelligence.assessment_engine --assessment <assessment_key> --target <target_id>`; without arguments the engine runs `PG_CONNECTION_HEALTH` for target 1.
 
 ## Known Issues / Open Design Decisions
 
@@ -128,25 +138,40 @@ The installer stores the header `Description` in `keystone.migration_history`, a
 
 Some collectors legitimately return zero rows (for example `PG_REPLICATION_SLOTS` on a server without replication slots). Evidence loaders read the latest captured rows, so "collected, nothing to report" is indistinguishable from "never collected" and is treated as missing evidence. Part of the open decision in issue 2.
 
+### 9. Findings can persist after recovery within the freshness window
+
+The engine evaluates the latest evidence that is still within `max_age_seconds`. If the condition is resolved but no new evidence has been collected, the old evidence still produces the finding. Observed in run 19: the aborted transaction was rolled back but the collector had not run again, so PG-CONN-001 still reported WARNING. Correct behaviour for the current model, but it must be documented in the Rule Catalog and considered when a health check triggers collection.
+
+### 10. PG-TRAN-001 does not cover aborted idle transactions
+
+PG-TRAN-001 matches `state = 'idle in transaction'` only. A session in `idle in transaction (aborted)` is never reported as a long idle transaction, however long it stays open; it only appears in PG-CONN-001 as a count without duration. Decide whether this is intended before writing the Rule Catalog entry.
+
+### 11. Manual collection workflow is error-prone
+
+A lab regression currently requires inserting a queue row, running the worker and running the engine by hand. A skipped queue insert produced a misleading result (run 19). This supports a later "run health check" entry point that collects the required evidence before evaluating. Not an MVP engine change by itself.
+
 ## Active Work
 
-Current checkpoint: stabilize and regression-test the five-rule Engineering Intelligence engine.
+Current checkpoint: the five-rule Engineering Intelligence engine is regression-tested in the lab; next is automated evaluator coverage and the Rule Catalog.
 
 Done:
 
 - Registry refactor verified against the repository: both registries complete, single evaluator contract, no leftover dispatch code.
-- Clean-install Dictionary bug fixed (V021) and covered by automated tests, including registry completeness.
+- Clean-install Dictionary bug fixed (V021) and covered by automated tests, including registry completeness. V021 verified as a no-op on the lab repository.
+- Engine command line: `--assessment` and `--target` select what runs; the file no longer needs editing.
+- Lab regression of all five rules after the refactor (see Verification status).
 
 Immediate work sequence:
 
-1. Lab: run the installer and confirm V021 is a no-op on the development repository.
-2. Produce fresh PG_CONNECTION_ACTIVITY evidence and re-run PG_CONNECTION_HEALTH.
-3. Regression-test PG_TRANSACTION_HEALTH after the registry refactor.
-4. Regression-test PG_REPLICATION_HEALTH after the registry refactor.
-5. Add automated unit coverage for the evaluators and freshness validation.
-6. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Verify which behaviour the lab shows before designing the fix.
-7. Decide the MVP representation for missing/stale required evidence (issues 2 and 8).
-8. Revisit the threshold model only when the next real rule requires multiple parameters.
+1. Add automated unit coverage for the evaluators and freshness validation (also covers the PG-TRAN-002 threshold path that the lab cannot produce).
+2. Create the Engineering Intelligence Rule Catalog, including issues 9 and 10.
+3. Revisit the threshold model based on the five real rules.
+4. Decide the MVP representation for missing/stale required evidence (issues 2 and 8).
+5. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
+
+Planned, not blocking the MVP engine:
+
+- Real replication slot test (`extended` / `lost`) on a snapshot of the lab VMs, to verify the collector path.
 
 Do not add a sixth rule before the current five-rule checkpoint is stable.
 
