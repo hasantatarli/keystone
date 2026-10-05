@@ -162,12 +162,12 @@ Done:
 - Lab regression of all five rules after the refactor (see Verification status).
 - Evaluator and freshness unit tests; threshold matching made independent of threshold order.
 - Product direction and MVP Plan recorded in the documentation vault (Product Strategy → Usage Scenarios, ADR-0013, MVP Plan).
+- Engineering Intelligence Rule Catalog: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`.
 
 Immediate work sequence (MVP Plan, Phase 0 — see `docs/KeyStone/02 - Roadmap/MVP Plan.md`):
 
-1. Create the Engineering Intelligence Rule Catalog in the documentation vault, including issues 9 and 10.
-2. Assessment Result model: persist HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE per rule and run. This implements the outcome model already defined in the architecture documents (Health Assessment Playbook, Reference Architecture, ADR-0010) and resolves issues 2 and 8; it is an implementation task, not an open design question.
-3. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
+1. Assessment Result model: persist HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE per rule and run. This implements the outcome model already defined in the architecture documents (Health Assessment Playbook, Reference Architecture, ADR-0010) and resolves issues 2 and 8; it is an implementation task, not an open design question.
+2. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
 
 Then Phase 1 (one-command health check and report) and Phase 2 (scheduler, finding lifecycle, finding-driven notification). The threshold model is revisited with the first rule that needs multiple parameters.
 
@@ -177,11 +177,9 @@ Planned, not blocking the MVP engine:
 
 Do not add a sixth rule before the current five-rule checkpoint is stable.
 
-## Next Documentation Checkpoint
+## Rule Catalog
 
-With five real rules now implemented, a human-readable Engineering Intelligence Rule Catalog is justified. It should document each rule's purpose, evidence source, freshness requirement, evaluation criteria, metric/thresholds, subject, expected finding, and recommendation.
-
-The catalog should explain engineering intent without duplicating machine-readable Dictionary metadata unnecessarily.
+The Engineering Intelligence Rule Catalog documents each rule's purpose, evidence, freshness, criteria, thresholds, subject, limitations and verification, plus candidate rules: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`. Update it together with the migration and `EXPECTED_RULES` whenever a rule changes.
 
 ## Explicitly Deferred / V1 Sonrasi
 
