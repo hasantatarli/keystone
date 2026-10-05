@@ -96,6 +96,8 @@ def load_thresholds(conn, rule_id):
                 threshold_unit
             FROM keystone.rule_threshold
             WHERE rule_id = %s
+            -- Order is for readable output only; evaluators select the
+            -- reached threshold through match_threshold(), independent of it.
             ORDER BY threshold_value DESC
             """,
             (rule_id,),
@@ -373,6 +375,37 @@ def load_latest_connection_activity_snapshot(conn, target_id):
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
+# Used only to break ties between thresholds with the same value.
+SEVERITY_RANK = {"INFO": 1, "WARNING": 2, "CRITICAL": 3}
+
+
+def match_threshold(observed_value, thresholds, unit):
+    """Return the most severe threshold reached by observed_value, or None.
+
+    A threshold is reached when observed_value >= threshold_value and its unit
+    matches. Among reached thresholds the highest threshold_value wins, so the
+    result does not depend on the order in which thresholds are supplied.
+    Thresholds with a different unit are ignored.
+    """
+    reached = [
+        threshold
+        for threshold in thresholds
+        if threshold["threshold_unit"] == unit
+        and observed_value >= float(threshold["threshold_value"])
+    ]
+
+    if not reached:
+        return None
+
+    return max(
+        reached,
+        key=lambda threshold: (
+            threshold["threshold_value"],
+            SEVERITY_RANK.get(threshold["severity"], 0),
+        ),
+    )
+
+
 def evaluate_long_idle_transaction(rows, rule, thresholds):
     findings = []
 
@@ -390,15 +423,11 @@ def evaluate_long_idle_transaction(rows, rule, thresholds):
             row["captured_at"] - row["transaction_start"]
         ).total_seconds()
 
-        matched_threshold = None
-
-        for threshold in thresholds:
-            if threshold["threshold_unit"] != "SECOND":
-                continue
-
-            if duration_seconds >= float(threshold["threshold_value"]):
-                matched_threshold = threshold
-                break
+        matched_threshold = match_threshold(
+            duration_seconds,
+            thresholds,
+            "SECOND",
+        )
 
         if matched_threshold is None:
             continue
@@ -429,15 +458,11 @@ def evaluate_database_xid_wraparound(rows, rule, thresholds):
     for row in rows:
         xid_age = row["xid_age"]
 
-        matched_threshold = None
-
-        for threshold in thresholds:
-            if threshold["threshold_unit"] != "TRANSACTION":
-                continue
-
-            if xid_age >= float(threshold["threshold_value"]):
-                matched_threshold = threshold
-                break
+        matched_threshold = match_threshold(
+            xid_age,
+            thresholds,
+            "TRANSACTION",
+        )
 
         if matched_threshold is None:
             continue
@@ -530,15 +555,11 @@ def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
     for row in rows:
         connection_count = row["idle_in_transaction_aborted_connections"]
 
-        matched_threshold = None
-
-        for threshold in thresholds:
-            if threshold["threshold_unit"] != "CONNECTION":
-                continue
-
-            if connection_count >= float(threshold["threshold_value"]):
-                matched_threshold = threshold
-                break
+        matched_threshold = match_threshold(
+            connection_count,
+            thresholds,
+            "CONNECTION",
+        )
 
         if matched_threshold is None:
             continue
