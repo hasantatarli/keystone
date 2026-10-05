@@ -199,5 +199,134 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
         self.assertEqual(sources - set(engine.EVIDENCE_LOADERS), set())
 
 
+class DevelopmentRepositoryUpgradeTests(unittest.TestCase):
+    """V021 must be a no-op on a repository seeded the way the lab was.
+
+    Reproduces the lab history: V001-V016, then the Transaction Health rows
+    inserted manually, then the remaining migrations. Applying V021 afterwards
+    must not add, duplicate or overwrite any Dictionary row.
+    """
+
+    # Deliberately different from the V021 default (300) to prove that V021
+    # never overwrites values already present in an existing repository.
+    TUNED_WARNING_SECONDS = Decimal("120")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = DisposablePostgres()
+        cls.server.start()
+        cls.addClassCleanup(cls.server.close)
+
+    def setUp(self):
+        database = "upgrade_test_" + uuid.uuid4().hex
+        with self.server.connect(autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database))
+            )
+        self.database = database
+        self.conn = self.server.connect(database)
+        self.addCleanup(self.conn.close)
+
+    def run_installer(self, migrations):
+        def connect():
+            return self.server.connect(self.database)
+
+        with patch.object(installer, "connect_repository", connect), \
+                patch.object(installer, "discover_migrations",
+                             return_value=migrations), \
+                contextlib.redirect_stdout(io.StringIO()):
+            installer.main()
+
+    def seed_transaction_health_manually(self):
+        # Mirrors the rows that were inserted by hand into the lab repository
+        # on 2026-09-22, between V016 and V017.
+        self.conn.execute(
+            """
+            INSERT INTO keystone.assessment_definition
+                (assessment_key, name, provider, description)
+            VALUES ('PG_TRANSACTION_HEALTH', 'Transaction Health',
+                    'PostgreSQL', 'manually seeded')
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO keystone.rule_definition
+                (assessment_id, rule_key, name, evidence_source,
+                 finding_template, recommendation)
+            SELECT assessment_id, 'PG-TRAN-001', 'Long Idle Transaction',
+                   'PG_ACTIVITY_SNAPSHOT',
+                   'Session {pid} idle for {duration_seconds}s.',
+                   'manually seeded'
+            FROM keystone.assessment_definition
+            WHERE assessment_key = 'PG_TRANSACTION_HEALTH'
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO keystone.rule_threshold
+                (rule_id, severity, threshold_value, threshold_unit)
+            SELECT rule_id, t.severity, t.value, 'SECOND'
+            FROM keystone.rule_definition
+            CROSS JOIN (VALUES ('WARNING', %s::numeric),
+                               ('CRITICAL', 900::numeric)) AS t (severity, value)
+            WHERE rule_key = 'PG-TRAN-001'
+            """,
+            (self.TUNED_WARNING_SECONDS,),
+        )
+        self.conn.commit()
+
+    def dictionary_snapshot(self):
+        # Full row content, including ids, so any insert/update is detected.
+        tables = (
+            "assessment_definition",
+            "rule_definition",
+            "rule_threshold",
+            "rule_evidence_requirement",
+        )
+        return {
+            table: self.conn.execute(
+                sql.SQL("SELECT * FROM keystone.{} ORDER BY 1").format(
+                    sql.Identifier(table)
+                )
+            ).fetchall()
+            for table in tables
+        }
+
+    def test_v021_is_noop_on_manually_seeded_repository(self):
+        discovered = installer.discover_migrations()
+        versions = [item["version"] for item in discovered]
+        v016 = versions.index("V016")
+        before_v021 = [item for item in discovered if item["version"] != "V021"]
+
+        self.run_installer(discovered[: v016 + 1])
+        self.seed_transaction_health_manually()
+        self.run_installer(before_v021)
+
+        before = self.dictionary_snapshot()
+        self.conn.commit()
+
+        self.run_installer(discovered)
+
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT status FROM keystone.migration_history "
+                "WHERE version = 'V021'"
+            ).fetchall(),
+            [("SUCCESS",)],
+        )
+        self.assertEqual(self.dictionary_snapshot(), before)
+        self.assertEqual(
+            self.conn.execute(
+                """
+                SELECT rt.threshold_value
+                FROM keystone.rule_threshold rt
+                JOIN keystone.rule_definition rd USING (rule_id)
+                WHERE rd.rule_key = 'PG-TRAN-001' AND rt.severity = 'WARNING'
+                """
+            ).fetchone()[0],
+            self.TUNED_WARNING_SECONDS,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
