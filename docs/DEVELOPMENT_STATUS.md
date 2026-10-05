@@ -152,7 +152,7 @@ A lab regression currently requires inserting a queue row, running the worker an
 
 ## Active Work
 
-Current checkpoint: the five-rule Engineering Intelligence engine is regression-tested in the lab; next is automated evaluator coverage and the Rule Catalog.
+Current checkpoint: the five-rule Engineering Intelligence engine is regression-tested in the lab and covered by automated tests; next is MVP Plan Phase 0.
 
 Done:
 
@@ -160,14 +160,16 @@ Done:
 - Clean-install Dictionary bug fixed (V021) and covered by automated tests, including registry completeness. V021 verified as a no-op on the lab repository.
 - Engine command line: `--assessment` and `--target` select what runs; the file no longer needs editing.
 - Lab regression of all five rules after the refactor (see Verification status).
+- Evaluator and freshness unit tests; threshold matching made independent of threshold order.
+- Product direction and MVP Plan recorded in the documentation vault (Product Strategy → Usage Scenarios, ADR-0013, MVP Plan).
 
-Immediate work sequence:
+Immediate work sequence (MVP Plan, Phase 0 — see `docs/KeyStone/02 - Roadmap/MVP Plan.md`):
 
-1. Add automated unit coverage for the evaluators and freshness validation (also covers the PG-TRAN-002 threshold path that the lab cannot produce).
-2. Create the Engineering Intelligence Rule Catalog, including issues 9 and 10.
-3. Revisit the threshold model based on the five real rules.
-4. Decide the MVP representation for missing/stale required evidence (issues 2 and 8).
-5. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
+1. Create the Engineering Intelligence Rule Catalog in the documentation vault, including issues 9 and 10.
+2. Assessment Result model: persist HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE per rule and run. This implements the outcome model already defined in the architecture documents (Health Assessment Playbook, Reference Architecture, ADR-0010) and resolves issues 2 and 8; it is an implementation task, not an open design question.
+3. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
+
+Then Phase 1 (one-command health check and report) and Phase 2 (scheduler, finding lifecycle, finding-driven notification). The threshold model is revisited with the first rule that needs multiple parameters.
 
 Planned, not blocking the MVP engine:
 

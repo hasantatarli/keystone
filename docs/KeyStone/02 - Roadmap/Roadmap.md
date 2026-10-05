@@ -12,7 +12,7 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 | PG-006 | Transaction / Wraparound Health | SYSTEM / DATABASE | SNAPSHOT | Very High | **Done** |
 | PG-007 | Replication & Slot Health | SYSTEM / NODE | SNAPSHOT | Very High | **Done** |
 | PG-008 | Session & Connection Activity | SYSTEM / DATABASE | SNAPSHOT | High | **Done** |
-| PG-009 | Locking / Long Transactions | DATABASE | SNAPSHOT / EVENT | Very High | **Next** |
+| PG-009 | Locking / Long Transactions | DATABASE | SNAPSHOT / EVENT | Very High | **Partial** — long transactions via `PG_ACTIVITY_SNAPSHOT`; locking open |
 | PG-010 | Index Inventory & Usage | DATABASE | SNAPSHOT | Very High | Planned |
 | PG-011 | Index Quality | DATABASE | SNAPSHOT | Very High | Planned |
 | PG-012 | pg_stat_statements Workload | DATABASE | SNAPSHOT / DELTA | Very High | Planned |
@@ -38,7 +38,9 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 
 ## Current Development Focus
 
-The PostgreSQL collection baseline is implemented through **PG-008 — Session & Connection Activity**. The next functional collector target is **PG-009 — Locking / Long Transactions**.
+The PostgreSQL collection baseline is implemented through **PG-008 — Session & Connection Activity**, plus Linux host evidence (`PG_HOST_SNAPSHOT`) and per-session activity evidence (`PG_ACTIVITY_SNAPSHOT`). Long-running transaction evidence (part of PG-009) is therefore available; locking evidence is still open.
+
+Since 2026-10-05, new collector work is prioritised by the MVP Plan and by evidence needs of new rules rather than by this sequence.
 
 Roadmap collector IDs describe functional collection capabilities and are independent from PostgreSQL provider repository migration versions. A single functional collector may require multiple repository migrations, and migration numbering may therefore advance independently from this roadmap.
 
