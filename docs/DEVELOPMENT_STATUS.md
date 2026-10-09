@@ -1,6 +1,6 @@
 # Keystone Development Status
 
-Last updated: 2026-10-05
+Last updated: 2026-10-09
 
 This document is the working checkpoint for the PostgreSQL MVP. It records what is implemented and verified, what is currently being worked on, and what comes next. It is intentionally narrower than a long-term product roadmap.
 
@@ -28,11 +28,12 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 
 ## Engineering Intelligence Implemented
 
-Five real PostgreSQL rules are currently implemented.
+Six real PostgreSQL rules are currently implemented. The Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`) documents each of them.
 
 | Rule | Assessment | Evidence | Result logic |
 | --- | --- | --- | --- |
-| PG-TRAN-001 | PG_TRANSACTION_HEALTH | PG_ACTIVITY_SNAPSHOT | Long idle transaction; WARNING/CRITICAL by duration threshold |
+| PG-TRAN-001 | PG_TRANSACTION_HEALTH | PG_ACTIVITY_SNAPSHOT | Long idle transaction; idle time since `state_change`, WARNING 300 s / CRITICAL 900 s |
+| PG-TRAN-003 | PG_TRANSACTION_HEALTH | PG_ACTIVITY_SNAPSHOT | Long-running transaction; transaction age in any non-aborted state, WARNING 30 min / CRITICAL 1 h |
 | PG-TRAN-002 | PG_TRANSACTION_HEALTH | PG_TRANSACTION_WRAPAROUND | Database XID age; WARNING/CRITICAL by transaction threshold |
 | PG-REP-001 | PG_REPLICATION_HEALTH | PG_REPLICATION_SLOTS | WAL status `extended`; default WARNING |
 | PG-REP-002 | PG_REPLICATION_HEALTH | PG_REPLICATION_SLOTS | WAL status `unreserved` or `lost`; default CRITICAL |
@@ -175,7 +176,7 @@ Planned, not blocking the MVP engine:
 
 - Real replication slot test (`extended` / `lost`) on a snapshot of the lab VMs, to verify the collector path.
 
-Do not add a sixth rule before the current five-rule checkpoint is stable.
+The five-rule checkpoint was completed on 2026-10-05. New rules follow the checklist in the Rule Catalog (catalog entry, migration, evaluator, `EXPECTED_RULES`, unit tests, lab verification).
 
 ## Rule Catalog
 
