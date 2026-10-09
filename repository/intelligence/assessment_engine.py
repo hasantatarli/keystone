@@ -460,6 +460,65 @@ def evaluate_long_idle_transaction(rows, rule, thresholds):
     return findings
 
 
+
+# Top-level failed transactions have already released their snapshot and
+# locks; they are reported by PG-CONN-001 and excluded from transaction age.
+EXCLUDED_LONG_RUNNING_STATES = {"idle in transaction (aborted)"}
+
+
+def evaluate_long_running_transaction(rows, rule, thresholds):
+    """PG-TRAN-003: client transactions open for a long time, any state.
+
+    The metric is transaction age (captured_at - transaction_start). Unlike
+    PG-TRAN-001 it does not care whether the session is active or idle: an
+    old transaction holds the xmin horizon and its locks either way. A long
+    idle transaction may therefore match both rules; this is intentional.
+    """
+    findings = []
+
+    for row in rows:
+        if row["backend_type"] != "client backend":
+            continue
+
+        if row["transaction_start"] is None:
+            continue
+
+        if row["state"] in EXCLUDED_LONG_RUNNING_STATES:
+            continue
+
+        duration_seconds = (
+            row["captured_at"] - row["transaction_start"]
+        ).total_seconds()
+
+        matched_threshold = match_threshold(
+            duration_seconds,
+            thresholds,
+            "SECOND",
+        )
+
+        if matched_threshold is None:
+            continue
+
+        findings.append(
+            {
+                "pid": row["pid"],
+                "duration_seconds": duration_seconds,
+                "severity": matched_threshold["severity"],
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "pid": row["pid"],
+                    "duration_seconds": f"{duration_seconds:.1f}",
+                    "state": row["state"],
+                },
+                "observed_value": duration_seconds,
+                "observed_unit": "SECOND",
+                "subject_type": "SESSION",
+                "subject_identifier": str(row["pid"]),
+            }
+        )
+
+    return findings
+
 def evaluate_database_xid_wraparound(rows, rule, thresholds):
     findings = []
 
@@ -609,6 +668,7 @@ EVIDENCE_LOADERS = {
 RULE_EVALUATORS = {
     "PG-TRAN-001": evaluate_long_idle_transaction,
     "PG-TRAN-002": evaluate_database_xid_wraparound,
+    "PG-TRAN-003": evaluate_long_running_transaction,
     "PG-REP-001": evaluate_replication_slot_wal_retention_pressure,
     "PG-REP-002": evaluate_replication_slot_wal_unavailable,
     "PG-CONN-001": evaluate_aborted_idle_transaction_connections,

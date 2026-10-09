@@ -64,6 +64,15 @@ EXPECTED_RULES = {
         },
         "evidence": {"PG_TRANSACTION_WRAPAROUND": (True, 86400)},
     },
+    "PG-TRAN-003": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("1800"), "SECOND"),
+            "CRITICAL": (Decimal("3600"), "SECOND"),
+        },
+        "evidence": {"PG_ACTIVITY_SNAPSHOT": (True, 600)},
+    },
     "PG-REP-001": {
         "assessment": "PG_REPLICATION_HEALTH",
         "default_severity": "WARNING",

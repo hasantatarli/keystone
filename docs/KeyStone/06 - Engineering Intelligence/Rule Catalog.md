@@ -1,7 +1,7 @@
 # Engineering Intelligence Rule Catalog
 
 **Status:** Current  
-**Last Updated:** 2026-10-05  
+**Last Updated:** 2026-10-09  
 **Provider:** PostgreSQL (15+)
 
 ## Purpose
@@ -10,7 +10,7 @@ This catalog explains, in engineering terms, what each Keystone rule detects, wh
 
 It is documentation, not configuration. The machine-readable source of truth is:
 
-- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V021),
+- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V022),
 - the evaluators in `repository/intelligence/assessment_engine.py`,
 - the expected Dictionary contract in `tests/test_intelligence_dictionary.py` (`EXPECTED_RULES`).
 
@@ -84,7 +84,7 @@ Detect client sessions that keep a transaction open while doing nothing. Such se
 
 - The metric is **idle time**, measured from `state_change` (the moment the session entered `idle in transaction`). A transaction that worked for ten minutes and has been idle for one minute is idle for one minute. The question this rule answers is "did the application leave a transaction open and stop talking to the database?"
 - Until 2026-10-05 the metric was transaction age (`captured_at - transaction_start`). It was changed because a long working transaction that had only just become idle was reported as a long idle transaction.
-- Transaction age regardless of state is a different engineering question (a transaction holding the xmin horizon for a long time, even if it keeps issuing short statements). It is a separate rule candidate: **Long-Running Transaction**.
+- Transaction age regardless of state is a different engineering question (a transaction holding the xmin horizon for a long time, even if it keeps issuing short statements). It is covered by **PG-TRAN-003 Long-Running Transaction**.
 - Sessions in `idle in transaction (aborted)` are deliberately excluded. They are covered by PG-CONN-001 (see below).
 
 **Known limitations**
@@ -95,6 +95,40 @@ Detect client sessions that keep a transaction open while doing nothing. Such se
 
 **Verification**  
 Lab 2026-10-05 (with the earlier transaction-age metric; the test sessions became idle immediately after BEGIN, so idle time and transaction age were equal): WARNING at 372 s, CRITICAL at ~950 s, recovery after ROLLBACK. Unit tests cover boundaries (299.9 / 300 / 900 s), filters, aborted-session exclusion, and idle time versus transaction age.
+
+---
+
+## PG-TRAN-003 — Long-Running Transaction
+
+**Purpose**  
+Detect client transactions that have been open for a long time, whatever the session is doing. An old transaction holds the xmin horizon and its locks: VACUUM cannot remove dead tuples created after it started, which leads to bloat, and other sessions may wait on its locks. This happens while the transaction keeps working as well as while it is idle.
+
+| | |
+| --- | --- |
+| Evidence | `PG_ACTIVITY_SNAPSHOT` (`postgresql.activity_snapshot`), required |
+| Freshness | 600 seconds |
+| Condition | `backend_type = 'client backend'` and `transaction_start` is not null and `state <> 'idle in transaction (aborted)'` |
+| Metric | `captured_at - transaction_start`: transaction age, in seconds |
+| Thresholds | WARNING ≥ 1800 s (30 min), CRITICAL ≥ 3600 s (1 h) |
+| Subject | SESSION (pid) |
+| Finding | Session {pid} has had a transaction open for {duration_seconds} seconds (current state: {state}). |
+| Recommendation | Identify the workload behind the transaction; long transactions hold the xmin horizon and locks. Consider smaller transactions and review application transaction boundaries. |
+
+**Design notes**
+
+- Thresholds are more tolerant than PG-TRAN-001 because legitimate long work (batch jobs, reporting, `pg_dump`) also matches. Such work really does hold the xmin horizon, so it is reported; the state in the finding text helps the engineer recognise it.
+- **Overlap with PG-TRAN-001 is intentional.** A session idle in a transaction for a long time can match both rules: PG-TRAN-001 answers "did the application forget an open transaction?", PG-TRAN-003 answers "is a transaction holding back VACUUM?". Reporting may group findings for the same session later.
+- Top-level aborted transactions are excluded: they have already released their snapshot and locks and are reported by PG-CONN-001.
+
+**Known limitations**
+
+- Only state at collection time is seen.
+- Aborted subtransactions inside a savepoint keep the outer transaction's resources but are excluded together with all aborted sessions. See the Long Resource-Retaining Aborted Transaction candidate.
+- Transactions opened by background workers or replication connections are not evaluated (client backends only). A standby with `hot_standby_feedback` can hold the primary's xmin through its replication slot; that is a replication concern, not covered here.
+- Allow-listing of known long jobs is not supported; there are no per-target overrides yet.
+
+**Verification**  
+Unit tests: boundaries (1799.9 / 1800 / 3600 s), reversed threshold order, any non-aborted state measured, aborted / no-transaction / non-client excluded, transaction age vs. idle time. Clean-install contract updated. Lab verification pending.
 
 ---
 
@@ -235,7 +269,6 @@ Not implemented; recorded so they are not lost.
 
 | Candidate | Source | Evidence available |
 | --- | --- | --- |
-| Long-Running Transaction (transaction age regardless of state) | PG-TRAN-001 design notes; 2026-09-21 evidence matrix | Yes (`PG_ACTIVITY_SNAPSHOT.transaction_start`) |
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
 | MultiXact wraparound risk | PG-TRAN-002 limitation, roadmap PG-029 | Yes (`mxid_age`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
