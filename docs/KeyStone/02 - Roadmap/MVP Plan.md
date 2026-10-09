@@ -1,7 +1,7 @@
 # PostgreSQL MVP Plan
 
 **Status:** Current  
-**Last Updated:** 2026-10-05
+**Last Updated:** 2026-10-09
 
 ## Purpose
 
@@ -23,13 +23,22 @@ This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMEN
 - Bring the documentation vault up to date and create the Engineering Intelligence Rule Catalog.
 - **Assessment Result model:** persist, for every rule in every run, whether the check was HEALTHY, ATTENTION_REQUIRED or INSUFFICIENT_EVIDENCE. This implements the outcome model already defined in the Health Assessment Playbook, Reference Architecture and ADR-0010; today a skipped rule is only printed to the console.
 - **Failure visibility:** an assessment run that fails technically must end as FAILED instead of disappearing (Engineering Principle 5).
+- **Evaluation time as a parameter:** the engine evaluates evidence "as of" a given time instead of always using the current clock. Live runs use now; offline bundles use their capture time, so an imported bundle is not reported as stale merely because it was imported later.
+
+Design constraint from Phase 1: collectors remain plain SQL so the offline bundle can be generated from them. Collection logic must not move into Python worker code.
 
 ### Phase 1 — Manual Assessment
 
 - **One-command health check:** run a set of assessments against a target and collect the required evidence first, through the existing execution engine. Replaces the manual queue / worker / engine sequence.
 - **Report:** a readable health check report generated from a run: coverage, healthy areas, findings, insufficient evidence, recommendations.
 
-Outcome: a usable one-off health check for a prospective customer.
+- **Offline evidence (no installation on the customer side):** many customers allow only a GUI client such as pgAdmin on a monitored jump server, with no CLI and no permission to install software. For them the health check must also accept evidence collected without a Keystone connection:
+  - **Customer side:** a read-only SQL bundle script, generated automatically from the existing collector SQL (never maintained by hand), that returns one JSON document in one cell. It runs in pgAdmin, psql or DBeaver and creates no objects. One script for SYSTEM-scoped collectors, one to run in each database for DATABASE-scoped collectors.
+  - **Keystone side:** an import command that writes the bundle into the same provider tables the collectors use, with provenance `OFFLINE`. Engine, findings and report are unchanged.
+  - **Data minimisation:** query text (`pg_stat_activity.query`) is excluded by default and only included on request. The bundle carries the Keystone version and collector checksums.
+  - **Known limits:** no host evidence (those checks become INSUFFICIENT_EVIDENCE); large results must be saved to a file, not copied from the grid.
+
+Outcome: a usable one-off health check for a prospective customer, with or without a live Keystone connection.
 
 ### Phase 2 — Continuous Assessment
 
