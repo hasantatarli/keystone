@@ -99,6 +99,8 @@ Finding text, observed value/unit and subject were checked for each problem find
 
 Controlled evidence means rows named `keystone_test_*` were inserted into the latest real `postgresql.replication_slot_snapshot` (same `captured_at`) and deleted after the test. This verifies the engine, evidence loading, freshness and both evaluators, but not the collector reading a real `extended` or `lost` slot. A real slot test is planned on a snapshot of the lab VMs.
 
+All commands with their variations (agent, worker, engine, installer, credential tool, tests, configuration and check queries): `docs/KeyStone/07 - Operations/Command Reference.md`.
+
 Runs are started with `python -m repository.intelligence.assessment_engine --assessment <assessment_key> --target <target_id>`; without arguments the engine runs `PG_CONNECTION_HEALTH` for target 1.
 
 Keystone Agent (ADR-0015): `python -m repository.agent.agent [--max-workers 20] [--poll-seconds 10]` runs continuously. The agent holding the scheduler advisory lock queues `SCHEDULED` collector assignments on a clock-aligned grid (a slot missed by a long run is skipped; one catch-up run after downtime); every agent runs queued tasks in a continuous pool, limited per target by `target.max_concurrent_tasks` (V025). Schedule lag is in `collector_run_history.scheduled_at` vs `started_at`. Stop with Ctrl+C or SIGTERM. Linux service example: `deploy/systemd/keystone-agent.service`. `python -m repository.worker.worker` still drains the queue once and exits.
