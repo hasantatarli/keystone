@@ -34,7 +34,7 @@ All intervals are stored as seconds in the database, like `max_age_seconds`. Uni
 
 ### Consistency warning
 
-When a collector interval is longer than the freshness limit of a rule that depends on that collector's evidence, the rule will usually end INSUFFICIENT_EVIDENCE. Saving such a configuration produces a warning; it is not blocked.
+When a collector interval is longer than the freshness limit of a rule that depends on that collector's evidence, the rule will usually end INSUFFICIENT_EVIDENCE. Saving such a configuration produces a warning; it is not blocked. The same check also reports a required collector that is not scheduled for the target at all. It is defined once, as the view `keystone.schedule_consistency_warning`; the agent logs its rows when it starts scheduling, and the web interface will show the same rows. It describes configuration, not database health.
 
 ### Execution: Keystone Agent
 
@@ -46,6 +46,8 @@ Schedules are executed by the Keystone Agent, a long-running service like SQL Se
 - **No catch-up after downtime.** When the agent comes back, an overdue item runs once immediately, then returns to the grid.
 - **Parallel execution with two limits.** A continuous worker pool runs tasks in parallel (agent parameter, default 20); a freed slot takes the next task at once. Each target has `max_concurrent_tasks` (default 3), because every task opens a connection to the monitored database: tasks of one target queue up, tasks of different targets run in parallel.
 - **Scale out, not up.** More agents can run side by side on other machines: only one schedules (advisory lock), all take work from the shared queue. Schedule lag (`started_at - scheduled_at`) is recorded and logged when it grows; that is the signal to add an agent.
+- **Offset.** A schedule may run a fixed number of seconds after each slot. Assessments default to 30 s, so evidence collected at the start of the slot is already stored when they evaluate. The same mechanism can later spread collectors that share an interval.
+- **Assessments run inside the agent.** They read only the repository and take seconds, so they run in a small pool of their own (2 threads) instead of a queue. Runs left RUNNING by a stopped agent are marked FAILED when the next scheduler starts.
 - **Later: worker pools.** When other database types or customer-network agents arrive, an agent will declare which work it can take (provider, network) and claim only that. Not built now; nothing in the current design prevents it.
 
 ### Out of scope for now
