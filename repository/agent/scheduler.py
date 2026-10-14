@@ -1,7 +1,7 @@
 """Generic interval scheduler (ADR-0015): decides WHEN; job adapters decide WHAT.
 
-Adapters list their scheduled items (with last start time taken from their own
-history) and run an item. The rules below live only here.
+Adapters list their scheduled items (with last start/finish taken from their
+own history) and run an item. The rules below live only here.
 """
 
 from dataclasses import dataclass, field
@@ -15,6 +15,9 @@ logger = get_logger("scheduler")
 # Session-level advisory lock key: only one active scheduler per repository.
 SCHEDULER_LOCK_KEY = 0x4B45595354  # "KEYST"
 
+# A run that starts this late after its slot is a catch-up, planned at "now".
+DEFAULT_GRACE_SECONDS = 15
+
 
 @dataclass(frozen=True)
 class ScheduledItem:
@@ -24,6 +27,8 @@ class ScheduledItem:
     key: tuple
     interval_seconds: int
     last_started_at: datetime = None          # from the adapter's own history
+    last_finished_at: datetime = None         # finish of that same run
+    is_busy: bool = False                     # queued or running right now
     payload: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -35,42 +40,68 @@ class JobAdapter:
     def list_items(self, conn):
         raise NotImplementedError
 
-    def run(self, conn, item, now):
+    def run(self, conn, item, planned_at):
         raise NotImplementedError
+
+
+def slot_start(now, interval_seconds):
+    """Start of the fixed time slot containing now (grid anchored to the Unix epoch)."""
+    start = (int(now.timestamp()) // interval_seconds) * interval_seconds
+    return datetime.fromtimestamp(start, tz=timezone.utc)
 
 
 class Scheduler:
     """Runs due items of all registered adapters once per tick.
 
-    Rules: due when last start + interval <= now; a failed run counts as run;
-    overdue items run once (no catch-up); an in-memory dispatch time covers
+    Rules: items run on a fixed grid (every interval, aligned to the clock);
+    a slot that began while the previous run was still going is skipped;
+    a failed run counts as run; after downtime an item runs once at once
+    (no catch-up of every missed slot); an in-memory dispatch time covers
     the case where the run could not be recorded in the repository.
     """
 
-    def __init__(self, adapters, clock=None):
+    def __init__(self, adapters, clock=None, grace_seconds=DEFAULT_GRACE_SECONDS):
         self.adapters = list(adapters)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.grace = timedelta(seconds=grace_seconds)
+        self.next_wake_at = None
         self._dispatched_at = {}
 
     def last_run(self, item):
-        """Latest of repository history and our own in-memory dispatch time."""
-        candidates = [
-            moment for moment in (
-                item.last_started_at,
-                self._dispatched_at.get((item.job_type, item.key)),
-            )
-            if moment is not None
-        ]
-        return max(candidates) if candidates else None
+        """(start, finish) of the latest run, from history or in-memory dispatch."""
+        dispatched = self._dispatched_at.get((item.job_type, item.key))
+        started = item.last_started_at
+
+        if dispatched is not None and (started is None or dispatched > started):
+            return dispatched, dispatched      # not recorded yet: finish unknown
+        if started is None:
+            return None, None
+        return started, item.last_finished_at or started
 
     def is_due(self, item, now):
-        last = self.last_run(item)
-        return last is None or last + timedelta(seconds=item.interval_seconds) <= now
+        if item.is_busy:
+            return False
+        started, finished = self.last_run(item)
+        if started is None:
+            return True
+
+        slot = slot_start(now, item.interval_seconds)
+        # Already ran in this slot, or the slot began while the previous run was busy.
+        return started < slot and finished <= slot
+
+    def planned_time(self, item, now):
+        """The slot start when on time; now for a first run or a late catch-up."""
+        slot = slot_start(now, item.interval_seconds)
+        started, _ = self.last_run(item)
+        if started is None or now - slot > self.grace:
+            return now
+        return slot
 
     def tick(self, conn):
         """One scheduling pass; returns the items that were dispatched."""
         now = self.clock()
         dispatched = []
+        next_wake = None
 
         for adapter in self.adapters:
             try:
@@ -84,14 +115,19 @@ class Scheduler:
                 continue
 
             for item in items:
+                boundary = (slot_start(now, item.interval_seconds)
+                            + timedelta(seconds=item.interval_seconds))
+                next_wake = boundary if next_wake is None else min(next_wake, boundary)
+
                 if not self.is_due(item, now):
                     continue
 
+                planned_at = self.planned_time(item, now)
                 # Recorded before running: a failure must not cause a retry
                 # on every tick.
                 self._dispatched_at[(item.job_type, item.key)] = now
                 try:
-                    adapter.run(conn, item, now)
+                    adapter.run(conn, item, planned_at)
                     conn.commit()
                     dispatched.append(item)
                 except Exception:
@@ -105,6 +141,7 @@ class Scheduler:
                                            "key": list(item.key)}},
                     )
 
+        self.next_wake_at = next_wake
         return dispatched
 
 

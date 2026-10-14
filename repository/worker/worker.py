@@ -26,6 +26,9 @@ class TaskOwnershipLost(RuntimeError):
 # -----------------------------------------------------------------------------
 MAX_RETRY_COUNT = 3
 
+# Transaction-level advisory lock that serializes task claims across agents.
+CLAIM_LOCK_KEY = 0x4B45595351  # "KEYSQ"
+
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
@@ -139,13 +142,34 @@ def calculate_checksum(file_path):
 # Queue Management
 # -----------------------------------------------------------------------------
 def claim_tasks(conn, worker_id, limit=5):
-    """Atomically claim due WAITING tasks (SKIP LOCKED) and return their full context."""
+    """Claim due WAITING tasks within the per-target limit and return their full context."""
     with conn.cursor() as cur:
+        # Claims are serialized so concurrent agents cannot overshoot a target's limit.
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(%s)", (CLAIM_LOCK_KEY,)
+        )
         cur.execute(
             """
-            WITH next_tasks AS
+            WITH running AS
             (
-                SELECT q.task_id
+                SELECT ca.target_id, count(*) AS running_count
+                FROM keystone.collection_queue q
+                JOIN keystone.collector_assignment ca
+                    ON ca.assignment_id = q.assignment_id
+                WHERE q.status = 'RUNNING'
+                GROUP BY ca.target_id
+            ),
+            candidates AS
+            (
+                SELECT
+                    q.task_id,
+                    q.scheduled_at,
+                    t.max_concurrent_tasks
+                        - COALESCE(r.running_count, 0) AS free_slots,
+                    row_number() OVER (
+                        PARTITION BY t.target_id
+                        ORDER BY q.scheduled_at, q.task_id
+                    ) AS position
                 FROM keystone.collection_queue q
                 JOIN keystone.collector_assignment ca
                     ON ca.assignment_id = q.assignment_id
@@ -153,15 +177,20 @@ def claim_tasks(conn, worker_id, limit=5):
                     ON cd.collector_id = ca.collector_id
                 JOIN keystone.target t
                     ON t.target_id = ca.target_id
+                LEFT JOIN running r
+                    ON r.target_id = t.target_id
                 WHERE q.status = 'WAITING'
                   AND q.scheduled_at <= clock_timestamp()
                   AND ca.is_enabled = TRUE
                   AND cd.is_active = TRUE
                   AND t.is_active = TRUE
-                ORDER BY
-                    q.scheduled_at,
-                    q.task_id
-                FOR UPDATE OF q SKIP LOCKED
+            ),
+            next_tasks AS
+            (
+                SELECT task_id
+                FROM candidates
+                WHERE position <= free_slots
+                ORDER BY scheduled_at, task_id
                 LIMIT %s
             )
             UPDATE keystone.collection_queue q
@@ -172,6 +201,7 @@ def claim_tasks(conn, worker_id, limit=5):
                 heartbeat_at = clock_timestamp()
             FROM next_tasks nt
             WHERE q.task_id = nt.task_id
+              AND q.status = 'WAITING'
             RETURNING q.task_id;
             """,
             (limit,worker_id),
@@ -193,6 +223,7 @@ def claim_tasks(conn, worker_id, limit=5):
             SELECT
                 q.task_id,
                 q.assignment_id,
+                q.scheduled_at,
                 q.started_at,
                 q.worker_id,
                 q.heartbeat_at,
@@ -315,6 +346,7 @@ def recover_stale_tasks(
             SELECT
                 q.task_id,
                 q.assignment_id,
+                q.scheduled_at,
                 q.started_at,
                 q.worker_id,
                 q.retry_count
@@ -339,6 +371,7 @@ def recover_stale_tasks(
                 (
                     assignment_id,
                     task_id,
+                    scheduled_at,
                     started_at,
                     finished_at,
                     status,
@@ -350,6 +383,7 @@ def recover_stale_tasks(
                 )
                 VALUES
                 (
+                    %s,
                     %s,
                     %s,
                     %s,
@@ -369,6 +403,7 @@ def recover_stale_tasks(
                 (
                     task["assignment_id"],
                     task["task_id"],
+                    task["scheduled_at"],
                     task["started_at"],
                     task["started_at"],
                     task["worker_id"],
@@ -2129,6 +2164,7 @@ def write_run_history(
         (
             assignment_id,
             task_id,
+            scheduled_at,
             started_at,
             finished_at,
             status,
@@ -2142,6 +2178,7 @@ def write_run_history(
         (
             %(assignment_id)s,
             %(task_id)s,
+            %(scheduled_at)s,
             %(started_at)s,
             %(finished_at)s,
             %(status)s,
@@ -2156,6 +2193,7 @@ def write_run_history(
     params = {
         "assignment_id": task["assignment_id"],
         "task_id": task["task_id"],
+        "scheduled_at": task.get("scheduled_at"),
         "started_at": started_at,
         "finished_at": finished_at,
         "status": status,

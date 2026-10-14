@@ -1,18 +1,21 @@
-"""Keystone Agent (ADR-0015): long-running service that schedules jobs and runs the worker.
+"""Keystone Agent (ADR-0015): long-running service that schedules jobs and runs them.
 
 Like SQL Server Agent it runs independently of any user interface; run it under
 systemd or as a Windows service. All state lives in the repository, so a
-restart continues where it stopped.
+restart continues where it stopped. More agents can run side by side: only one
+schedules (advisory lock), all of them take work from the shared queue.
 
-    python -m repository.agent.agent [--poll-seconds 10]
+    python -m repository.agent.agent [--max-workers 20] [--poll-seconds 10]
 """
 
 import argparse
+from datetime import datetime, timezone
 import signal
 import threading
 import uuid
 
 from repository.agent.jobs import SCHEDULED_JOB_TYPES
+from repository.agent.pool import DEFAULT_MAX_WORKERS, WorkerPool
 from repository.agent.scheduler import Scheduler, try_acquire_scheduler_lock
 from repository.common.logging_config import configure_logging, get_logger
 from repository.worker import worker
@@ -21,16 +24,18 @@ from repository.worker import worker
 logger = get_logger("agent")
 
 DEFAULT_POLL_SECONDS = 10
+MIN_SLEEP_SECONDS = 0.05
 
 
 class Agent:
-    """One cycle = schedule due jobs (if we hold the scheduler lock) + drain the queue."""
+    """Scheduler thread (only the lock holder schedules) + continuous worker pool."""
 
-    def __init__(self, connect, adapters, run_worker, poll_seconds=DEFAULT_POLL_SECONDS,
+    def __init__(self, connect, adapters, pool, poll_seconds=DEFAULT_POLL_SECONDS,
                  clock=None):
         self.connect = connect
-        self.scheduler = Scheduler(adapters, clock=clock)
-        self.run_worker = run_worker
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.scheduler = Scheduler(adapters, clock=self.clock)
+        self.pool = pool
         self.poll_seconds = poll_seconds
         self.stop_event = threading.Event()
         self._lock_conn = None
@@ -66,33 +71,49 @@ class Agent:
             except Exception:
                 pass
 
-    def run_cycle(self):
-        """Schedule (only the lock holder), then run queued work; errors never stop the agent."""
-        if self.holds_scheduler_lock():
-            try:
-                with self.connect() as conn:
-                    self.scheduler.tick(conn)
-            except Exception:
-                logger.error("Scheduling pass failed.", exc_info=True)
+    def schedule_once(self):
+        """One scheduling pass; returns seconds to sleep until the next slot (max poll)."""
+        if not self.holds_scheduler_lock():
+            return self.poll_seconds
 
         try:
-            self.run_worker()
+            with self.connect() as conn:
+                if self.scheduler.tick(conn):
+                    self.pool.wake()
         except Exception:
-            logger.error("Worker pass failed.", exc_info=True)
+            logger.error("Scheduling pass failed.", exc_info=True)
+            return self.poll_seconds
 
-    def run_forever(self):
-        logger.info("Keystone Agent started (poll every %s s).", self.poll_seconds,
-                    extra={"keystone_event": True})
+        next_wake = self.scheduler.next_wake_at
+        if next_wake is None:
+            return self.poll_seconds
+        seconds = (next_wake - self.clock()).total_seconds() + MIN_SLEEP_SECONDS
+        return min(max(seconds, MIN_SLEEP_SECONDS), self.poll_seconds)
+
+    def _scheduler_loop(self):
         try:
             while not self.stop_event.is_set():
-                self.run_cycle()
-                self.stop_event.wait(self.poll_seconds)
+                self.stop_event.wait(self.schedule_once())
         finally:
             self._release_lock()
+
+    def run_forever(self):
+        logger.info("Keystone Agent started (max %s workers, poll %s s).",
+                    self.pool.max_workers, self.poll_seconds,
+                    extra={"keystone_event": True})
+        scheduler_thread = threading.Thread(target=self._scheduler_loop,
+                                            name="keystone-scheduler", daemon=True)
+        scheduler_thread.start()
+        try:
+            self.pool.run(self.stop_event, self.poll_seconds)
+        finally:
+            self.stop_event.set()
+            scheduler_thread.join(timeout=30)
             logger.info("Keystone Agent stopped.", extra={"keystone_event": True})
 
     def stop(self, *_):
         self.stop_event.set()
+        self.pool.wake()
 
 
 def parse_args(argv=None):
@@ -100,20 +121,29 @@ def parse_args(argv=None):
         prog="python -m repository.agent.agent",
         description="Keystone Agent: scheduler and worker service.",
     )
+    parser.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS,
+                        help=f"tasks running in parallel (default: {DEFAULT_MAX_WORKERS})")
     parser.add_argument("--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS,
-                        help=f"seconds between cycles (default: {DEFAULT_POLL_SECONDS})")
-    return parser.parse_args(argv)
+                        help=f"max seconds between queue checks (default: {DEFAULT_POLL_SECONDS})")
+    args = parser.parse_args(argv)
+    if args.max_workers < 1:
+        parser.error("--max-workers must be at least 1")
+    return args
 
 
 def main(argv=None):
     args = parse_args(argv)
     configure_logging("agent", connect=worker.connect_repository)
 
-    worker_id = f"agent-{uuid.uuid4()}"
+    pool = WorkerPool(
+        connect=worker.connect_repository,
+        worker_id=f"agent-{uuid.uuid4()}",
+        max_workers=args.max_workers,
+    )
     agent = Agent(
         connect=worker.connect_repository,
         adapters=SCHEDULED_JOB_TYPES,
-        run_worker=lambda: worker.run_once(worker_id=worker_id, quiet_when_idle=True),
+        pool=pool,
         poll_seconds=args.poll_seconds,
     )
 
