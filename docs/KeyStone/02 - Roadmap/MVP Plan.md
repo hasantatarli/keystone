@@ -27,9 +27,13 @@ This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMEN
 
 Design constraint from Phase 1: collectors remain plain SQL so the offline bundle can be generated from them. Collection logic must not move into Python worker code.
 
-### Phase 1 — Manual Assessment
+### Phase 1 — Scheduling and Manual Assessment
 
-- **One-command health check:** run a set of assessments against a target and collect the required evidence first, through the existing execution engine. Replaces the manual queue / worker / engine sequence.
+Order revised on 2026-10-14 (ADR-0015): scheduling comes first, because the manual health check is the same pipeline triggered once.
+
+- **Collector scheduler:** turn `SCHEDULED` collector assignments into queued work at their interval; default intervals from collector header metadata.
+- **Assessment schedule:** `keystone.assessment_schedule` (assessment, target, interval in seconds, enabled) with default intervals in the Dictionary; the scheduler runs due assessments. Warning when a collector interval exceeds a dependent rule's freshness limit.
+- **One-command health check:** queue the required collectors once, let the worker drain them, run the assessments. Replaces the manual queue / worker / engine sequence.
 - **Report:** a readable health check report generated from a run: coverage, healthy areas, findings, insufficient evidence, recommendations.
   - **Language (decided 2026-10-14):** the report frame (headings, summary, section labels such as healthy areas and areas not assessed) is produced in Turkish and English; rule finding and recommendation texts remain English in the Dictionary for now. Turkey is the initial market; a multilingual Dictionary is added when a real customer needs translated rule texts. The report generator must not hard-code a single language.
 
@@ -39,11 +43,10 @@ Design constraint from Phase 1: collectors remain plain SQL so the offline bundl
   - **Data minimisation:** query text (`pg_stat_activity.query`) is excluded by default and only included on request. The bundle carries the Keystone version and collector checksums.
   - **Known limits:** no host evidence (those checks become INSUFFICIENT_EVIDENCE); large results must be saved to a file, not copied from the grid.
 
-Outcome: a usable one-off health check for a prospective customer, with or without a live Keystone connection.
+Outcome: Keystone collects and assesses on its own schedule, and a one-off health check for a prospective customer works with or without a live Keystone connection.
 
 ### Phase 2 — Continuous Assessment
 
-- **Scheduler:** turn `SCHEDULED` collector assignments into queued work at their interval; run assessments after relevant evidence arrives.
 - **Finding lifecycle:** recognise that a condition is the same across runs (new, ongoing, escalated, resolved) instead of creating a new finding every run.
 - **Finding-driven notification:** notify the engineer when findings appear, escalate, resolve or when evidence becomes insufficient (ADR-0013).
 

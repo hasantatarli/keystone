@@ -163,7 +163,7 @@ A lab regression currently requires inserting a queue row, running the worker an
 
 ## Active Work
 
-Current checkpoint: the five-rule Engineering Intelligence engine is regression-tested in the lab and covered by automated tests; next is MVP Plan Phase 0.
+Current checkpoint: MVP Plan Phase 0 complete; next is Phase 1 (scheduling, then the one-command health check and report).
 
 Done:
 
@@ -175,14 +175,18 @@ Done:
 - Product direction and MVP Plan recorded in the documentation vault (Product Strategy → Usage Scenarios, ADR-0013, MVP Plan).
 - Engineering Intelligence Rule Catalog: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`.
 
-Immediate work sequence (MVP Plan, Phase 0 — design agreed 2026-10-14 in ADR-0014):
+Phase 0 is complete (2026-10-14): assessment results and rule-level failure isolation (V023), evaluation time parameter, shared logging with `keystone.event_log` (V024), concise code hints.
 
-1. `keystone.assessment_result`: one row per evaluated rule with outcome HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE / ERROR, `max_severity`, `finding_count`, `reason`. Resolves issues 2 and 8.
-2. Rule-level failure isolation: a failing rule records ERROR and the others continue; run status PARTIAL; engine failure ends FAILED and stays persisted. Resolves issue 1 (lost runs, likely run 16).
-3. Evaluation time as a parameter (live: now; offline bundles: capture time).
-4. Shared logging configuration (rotating file + `keystone.event_log` for WARNING and above via a separate autocommit connection); assessment engine uses it. Worker follows in Phase 2.
+Next (MVP Plan Phase 1, design in ADR-0015):
 
-Then Phase 1 (one-command health check and report) and Phase 2 (scheduler, finding lifecycle, finding-driven notification). The threshold model is revisited with the first rule that needs multiple parameters.
+1. Collector scheduler: queue due `SCHEDULED` assignments; default intervals from collector header metadata.
+2. `keystone.assessment_schedule` and scheduled assessment runs; interval vs. freshness warning.
+3. One-command health check (queue required collectors once, drain, assess).
+4. HTML report (Turkish/English frame).
+
+Hardening backlog:
+
+- Collector target sessions: short `lock_timeout`; shorter `statement_timeout` for `PG_TABLE_CAPACITY` (relation size functions take AccessShareLock on every relation; a concurrent DDL would queue other sessions behind it). Values to be decided from field experience.
 
 Planned, not blocking the MVP engine:
 
