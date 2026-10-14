@@ -191,6 +191,7 @@ Next (MVP Plan Phase 1, design in ADR-0015):
 
 Hardening backlog:
 
+- Silent network loss to a target during a query: the worker waits on the socket forever while its heartbeat thread keeps the task alive, so the assignment never runs again. Planned: TCP keepalives on target connections and an absolute per-task deadline that stops the heartbeat. To be discussed before implementation (2026-10-14).
 - Collector target sessions: short `lock_timeout`; shorter `statement_timeout` for `PG_TABLE_CAPACITY` (relation size functions take AccessShareLock on every relation; a concurrent DDL would queue other sessions behind it). Values to be decided from field experience.
 
 Planned, not blocking the MVP engine:
