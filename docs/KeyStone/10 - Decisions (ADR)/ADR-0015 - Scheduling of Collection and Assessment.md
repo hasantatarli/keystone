@@ -36,6 +36,18 @@ All intervals are stored as seconds in the database, like `max_age_seconds`. Uni
 
 When a collector interval is longer than the freshness limit of a rule that depends on that collector's evidence, the rule will usually end INSUFFICIENT_EVIDENCE. Saving such a configuration produces a warning; it is not blocked.
 
+### Execution: Keystone Agent
+
+Schedules are executed by the Keystone Agent, a long-running service like SQL Server Agent, independent of any user interface (not a web-hosted job runner, which stops when its host recycles).
+
+- **Generic scheduler, job adapters.** The scheduler only decides *when*; each job type (collector assignments now, assessment schedules next) is an adapter that lists its items with their last run and knows how to start one.
+- **Fixed grid.** Items run on a clock-aligned grid: a 60 s item at every full minute, a 3600 s item at every full hour. Start times do not drift with run duration.
+- **Missed slots are skipped.** A slot that begins while the previous run is still going (or still queued) is not run; the item waits for the next slot. A failed run counts as a run.
+- **No catch-up after downtime.** When the agent comes back, an overdue item runs once immediately, then returns to the grid.
+- **Parallel execution with two limits.** A continuous worker pool runs tasks in parallel (agent parameter, default 20); a freed slot takes the next task at once. Each target has `max_concurrent_tasks` (default 3), because every task opens a connection to the monitored database: tasks of one target queue up, tasks of different targets run in parallel.
+- **Scale out, not up.** More agents can run side by side on other machines: only one schedules (advisory lock), all take work from the shared queue. Schedule lag (`started_at - scheduled_at`) is recorded and logged when it grows; that is the signal to add an agent.
+- **Later: worker pools.** When other database types or customer-network agents arrive, an agent will declare which work it can take (provider, network) and claim only that. Not built now; nothing in the current design prevents it.
+
 ### Out of scope for now
 
 - Time windows (for example, run only at night) and event-triggered assessments. Simple intervals are sufficient for the MVP; both can be added as columns later.
@@ -44,6 +56,7 @@ When a collector interval is longer than the freshness limit of a rule that depe
 ## Consequences
 
 - One scheduler loop can serve both collector assignments and assessment schedules.
+- Capacity grows by adding agents; the per-target limit keeps load on customer databases bounded regardless of how many agents run.
 - Manual and continuous assessment share code, history and failure handling.
 - Different environments can be tuned without code changes; the web interface edits rows only.
 - Defaults must be maintained with each new collector (header metadata) and assessment (migration).
