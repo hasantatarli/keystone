@@ -34,7 +34,8 @@ class Agent:
                  clock=None):
         self.connect = connect
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.scheduler = Scheduler(adapters, clock=self.clock)
+        self.adapters = list(adapters)
+        self.scheduler = Scheduler(self.adapters, clock=self.clock)
         self.pool = pool
         self.poll_seconds = poll_seconds
         self.stop_event = threading.Event()
@@ -53,6 +54,7 @@ class Agent:
                 self._lock_conn = conn
                 logger.info("Scheduler lock acquired; this agent schedules jobs.",
                             extra={"keystone_event": True})
+                self._start_adapters()
                 return True
 
             conn.close()
@@ -62,6 +64,16 @@ class Agent:
             logger.warning("Scheduler lock session lost; will retry.", exc_info=True)
             self._release_lock()
             return False
+
+    def _start_adapters(self):
+        """Run each adapter's start hook; a failing hook does not stop scheduling."""
+        for adapter in self.adapters:
+            try:
+                with self.connect() as conn:
+                    adapter.on_start(conn)
+                    conn.commit()
+            except Exception:
+                logger.error("Start hook of %s failed.", adapter.job_type, exc_info=True)
 
     def _release_lock(self):
         conn, self._lock_conn = self._lock_conn, None
@@ -109,6 +121,8 @@ class Agent:
         finally:
             self.stop_event.set()
             scheduler_thread.join(timeout=30)
+            for adapter in self.adapters:
+                adapter.shutdown()
             logger.info("Keystone Agent stopped.", extra={"keystone_event": True})
 
     def stop(self, *_):

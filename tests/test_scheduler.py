@@ -178,6 +178,30 @@ class SchedulerRuleTests(unittest.TestCase):
         self.assertEqual(adapter.runs, [self.at(37)])
         self.assertEqual(adapter.planned, [self.at(37)])   # late: planned "now", not 12:00
 
+    def test_slot_start_with_offset(self):
+        now = datetime(2026, 10, 14, 12, 34, 56, tzinfo=timezone.utc)
+        self.assertEqual(slot_start(now, 60, 30), now.replace(second=30))
+        early = now.replace(second=10)
+        self.assertEqual(slot_start(early, 60, 30), now.replace(minute=33, second=30))
+
+    def test_item_with_offset_runs_after_the_boundary(self):
+        clock = self.clock
+
+        class OffsetAdapter(FakeAdapter):
+            def list_items(self, conn):
+                return [ScheduledItem("FAKE", ("o",), 60, self.history, self.finished,
+                                      offset_seconds=30)]
+
+        adapter = OffsetAdapter(clock)
+        adapter.history = adapter.finished = T0 - timedelta(seconds=10)   # 11:59:50
+        scheduler = Scheduler([adapter], clock=clock)
+
+        self.tick(scheduler, 29)          # 12:00:29
+        self.assertEqual(adapter.runs, [])
+        self.tick(scheduler, 1)           # 12:00:30
+        self.assertEqual(adapter.planned, [self.at(30)])
+        self.assertEqual(scheduler.next_wake_at, self.at(90))
+
     def test_next_wake_is_the_next_slot_boundary(self):
         scheduler = Scheduler([self.adapter(interval=60)], clock=self.clock)
         self.tick(scheduler, 10)

@@ -137,6 +137,7 @@ def create_assessment_run(
     assessment_id,
     target_id,
     started_at,
+    scheduled_at=None,
 ):
     with conn.cursor() as cur:
         cur.execute(
@@ -146,10 +147,12 @@ def create_assessment_run(
                 assessment_id,
                 target_id,
                 started_at,
+                scheduled_at,
                 status
             )
             VALUES
             (
+                %s,
                 %s,
                 %s,
                 %s,
@@ -161,6 +164,7 @@ def create_assessment_run(
                 assessment_id,
                 target_id,
                 started_at,
+                scheduled_at,
             ),
         )
 
@@ -893,11 +897,13 @@ def run_assessment(
     assessment_key,
     target_id,
     evaluation_time=None,
+    scheduled_at=None,
 ):
     """Run all enabled rules of one assessment for one target; returns run id.
 
     One transaction per rule: a failing rule becomes ERROR, others continue
-    (run PARTIAL). evaluation_time defaults to now. Details: ADR-0014.
+    (run PARTIAL). evaluation_time defaults to now; scheduled_at is set by
+    the agent for scheduled runs. Details: ADR-0014, ADR-0015.
     """
     if evaluation_time is None:
         evaluation_time = datetime.now(timezone.utc)
@@ -911,6 +917,7 @@ def run_assessment(
         assessment["assessment_id"],
         target_id,
         datetime.now(timezone.utc),
+        scheduled_at,
     )
     conn.commit()
     logger.info("Assessment Run ID: %s", assessment_run_id)
