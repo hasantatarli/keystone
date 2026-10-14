@@ -101,9 +101,9 @@ Controlled evidence means rows named `keystone_test_*` were inserted into the la
 
 Runs are started with `python -m repository.intelligence.assessment_engine --assessment <assessment_key> --target <target_id>`; without arguments the engine runs `PG_CONNECTION_HEALTH` for target 1.
 
-Keystone Agent (ADR-0015): `python -m repository.agent.agent [--poll-seconds 10]` runs continuously: every cycle it queues due `SCHEDULED` collector assignments (only the instance holding the scheduler advisory lock) and drains the queue with the worker. Stop with Ctrl+C or SIGTERM. Linux service example: `deploy/systemd/keystone-agent.service`. `python -m repository.worker.worker` still drains the queue once and exits.
+Keystone Agent (ADR-0015): `python -m repository.agent.agent [--max-workers 20] [--poll-seconds 10]` runs continuously. The agent holding the scheduler advisory lock queues `SCHEDULED` collector assignments on a clock-aligned grid (a slot missed by a long run is skipped; one catch-up run after downtime); every agent runs queued tasks in a continuous pool, limited per target by `target.max_concurrent_tasks` (V025). Schedule lag is in `collector_run_history.scheduled_at` vs `started_at`. Stop with Ctrl+C or SIGTERM. Linux service example: `deploy/systemd/keystone-agent.service`. `python -m repository.worker.worker` still drains the queue once and exits.
 
-Technical logs (ADR-0014): the engine writes its console output also to `logs/assessment_engine.log` (rotating; directory overridable with `KEYSTONE_LOG_DIR`), and WARNING and above to `keystone.event_log`:
+Technical logs (ADR-0014): engine, agent and worker write their console output also to `logs/<component>.log` (rotating; directory overridable with `KEYSTONE_LOG_DIR`), and WARNING and above to `keystone.event_log`. The worker logs one line per task start and end; collected rows only at DEBUG (`KEYSTONE_LOG_LEVEL=DEBUG`; PowerShell: `$env:KEYSTONE_LOG_LEVEL = "DEBUG"`):
 
 `SELECT logged_at, level, component, message, context FROM keystone.event_log ORDER BY logged_at DESC LIMIT 20;`
 
@@ -179,12 +179,15 @@ Done:
 
 Phase 0 is complete (2026-10-14): assessment results and rule-level failure isolation (V023), evaluation time parameter, shared logging with `keystone.event_log` (V024), concise code hints.
 
+Phase 1, step 1 done (2026-10-14, PR #11, #12, lab-verified): Keystone Agent with generic scheduler and collector scheduling; fixed grid, continuous pool, per-target limit and schedule lag (V025); worker logging through the shared logger.
+
 Next (MVP Plan Phase 1, design in ADR-0015):
 
-1. Collector scheduler: queue due `SCHEDULED` assignments; default intervals from collector header metadata.
-2. `keystone.assessment_schedule` and scheduled assessment runs; interval vs. freshness warning.
+1. `keystone.assessment_schedule` and scheduled assessment runs (AssessmentJobs adapter); default intervals in the Dictionary; interval vs. freshness warning.
+2. Default collector intervals from collector header metadata.
 3. One-command health check (queue required collectors once, drain, assess).
 4. HTML report (Turkish/English frame).
+5. Windows service setup for the agent.
 
 Hardening backlog:
 
