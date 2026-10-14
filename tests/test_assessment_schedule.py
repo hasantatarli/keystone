@@ -216,6 +216,18 @@ class AssessmentScheduleTests(unittest.TestCase):
             (run_id,)).fetchone()["scheduled_at"]
         self.assertEqual(stored, planned)
 
+    def test_engine_logs_one_summary_line_per_run_at_info(self):
+        from repository.intelligence import assessment_engine
+        with self.assertLogs("keystone.assessment_engine", level="INFO") as logs:
+            run_id = assessment_engine.run_assessment(
+                self.conn, "PG_TRANSACTION_HEALTH", self.target_id)
+
+        info = [r.getMessage() for r in logs.records if r.levelname == "INFO"]
+        self.assertEqual(info, [
+            f"Assessment run {run_id} PG_TRANSACTION_HEALTH on target {self.target_id}"
+            " -> SUCCESS: 3 INSUFFICIENT_EVIDENCE"
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

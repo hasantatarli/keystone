@@ -2,6 +2,7 @@
 # Imports
 # -----------------------------------------------------------------------------
 import argparse
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -805,9 +806,9 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
             f"No evidence requirements defined for rule: {rule['rule_key']}"
         )
 
-    logger.info("Evidence requirements:")
+    logger.debug("Evidence requirements:")
     for requirement in evidence_requirements:
-        logger.info("%s", requirement)
+        logger.debug("%s", requirement)
 
     # MVP evaluators currently consume one evidence row-set. Keep evidence
     # loading and freshness checks generic so new rules do not add branches
@@ -909,8 +910,8 @@ def run_assessment(
         evaluation_time = datetime.now(timezone.utc)
 
     assessment = load_assessment(conn, assessment_key)
-    logger.info("Assessment:")
-    logger.info("%s", assessment)
+    logger.debug("Assessment:")
+    logger.debug("%s", assessment)
 
     assessment_run_id = create_assessment_run(
         conn,
@@ -920,7 +921,7 @@ def run_assessment(
         scheduled_at,
     )
     conn.commit()
-    logger.info("Assessment Run ID: %s", assessment_run_id)
+    logger.debug("Assessment Run ID: %s", assessment_run_id)
 
     try:
         rules = load_rules(conn, assessment["assessment_id"])
@@ -929,10 +930,11 @@ def run_assessment(
         # One evidence load per source per run, shared by all rules.
         evidence_cache = {}
         error_count = 0
+        outcome_counts = {}
 
         for rule in rules:
-            logger.info("")
-            logger.info("Evaluating %s - %s", rule["rule_key"], rule["name"])
+            logger.debug("")
+            logger.debug("Evaluating %s - %s", rule["rule_key"], rule["name"])
 
             try:
                 with conn.transaction():
@@ -951,7 +953,7 @@ def run_assessment(
                             rule,
                             finding,
                         )
-                        logger.info(
+                        logger.debug(
                             "Finding %s: %s - %s",
                             finding_id,
                             finding["severity"],
@@ -1002,7 +1004,8 @@ def run_assessment(
                         evaluation_time,
                     )
 
-            logger.info(
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+            logger.debug(
                 "Outcome: %s%s",
                 outcome,
                 f" ({reason})" if reason else "",
@@ -1032,11 +1035,15 @@ def run_assessment(
         )
         raise
 
-    logger.info("")
+    # One line per run: parallel runs in the agent cannot interleave it.
     logger.info(
-        "Assessment Run %s completed with status %s.",
+        "Assessment run %s %s on target %s -> %s: %s",
         assessment_run_id,
+        assessment_key,
+        target_id,
         status,
+        ", ".join(f"{count} {name}" for name, count in sorted(outcome_counts.items()))
+        or "no rules",
     )
 
     return assessment_run_id
@@ -1074,6 +1081,8 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     configure_logging("assessment_engine", connect=connect_repository)
+    # A manual run shows rule-by-rule detail; the agent logs one line per run.
+    logger.setLevel(logging.DEBUG)
 
     with connect_repository() as conn:
         run_assessment(
