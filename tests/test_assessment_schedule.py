@@ -144,9 +144,11 @@ class AssessmentScheduleTests(unittest.TestCase):
         jobs = AssessmentJobs(connect=self.connect, run_assessment=fake_run)
         self.addCleanup(jobs.shutdown)
         self.addCleanup(release.set)
-        scheduler = Scheduler([jobs])
+        # Exactly on a slot (hh:m0:30): no catch-up, so only on-time runs start.
+        slot = datetime(2026, 10, 14, 12, 0, 30, tzinfo=timezone.utc)
+        scheduler = Scheduler([jobs], clock=lambda: slot)
 
-        dispatched = scheduler.tick(self.conn)          # never ran: all due now
+        dispatched = scheduler.tick(self.conn)
         self.assertEqual(len(dispatched), 3)
 
         deadline = time.monotonic() + 5
@@ -156,7 +158,16 @@ class AssessmentScheduleTests(unittest.TestCase):
 
         # Still running: listed as busy, not dispatched again.
         self.assertTrue(all(item.is_busy for item in jobs.list_items(self.conn)))
+        self.assertEqual({c[2] for c in calls}, {slot})
         self.conn.commit()
+
+    def test_assessments_do_not_catch_up_after_start(self):
+        self.apply_defaults()
+        late = datetime(2026, 10, 14, 12, 2, 37, tzinfo=timezone.utc)   # slot 12:00:30
+        jobs = AssessmentJobs(run_assessment=lambda *a, **k: None)
+        self.addCleanup(jobs.shutdown)
+
+        self.assertEqual(Scheduler([jobs], clock=lambda: late).tick(self.conn), [])
 
     def test_last_run_comes_from_assessment_run(self):
         self.apply_defaults()

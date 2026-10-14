@@ -30,6 +30,7 @@ class ScheduledItem:
     last_finished_at: datetime = None         # finish of that same run
     is_busy: bool = False                     # queued or running right now
     offset_seconds: int = 0                   # run this long after each slot
+    catch_up: bool = True                     # run once at once when overdue
     payload: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -64,7 +65,8 @@ class Scheduler:
     Rules: items run on a fixed grid (every interval, aligned to the clock);
     a slot that began while the previous run was still going is skipped;
     a failed run counts as run; after downtime an item runs once at once
-    (no catch-up of every missed slot); an in-memory dispatch time covers
+    (no catch-up of every missed slot), unless catch_up is off: then it
+    waits for the next slot; an in-memory dispatch time covers
     the case where the run could not be recorded in the repository.
     """
 
@@ -89,11 +91,12 @@ class Scheduler:
     def is_due(self, item, now):
         if item.is_busy:
             return False
+        slot = slot_start(now, item.interval_seconds, item.offset_seconds)
+        if not item.catch_up and now - slot > self.grace:
+            return False                # no catch-up: wait for the next slot
         started, finished = self.last_run(item)
         if started is None:
             return True
-
-        slot = slot_start(now, item.interval_seconds, item.offset_seconds)
         # Already ran in this slot, or the slot began while the previous run was busy.
         return started < slot and finished <= slot
 
@@ -101,7 +104,7 @@ class Scheduler:
         """The slot start when on time; now for a first run or a late catch-up."""
         slot = slot_start(now, item.interval_seconds, item.offset_seconds)
         started, _ = self.last_run(item)
-        if started is None or now - slot > self.grace:
+        if item.catch_up and (started is None or now - slot > self.grace):
             return now
         return slot
 

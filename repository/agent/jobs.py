@@ -167,6 +167,7 @@ class AssessmentJobs(JobAdapter):
                 key=key,
                 interval_seconds=_value(row, "interval_seconds", 2),
                 offset_seconds=_value(row, "offset_seconds", 3),
+                catch_up=False,         # evidence of this slot is not collected yet
                 last_started_at=_value(row, "last_started_at", 4),
                 last_finished_at=_value(row, "last_finished_at", 5),
                 is_busy=busy,
