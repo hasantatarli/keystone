@@ -191,7 +191,8 @@ Next (MVP Plan Phase 1, design in ADR-0015):
 
 Hardening backlog:
 
-- Silent network loss to a target during a query: the worker waits on the socket forever while its heartbeat thread keeps the task alive, so the assignment never runs again. Planned: TCP keepalives on target connections and an absolute per-task deadline that stops the heartbeat. To be discussed before implementation (2026-10-14).
+- Silent network loss to a target during a query: the worker waits on the socket forever while its heartbeat thread keeps the task alive, so the assignment never runs again. Agreed (2026-10-14): (1) TCP keepalives on target connections, window about 2-3 minutes, so short network blips do not end a task; (2) no hard deadline (threads cannot be killed; long legitimate work must not be cut): a task running longer than 3x the median duration of its last 20 successful runs (minimum 2 minutes) logs one WARNING to event_log and is left for manual check; fixed default 10 minutes until 5 successful runs exist; optional per-assignment expected maximum duration overrides the calculated threshold.
+- Later (Engineering Intelligence): known activity windows, for example a weekend backup, as context so that long runs inside them are not reported. Related to the deferred time windows in ADR-0015.
 - Collector target sessions: short `lock_timeout`; shorter `statement_timeout` for `PG_TABLE_CAPACITY` (relation size functions take AccessShareLock on every relation; a concurrent DDL would queue other sessions behind it). Values to be decided from field experience.
 
 Planned, not blocking the MVP engine:
