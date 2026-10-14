@@ -1,32 +1,6 @@
-"""Shared technical logging for Keystone components (ADR-0014).
+"""Shared logging (ADR-0014): console + rotating file, WARNING+ also to event_log.
 
-Two layers:
-
-- Every record goes to the console (message only, as before) and to a rotating
-  log file per component (with timestamp, level and logger). The file works
-  even when the repository database is unreachable.
-- Significant records (WARNING and above, or records explicitly marked as
-  events) are also written to keystone.event_log so they can be queried and
-  later shown in the user interface.
-
-The repository handler uses its own autocommit connection. An event is
-therefore never rolled back together with the failed work it describes (the
-reason assessment runs used to disappear). If the repository cannot be
-written, the handler drops that copy silently and retries with a fresh
-connection next time; the file still has the record and the application keeps
-running.
-
-Business events (collector runs, assessment runs and results, findings) are
-not logged here; they live in their own tables.
-
-Usage:
-
-    from repository.common.logging_config import configure_logging, get_logger
-
-    configure_logging("assessment_engine", connect=connect_repository)
-    logger = get_logger("assessment_engine")
-    logger.warning("Rule failed", extra={"context": {"rule_key": "PG-TRAN-001"}})
-    logger.info("Worker started", extra={"keystone_event": True})
+Usage: configure_logging("worker", connect=...); get_logger("worker").warning(...)
 """
 
 import json
@@ -54,12 +28,9 @@ def get_logger(name):
 
 
 class RepositoryEventHandler(logging.Handler):
-    """Write significant log records to keystone.event_log.
+    """Writes WARNING+ (or extra={"keystone_event": True}) to keystone.event_log.
 
-    A record is significant when its level is at least `threshold` or when it
-    was logged with extra={"keystone_event": True} (for example component
-    start and stop). Optional structured identifiers can be passed as
-    extra={"context": {...}} and are stored as JSONB.
+    Own autocommit connection, so events survive the caller's rollback.
     """
 
     def __init__(self, component, connect, threshold=logging.WARNING):
@@ -125,8 +96,7 @@ class RepositoryEventHandler(logging.Handler):
                 ),
             )
         except Exception as exc:
-            # Logging must never break the application. The file handler has
-            # the record; retry with a fresh connection on the next event.
+            # Never break the app: the file has the record; reconnect next time.
             self._discard_connection()
             if not self._failure_reported:
                 self._failure_reported = True
@@ -157,14 +127,9 @@ def configure_logging(
     level=logging.INFO,
     console=True,
 ):
-    """Configure the shared 'keystone' logger for one component.
+    """Set up console, logs/<component>.log and (if connect given) event_log.
 
-    component -- name used for the log file and event_log.component
-    connect   -- callable returning a repository connection; enables
-                 event_log. Without it only console and file are used.
-    log_dir   -- directory for log files; default KEYSTONE_LOG_DIR or ./logs
-
-    Calling it again replaces the previous configuration.
+    Safe to call again; replaces the previous setup.
     """
     shutdown_logging()
 

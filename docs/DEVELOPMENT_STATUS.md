@@ -225,4 +225,4 @@ Run the full test suite from the repository root before opening a code pull requ
 
 `python -B -m unittest discover -s tests -p "test_*.py" -v`
 
-Code should include concise comments/docstrings where they explain architectural intent, contracts, non-obvious behavior, or why a design choice exists. Avoid comments that merely restate obvious syntax.
+Code comments are short hints (1–2 lines) that say what a block does and point to where the reasoning lives (ADR, Rule Catalog), so someone editing by hand can orient quickly. Detailed rationale belongs in the documentation vault, not in docstrings. Avoid comments that merely restate obvious syntax.

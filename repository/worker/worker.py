@@ -18,6 +18,7 @@ from psycopg.errors import QueryCanceled
 from psycopg import OperationalError
 
 class TaskOwnershipLost(RuntimeError):
+    """Another worker took over the task (stale recovery); stop writing results."""
     pass
 
 # -----------------------------------------------------------------------------
@@ -48,6 +49,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # -----------------------------------------------------------------------------
 
 def connect_repository():
+    """Connection to the Keystone repository (KEYSTONE_REPOSITORY_* env vars)."""
     return psycopg.connect(
         **REPOSITORY_CONFIG,
         row_factory=dict_row
@@ -59,6 +61,7 @@ def connect_repository():
 # -----------------------------------------------------------------------------
 
 def connect_target(task, database_name=None):
+    """SQL connection to the target database; 300 s statement timeout."""
     password = resolve_password(task)
 
     conn=  psycopg.connect(
@@ -79,6 +82,7 @@ def connect_target(task, database_name=None):
     return conn
 
 def connect_ssh_target(task):
+    """SSH connection for SSH collectors (host keys auto-accepted for now)."""
     password = resolve_password(task)
 
     client = paramiko.SSHClient()
@@ -104,6 +108,7 @@ def connect_ssh_target(task):
 # -----------------------------------------------------------------------------
 
 def resolve_password(task):
+    """Decrypt the stored credential; only PASSWORD auth is supported."""
     auth_type = task["auth_type"].upper()
 
     if auth_type == "PASSWORD":
@@ -120,6 +125,7 @@ def resolve_password(task):
 # -----------------------------------------------------------------------------
 
 def calculate_checksum(file_path):
+    """SHA-256 of a collector file, compared with the registered checksum."""
     sha256 = hashlib.sha256()
 
     with file_path.open("rb") as file:
@@ -133,6 +139,7 @@ def calculate_checksum(file_path):
 # Queue Management
 # -----------------------------------------------------------------------------
 def claim_tasks(conn, worker_id, limit=5):
+    """Atomically claim due WAITING tasks (SKIP LOCKED) and return their full context."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -246,6 +253,7 @@ def claim_tasks(conn, worker_id, limit=5):
     return tasks
 
 def remove_task(conn, task_id, worker_id):
+    """Delete a finished task from the queue, only if this worker still owns it."""
     sql = """
         DELETE FROM keystone.collection_queue
         WHERE task_id = %(task_id)s
@@ -269,6 +277,7 @@ def remove_task(conn, task_id, worker_id):
     return deleted_count
 
 def get_stale_tasks(conn, stale_after_seconds=90):
+    """RUNNING tasks whose heartbeat is older than stale_after_seconds (for reporting)."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -299,6 +308,7 @@ def recover_stale_tasks(
     stale_after_seconds=90,
     max_retry_count=MAX_RETRY_COUNT
 ):
+    """Requeue stale RUNNING tasks, or mark RETRY_EXHAUSTED after max retries."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -421,6 +431,7 @@ def recover_stale_tasks(
 
 
 def update_task_heartbeat(task_id, worker_id):
+    """Refresh heartbeat_at so other workers know the task is alive."""
     with connect_repository() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -445,6 +456,7 @@ def heartbeat_loop(
     stop_event,
     interval_seconds=30
 ):
+    """Background thread: update the heartbeat every interval until stopped."""
     while not stop_event.wait(interval_seconds):
         try:
             update_task_heartbeat(
@@ -460,6 +472,7 @@ def heartbeat_loop(
 
 
 def verify_task_ownership(conn, task_id, worker_id):
+    """Lock the task row and check this worker still owns it."""
     sql = """
         SELECT task_id
         FROM keystone.collection_queue
@@ -485,6 +498,7 @@ def verify_task_ownership(conn, task_id, worker_id):
 # -----------------------------------------------------------------------------
 
 def execute_collector(task, target_conn):
+    """Verify the collector checksum, run its SQL on the target, return rows."""
     script_path = PROJECT_ROOT / task["script_file"]
 
     if not script_path.exists():
@@ -511,6 +525,7 @@ def execute_collector(task, target_conn):
         return cur.fetchall()
 
 def parse_host_snapshot_output(output):
+    """Turn the sectioned SSH host collector output into HOST/STORAGE rows."""
     sections = {}
     current_section = None
 
@@ -676,6 +691,7 @@ def parse_host_snapshot_output(output):
 
 
 def execute_ssh_collector(task):
+    """Verify checksum, run the shell collector over SSH, parse its output."""
     script_path = PROJECT_ROOT / task["script_file"]
 
     if not script_path.exists():
@@ -739,6 +755,7 @@ def execute_ssh_collector(task):
 
 
 def discover_databases(target_conn):
+    """Connectable, non-template databases for DATABASE-scoped fan-out."""
     sql = """
         SELECT
             oid AS database_oid,
@@ -754,6 +771,7 @@ def discover_databases(target_conn):
         return cur.fetchall()
 
 def execute_database_scoped_collector(task):
+    """Run the collector in every database; failures per database are collected, not fatal."""
     rows = []
     errors = []
 
@@ -822,6 +840,7 @@ def execute_database_scoped_collector(task):
 
 
 def save_instance_inventory(conn, task, rows):
+    """Persist PG_INSTANCE_INVENTORY rows."""
     if not rows:
         raise RuntimeError(
             "Instance Inventory collector returned no rows."
@@ -897,6 +916,7 @@ def save_instance_inventory(conn, task, rows):
     #conn.commit()
 
 def save_configuration_snapshot(conn, task, rows):
+    """Persist PG_CONFIGURATION_SNAPSHOT rows."""
     if not rows:
         raise RuntimeError(
             "Configuration Snapshot collector returned no rows."
@@ -959,6 +979,7 @@ def save_configuration_snapshot(conn, task, rows):
         cur.executemany(sql, data)    
 
 def save_database_snapshot(conn, task, rows):
+    """Persist PG_DATABASE_INVENTORY rows."""
     if not rows:
         raise RuntimeError(
             "Database Inventory & Capacity collector returned no rows."
@@ -1030,6 +1051,7 @@ def save_database_snapshot(conn, task, rows):
         cur.executemany(sql, data)
 
 def save_table_capacity_snapshot(conn, task, rows):
+    """Persist PG_TABLE_CAPACITY rows."""
     if not rows:
         return
 
@@ -1115,6 +1137,7 @@ def save_table_capacity_snapshot(conn, task, rows):
         cur.executemany(sql, params)
         
 def save_vacuum_analyze_snapshot(conn, task, rows):
+    """Persist PG_VACUUM_ANALYZE rows."""
     if not rows:
         return
 
@@ -1224,6 +1247,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
         cur.executemany(sql, data)
 
 def save_transaction_wraparound_snapshot(conn, task, rows):
+    """Persist PG_TRANSACTION_WRAPAROUND rows (database and relation level)."""
     if not rows:
         raise RuntimeError(
             "PG_TRANSACTION_WRAPAROUND collector returned no rows."
@@ -1376,6 +1400,7 @@ def save_transaction_wraparound_snapshot(conn, task, rows):
             )
 
 def save_replication_status_snapshot(conn, task, rows):
+    """Persist PG_REPLICATION_STATUS rows (system and per-replica)."""
     if not rows:
         raise RuntimeError(
             "PG_REPLICATION_STATUS collector returned no rows."
@@ -1529,6 +1554,7 @@ def save_replication_status_snapshot(conn, task, rows):
             )
 
 def save_replication_slot_snapshot(conn, task, rows):
+    """Persist PG_REPLICATION_SLOTS rows."""
     if not rows:
         return
 
@@ -1621,6 +1647,7 @@ def save_replication_slot_snapshot(conn, task, rows):
         )
 
 def save_connection_activity_snapshot(conn, task, rows):
+    """Persist PG_CONNECTION_ACTIVITY rows (SYSTEM / DATABASE / BREAKDOWN records)."""
     if not rows:
         return
 
@@ -1823,6 +1850,7 @@ def save_connection_activity_snapshot(conn, task, rows):
 
 
 def save_activity_snapshot(conn, task, rows):
+    """Persist PG_ACTIVITY_SNAPSHOT rows (one per session)."""
     if not rows:
         return
 
@@ -1952,6 +1980,7 @@ def save_activity_snapshot(conn, task, rows):
 # -----------------------------------------------------------------------------
 
 def save_host_snapshot(conn, task, rows):
+    """Persist PG_HOST_SNAPSHOT host and storage rows."""
     host_rows = [
         row
         for row in rows
@@ -2065,6 +2094,7 @@ COLLECTOR_HANDLERS = {
 }
 
 def persist_collector_result(conn, task, rows):
+    """Dispatch rows to the collector's save_* handler (COLLECTOR_HANDLERS)."""
     collector_key = task["collector_key"]
 
     handler = COLLECTOR_HANDLERS.get(collector_key)
@@ -2089,6 +2119,7 @@ def write_run_history(
     status_message=None,
     error_message=None
 ):
+    """Insert one keystone.collector_run_history row for a task execution."""
     execution_time_ms = int(
         (finished_at - started_at).total_seconds() * 1000
     )
@@ -2141,6 +2172,7 @@ def write_run_history(
     #conn.commit()
 
 def process_task(task):
+    """Run one claimed task end to end: execute, persist, history, dequeue; with heartbeat."""
     stop_heartbeat = threading.Event()
 
     heartbeat_thread = threading.Thread(
@@ -2557,6 +2589,7 @@ def finalize_failed_task(
     status_message,
     error_message
 ):
+    """Record a failed run in history and dequeue, if this worker still owns the task."""
     if not verify_task_ownership(
         conn,
         task["task_id"],
@@ -2595,6 +2628,7 @@ def finalize_failed_task(
 # Main
 # -----------------------------------------------------------------------------
 def main():
+    """Recover stale tasks, then claim and process tasks in parallel until the queue is empty."""
     print()
     print("Keystone Worker")
     print("===============")

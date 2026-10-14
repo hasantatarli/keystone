@@ -60,10 +60,12 @@ POSTGRESQL_COLLECTORS_DIR = (
 # -----------------------------------------------------------------------------
 
 def connect_repository():
+    """Connection to the Keystone repository (KEYSTONE_REPOSITORY_* env vars)."""
     return psycopg.connect(**DB_CONFIG)
 
 
 def run_bootstrap(conn):
+    """Create the minimum objects (schema, control, migration_history); idempotent."""
     print("Running repository bootstrap...")
 
     sql = BOOTSTRAP_FILE.read_text(encoding="utf-8")
@@ -81,6 +83,7 @@ def run_bootstrap(conn):
 # -----------------------------------------------------------------------------
 
 def get_successful_migrations(conn):
+    """Migrations already recorded as SUCCESS in migration_history."""
     sql = """
         SELECT component,
                migration_no,
@@ -103,12 +106,14 @@ def get_successful_migrations(conn):
 # -----------------------------------------------------------------------------
 
 def build_migration_pattern(prefix):
+    """File name pattern for one migration source, e.g. V001__name.sql."""
     return re.compile(
         rf"^{re.escape(prefix)}(?P<number>\d+)__(?P<name>.+)\.sql$",
         re.IGNORECASE
     )
 
 def calculate_checksum(file_path):
+    """SHA-256 of a file (recorded, not yet verified on later runs)."""
     sha256 = hashlib.sha256()
 
     with file_path.open("rb") as file:
@@ -118,9 +123,11 @@ def calculate_checksum(file_path):
     return sha256.hexdigest()
 
 def parse_metadata(file_path):
+    """Read the header fields (Migration No, Title, Description...) of a migration file."""
     content = file_path.read_text(encoding="utf-8")
 
     def get_value(field_name):
+        """Required header field value; raises if missing."""
         pattern = rf"^{re.escape(field_name)}\s*:\s*(.+)$"
         match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
 
@@ -163,9 +170,11 @@ def parse_metadata(file_path):
     }
 
 def parse_collector_metadata(file_path):
+    """Read the header fields (Key, Name, Execution Scope...) of a collector file."""
     content = file_path.read_text(encoding="utf-8")
 
     def get_value(field_name):
+        """Required header field value; raises if missing."""
         pattern = (
             rf"^\s*(?:#\s*)?"
             rf"{re.escape(field_name)}\s*:\s*(.+)$"
@@ -187,6 +196,7 @@ def parse_collector_metadata(file_path):
 
 
     def get_optional_value(field_name, default=None):
+        """Optional header field value with a default."""
         pattern = (
             rf"^\s*(?:#\s*)?"
             rf"{re.escape(field_name)}\s*:\s*(.+)$"
@@ -243,6 +253,7 @@ def parse_collector_metadata(file_path):
     }
 
 def discover_collectors():
+    """All collector files with their metadata and checksums."""
     collectors = []
 
     if not POSTGRESQL_COLLECTORS_DIR.exists():
@@ -280,6 +291,7 @@ def discover_collectors():
     return collectors
 
 def discover_migrations():
+    """All migration files; Core first, then providers, each in number order."""
     migrations = []
 
     for source in MIGRATION_SOURCES:
@@ -368,6 +380,7 @@ def discover_migrations():
 # -----------------------------------------------------------------------------
 
 def get_pending_migrations(discovered, successful):
+    """Discovered migrations not yet applied successfully."""
     successful_keys = {
         (
             row[0],  # component
@@ -398,6 +411,7 @@ def write_migration_history(
     status_message=None,
     error_message=None
 ):
+    """Record one migration execution (SUCCESS or FAILED)."""
     metadata = migration["metadata"]
 
     sql = """
@@ -451,6 +465,7 @@ def write_migration_history(
     #conn.commit()
 
 def execute_migration(conn, migration):
+    """Apply one migration + SUCCESS history in one transaction; on error roll back, record FAILED."""
     print()
     print(
         f"Executing {migration['version']} "
@@ -517,6 +532,7 @@ def execute_migration(conn, migration):
         return False
 
 def update_current_migration(conn, migration):
+    """Store the latest applied migration per component in keystone.control."""
     component = migration["component"]
 
     control_name = f"{component}.CurrentMigration"
@@ -568,6 +584,7 @@ def update_current_migration(conn, migration):
 # Collector Registration
 # -----------------------------------------------------------------------------
 def register_collectors(conn):
+    """Insert or update collector_definition rows from collector file metadata."""
     collectors = discover_collectors()
 
     sql = """
@@ -637,6 +654,7 @@ def register_collectors(conn):
 
 def main():
 
+    """Bootstrap, apply pending migrations in order (stop on first failure), register collectors."""
     print()
     print("Keystone Repository Installer")
     print("=============================")
