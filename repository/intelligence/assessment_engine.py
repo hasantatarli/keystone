@@ -139,6 +139,7 @@ def create_assessment_run(
     target_id,
     started_at,
     scheduled_at=None,
+    health_check_id=None,
 ):
     with conn.cursor() as cur:
         cur.execute(
@@ -149,10 +150,12 @@ def create_assessment_run(
                 target_id,
                 started_at,
                 scheduled_at,
+                health_check_id,
                 status
             )
             VALUES
             (
+                %s,
                 %s,
                 %s,
                 %s,
@@ -166,6 +169,7 @@ def create_assessment_run(
                 target_id,
                 started_at,
                 scheduled_at,
+                health_check_id,
             ),
         )
 
@@ -899,6 +903,7 @@ def run_assessment(
     target_id,
     evaluation_time=None,
     scheduled_at=None,
+    health_check_id=None,
 ):
     """Run all enabled rules of one assessment for one target; returns run id.
 
@@ -919,6 +924,7 @@ def run_assessment(
         target_id,
         datetime.now(timezone.utc),
         scheduled_at,
+        health_check_id,
     )
     conn.commit()
     logger.debug("Assessment Run ID: %s", assessment_run_id)
