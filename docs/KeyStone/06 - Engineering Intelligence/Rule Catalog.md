@@ -128,7 +128,7 @@ Detect client transactions that have been open for a long time, whatever the ses
 - Allow-listing of known long jobs is not supported; there are no per-target overrides yet.
 
 **Verification**  
-Unit tests: boundaries (1799.9 / 1800 / 3600 s), reversed threshold order, any non-aborted state measured, aborted / no-transaction / non-client excluded, transaction age vs. idle time. Clean-install contract updated. Lab verification pending.
+Unit tests: boundaries (1799.9 / 1800 / 3600 s), reversed threshold order, any non-aborted state measured, aborted / no-transaction / non-client excluded, transaction age vs. idle time. Clean-install contract updated. Lab 2026-10-14: WARNING at 1844.6 s with state active while PG-TRAN-001 reported nothing (session not idle).
 
 ---
 
