@@ -191,12 +191,15 @@ Phase 1, step 2 done (2026-10-14, PR #13, lab-verified): scheduled assessments (
 
 Hardening done (2026-10-14, PR #14, lab-verified): TCP keepalive on target connections; long-running task warning (V027, `expected_max_seconds`); per-database error text in run history.
 
-Next (MVP Plan Phase 1, design in ADR-0015):
+One-command health check done (2026-10-14, PR #15, lab-verified): `python -m repository.healthcheck.health_check --target <id>`; V028 (`health_check`, `health_check_collection`, `assessment_run.health_check_id`); SYSTEM target includes its NODE targets; first lab run collected 9 tasks in 4.5 s, all six rules evaluated.
 
-1. Default collector intervals from collector header metadata.
-2. One-command health check (queue required collectors once, drain, assess).
-3. HTML report (Turkish/English frame).
-4. Windows service setup for the agent.
+Next (MVP Plan Phase 1):
+
+1. HTML report from a health check (Turkish/English frame) — content and layout to be agreed first.
+2. Default collector intervals from collector header metadata.
+3. Windows service setup for the agent.
+
+Small gaps noted: `collector_assignment` has no creation time / creator (needed when the web interface edits assignments).
 
 Hardening backlog:
 

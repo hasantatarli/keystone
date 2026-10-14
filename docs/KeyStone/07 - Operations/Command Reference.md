@@ -134,7 +134,45 @@ The engine evaluates the evidence already in the repository; it does not collect
 
 ---
 
-## 6. Credential tool
+## 6. Health check (one-off)
+
+Collects the evidence the assessments need (plus report context: database inventory, instance inventory on every node, host snapshot where assigned), then runs the assessments and prints a summary. A SYSTEM target includes its NODE targets. Works with or without a running agent.
+
+```powershell
+python -m repository.healthcheck.health_check --target 1
+python -m repository.healthcheck.health_check --target 1 --assessment PG_TRANSACTION_HEALTH
+python -m repository.healthcheck.health_check --target 1 --wait-minutes 5     # per-collector wait limit (default 10)
+python -m repository.healthcheck.health_check --help
+```
+
+- Missing collector assignments are created as ON_DEMAND only when the target has a suitable connection; otherwise the collection is listed as NOT_COLLECTED with the reason.
+- A collector past the wait limit is not waited for (WAIT_LIMIT); the command still waits for it to end before exiting.
+
+```sql
+-- health checks of a target
+SELECT * FROM keystone.health_check WHERE target_id = 1 ORDER BY health_check_id DESC;
+
+-- what a health check collected
+SELECT c.collector_key, t.name, c.purpose, c.status, c.status_message, rh.rows_collected
+FROM keystone.health_check_collection c
+JOIN keystone.target t ON t.target_id = c.target_id
+LEFT JOIN keystone.collector_run_history rh ON rh.task_id = c.task_id
+WHERE c.health_check_id = <id>
+ORDER BY c.purpose DESC, c.collector_key, t.name;
+
+-- its rule outcomes
+SELECT ad.assessment_key, rd.rule_key, res.outcome, res.max_severity, res.reason
+FROM keystone.assessment_run ar
+JOIN keystone.assessment_definition ad ON ad.assessment_id = ar.assessment_id
+JOIN keystone.assessment_result res ON res.assessment_run_id = ar.assessment_run_id
+JOIN keystone.rule_definition rd ON rd.rule_id = res.rule_id
+WHERE ar.health_check_id = <id>
+ORDER BY ad.assessment_key, rd.rule_key;
+```
+
+---
+
+## 7. Credential tool
 
 Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.credential_data`. The password is typed hidden.
 
@@ -144,7 +182,7 @@ python -m repository.tools.encrypt_credential
 
 ---
 
-## 7. Tests
+## 8. Tests
 
 ```bash
 # all tests (needs PostgreSQL binaries for disposable test servers)
@@ -161,7 +199,7 @@ su pgtest -c "cd $PWD && KEYSTONE_TEST_PG_BIN=/usr/lib/postgresql/16/bin python3
 
 ---
 
-## 8. Configuration with SQL
+## 9. Configuration with SQL
 
 ### Collector schedules
 
@@ -223,7 +261,7 @@ SELECT * FROM keystone.schedule_consistency_warning WHERE target_id = 1;
 
 ---
 
-## 9. Checking what happened
+## 10. Checking what happened
 
 ```sql
 -- collector runs and start lag
@@ -264,4 +302,4 @@ ORDER BY logged_at DESC
 LIMIT 50;
 ```
 
-Log files: `logs/agent.log`, `logs/worker.log`, `logs/assessment_engine.log` (or under `KEYSTONE_LOG_DIR`).
+Log files: `logs/agent.log`, `logs/worker.log`, `logs/assessment_engine.log`, `logs/health_check.log` (or under `KEYSTONE_LOG_DIR`).
