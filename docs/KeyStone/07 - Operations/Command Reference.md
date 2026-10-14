@@ -185,6 +185,11 @@ WHERE assignment_id = <id>;
 
 -- per-target limit of parallel collection tasks (default 3)
 UPDATE keystone.target SET max_concurrent_tasks = 2 WHERE target_id = 1;
+
+-- long-running warning: fixed threshold for an assignment whose long runs are known
+-- (default NULL = 3x median of the last 20 successful runs, min 120 s; 600 s until 5 runs)
+UPDATE keystone.collector_assignment SET expected_max_seconds = 3600 WHERE assignment_id = <id>;
+UPDATE keystone.collector_assignment SET expected_max_seconds = NULL WHERE assignment_id = <id>;
 ```
 
 ### Assessment schedules

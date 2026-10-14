@@ -187,17 +187,19 @@ Phase 0 is complete (2026-10-14): assessment results and rule-level failure isol
 
 Phase 1, step 1 done (2026-10-14, PR #11, #12, lab-verified): Keystone Agent with generic scheduler and collector scheduling; fixed grid, continuous pool, per-target limit and schedule lag (V025); worker logging through the shared logger.
 
+Phase 1, step 2 done (2026-10-14, PR #13, lab-verified): scheduled assessments (V026) with 30 s offset and no catch-up at start, Dictionary defaults and `apply_default_assessment_schedules`, `schedule_consistency_warning`, one log line per assessment run.
+
+Hardening done (2026-10-14, PR #14, lab-verified): TCP keepalive on target connections; long-running task warning (V027, `expected_max_seconds`); per-database error text in run history.
+
 Next (MVP Plan Phase 1, design in ADR-0015):
 
-1. `keystone.assessment_schedule` and scheduled assessment runs (AssessmentJobs adapter); default intervals in the Dictionary; interval vs. freshness warning.
-2. Default collector intervals from collector header metadata.
-3. One-command health check (queue required collectors once, drain, assess).
-4. HTML report (Turkish/English frame).
-5. Windows service setup for the agent.
+1. Default collector intervals from collector header metadata.
+2. One-command health check (queue required collectors once, drain, assess).
+3. HTML report (Turkish/English frame).
+4. Windows service setup for the agent.
 
 Hardening backlog:
 
-- Silent network loss to a target during a query: the worker waits on the socket forever while its heartbeat thread keeps the task alive, so the assignment never runs again. Agreed (2026-10-14): (1) TCP keepalives on target connections, window about 2-3 minutes, so short network blips do not end a task; (2) no hard deadline (threads cannot be killed; long legitimate work must not be cut): a task running longer than 3x the median duration of its last 20 successful runs (minimum 2 minutes) logs one WARNING to event_log and is left for manual check; fixed default 10 minutes until 5 successful runs exist; optional per-assignment expected maximum duration overrides the calculated threshold.
 - Later (Engineering Intelligence): known activity windows, for example a weekend backup, as context so that long runs inside them are not reported. Related to the deferred time windows in ADR-0015.
 - Collector target sessions: short `lock_timeout`; shorter `statement_timeout` for `PG_TABLE_CAPACITY` (relation size functions take AccessShareLock on every relation; a concurrent DDL would queue other sessions behind it). Values to be decided from field experience.
 
