@@ -164,10 +164,12 @@ Done:
 - Product direction and MVP Plan recorded in the documentation vault (Product Strategy → Usage Scenarios, ADR-0013, MVP Plan).
 - Engineering Intelligence Rule Catalog: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`.
 
-Immediate work sequence (MVP Plan, Phase 0 — see `docs/KeyStone/02 - Roadmap/MVP Plan.md`):
+Immediate work sequence (MVP Plan, Phase 0 — design agreed 2026-10-14 in ADR-0014):
 
-1. Assessment Result model: persist HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE per rule and run. This implements the outcome model already defined in the architecture documents (Health Assessment Playbook, Reference Architecture, ADR-0010) and resolves issues 2 and 8; it is an implementation task, not an open design question.
-2. Fix assessment-run exception handling. Note: the engine does not commit explicitly and the repository connection rolls back on exception, so with the current code a failed run may leave no row at all rather than a RUNNING row. Run 16 is missing from the lab sequence and may be such a case; verify before designing the fix.
+1. `keystone.assessment_result`: one row per evaluated rule with outcome HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE / ERROR, `max_severity`, `finding_count`, `reason`. Resolves issues 2 and 8.
+2. Rule-level failure isolation: a failing rule records ERROR and the others continue; run status PARTIAL; engine failure ends FAILED and stays persisted. Resolves issue 1 (lost runs, likely run 16).
+3. Evaluation time as a parameter (live: now; offline bundles: capture time).
+4. Shared logging configuration (rotating file + `keystone.event_log` for WARNING and above via a separate autocommit connection); assessment engine uses it. Worker follows in Phase 2.
 
 Then Phase 1 (one-command health check and report) and Phase 2 (scheduler, finding lifecycle, finding-driven notification). The threshold model is revisited with the first rule that needs multiple parameters.
 
