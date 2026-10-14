@@ -23,15 +23,24 @@ class AssessmentEngineCliTests(unittest.TestCase):
         connection_cm.__enter__.return_value = conn
 
         with patch.object(engine, "connect_repository",
-                          return_value=connection_cm), \
+                          return_value=connection_cm) as connect, \
+                patch.object(engine, "configure_logging") as configure, \
                 patch.object(engine, "run_assessment") as run_assessment:
             engine.main(argv)
 
+        self.configure_logging = configure
+        self.connect_repository = connect
         return conn, run_assessment
 
     def test_no_arguments_keeps_previous_default_behaviour(self):
         conn, run_assessment = self.run_main([])
         run_assessment.assert_called_once_with(conn, "PG_CONNECTION_HEALTH", 1)
+
+    def test_main_configures_logging_with_repository_events(self):
+        self.run_main([])
+        self.configure_logging.assert_called_once_with(
+            "assessment_engine", connect=self.connect_repository
+        )
 
     def test_assessment_and_target_are_passed_through(self):
         conn, run_assessment = self.run_main(
