@@ -165,6 +165,10 @@ PG-TRAN-001 matches `state = 'idle in transaction'` only. A session in `idle in 
 
 A lab regression currently requires inserting a queue row, running the worker and running the engine by hand. A skipped queue insert produced a misleading result (run 19). This supports a later "run health check" entry point that collects the required evidence before evaluating. Not an MVP engine change by itself.
 
+### 12. Proxy or firewall idle timeouts cut long collector queries
+
+Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through HAProxy, which closes connections idle for 50 s. A collector query that waits without returning data (a lock wait, or size functions on a large database) is cut after 50 s; for DATABASE-scoped collectors the affected database fails and the run ends `PARTIAL_SUCCESS`. TCP keepalive does not prevent this (the proxy host answers the probes). Short collectors are not affected. Options to decide: collectors connect to nodes directly, the customer raises the proxy timeout for the Keystone user, or an installation checklist item. Related: short `lock_timeout` for collector sessions (hardening backlog).
+
 ## Active Work
 
 Current checkpoint: MVP Plan Phase 0 complete; next is Phase 1 (scheduling, then the one-command health check and report).
