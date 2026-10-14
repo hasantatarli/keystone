@@ -165,6 +165,7 @@ def complete_assessment_run(
     conn,
     assessment_run_id,
     status,
+    status_message=None,
 ):
     with conn.cursor() as cur:
         cur.execute(
@@ -172,12 +173,52 @@ def complete_assessment_run(
             UPDATE keystone.assessment_run
             SET
                 finished_at = clock_timestamp(),
-                status = %s
+                status = %s,
+                status_message = %s
             WHERE assessment_run_id = %s
             """,
             (
                 status,
+                status_message,
                 assessment_run_id,
+            ),
+        )
+
+
+def insert_assessment_result(
+    conn,
+    assessment_run_id,
+    rule,
+    outcome,
+    max_severity,
+    finding_count,
+    reason,
+    evaluated_at,
+):
+    """Persist the outcome of one rule in one run (ADR-0014)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO keystone.assessment_result
+            (
+                assessment_run_id,
+                rule_id,
+                outcome,
+                max_severity,
+                finding_count,
+                reason,
+                evaluated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                assessment_run_id,
+                rule["rule_id"],
+                outcome,
+                max_severity,
+                finding_count,
+                reason,
+                evaluated_at,
             ),
         )
 
@@ -719,18 +760,168 @@ def validate_evidence_freshness(
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
+# Assessment result outcomes (ADR-0014). assessment_run.status stays technical.
+OUTCOME_HEALTHY = "HEALTHY"
+OUTCOME_ATTENTION_REQUIRED = "ATTENTION_REQUIRED"
+OUTCOME_INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+OUTCOME_ERROR = "ERROR"
+
+
+def highest_severity(findings):
+    """Return the most severe finding severity, or None for no findings."""
+    if not findings:
+        return None
+
+    return max(
+        (finding["severity"] for finding in findings),
+        key=lambda severity: SEVERITY_RANK.get(severity, 0),
+    )
+
+
+def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
+    """Evaluate one rule and return (outcome, findings, reason).
+
+    Missing or stale required evidence is a normal result
+    (INSUFFICIENT_EVIDENCE), not an error. Configuration or code problems,
+    such as an unregistered evaluator, raise an exception; the caller records
+    them as an ERROR result for this rule only.
+    """
+    evaluator = RULE_EVALUATORS.get(rule["rule_key"])
+    if evaluator is None:
+        raise RuntimeError(
+            f"No evaluator registered for rule: {rule['rule_key']}"
+        )
+
+    thresholds = load_thresholds(conn, rule["rule_id"])
+    evidence_requirements = load_evidence_requirements(
+        conn,
+        rule["rule_id"],
+    )
+
+    if not evidence_requirements:
+        raise RuntimeError(
+            f"No evidence requirements defined for rule: {rule['rule_key']}"
+        )
+
+    print("Evidence requirements:")
+    for requirement in evidence_requirements:
+        print(requirement)
+
+    # MVP evaluators currently consume one evidence row-set. Keep evidence
+    # loading and freshness checks generic so new rules do not add branches
+    # to the orchestration loop. Expand the evaluator input contract only
+    # when a real multi-source rule requires it.
+    evidence_sets = []
+
+    for requirement in evidence_requirements:
+        evidence_source = requirement["evidence_source"]
+        loader = EVIDENCE_LOADERS.get(evidence_source)
+
+        if loader is None:
+            raise RuntimeError(
+                f"No evidence loader registered for source: {evidence_source}"
+            )
+
+        # Evidence is read-only; rows stay valid for later rules even if the
+        # rule that loaded them is rolled back.
+        if evidence_source not in evidence_cache:
+            evidence_cache[evidence_source] = loader(conn, target_id)
+
+        rows = evidence_cache[evidence_source]
+        valid, reason = validate_evidence_freshness(
+            rows,
+            requirement,
+            evaluation_time,
+        )
+
+        if not valid:
+            return (
+                OUTCOME_INSUFFICIENT_EVIDENCE,
+                [],
+                f"{evidence_source}: {reason}",
+            )
+
+        evidence_sets.append(rows)
+
+    if len(evidence_sets) != 1:
+        raise RuntimeError(
+            f"Rule {rule['rule_key']} has {len(evidence_sets)} evidence "
+            "sources; MVP evaluators currently support exactly one."
+        )
+
+    findings = evaluator(
+        evidence_sets[0],
+        rule,
+        thresholds,
+    )
+
+    if findings:
+        return OUTCOME_ATTENTION_REQUIRED, findings, None
+
+    return OUTCOME_HEALTHY, [], None
+
+
+def mark_run_failed(conn, assessment_run_id, exc):
+    """Record an engine-level failure so the run never disappears.
+
+    First try the run's own connection after a rollback. If that connection is
+    unusable (for example it was lost), try once with a fresh connection.
+    """
+    message = f"{type(exc).__name__}: {exc}"
+
+    try:
+        conn.rollback()
+        complete_assessment_run(conn, assessment_run_id, "FAILED", message)
+        conn.commit()
+        return
+    except Exception:
+        pass
+
+    try:
+        with connect_repository() as fresh_conn:
+            complete_assessment_run(
+                fresh_conn,
+                assessment_run_id,
+                "FAILED",
+                message,
+            )
+    except Exception as mark_exc:
+        print(
+            f"WARNING: could not mark assessment run {assessment_run_id} "
+            f"as FAILED: {mark_exc}"
+        )
+
+
 def run_assessment(
     conn,
     assessment_key,
     target_id,
+    evaluation_time=None,
 ):
     """Run enabled rules for one assessment against one target.
 
     The orchestration is intentionally rule-agnostic: Dictionary metadata tells
     the engine which evidence is required, registries resolve evidence loaders
     and evaluators, and rule-specific engineering logic stays in evaluators.
+
+    Every evaluated rule produces an assessment_result (ADR-0014):
+    HEALTHY, ATTENTION_REQUIRED, INSUFFICIENT_EVIDENCE or ERROR.
+
+    Transactions:
+    - The run row is committed first, so it survives any later failure.
+    - Each rule runs in its own transaction. If it fails, its partial work
+      (findings) is rolled back and an ERROR result is recorded instead; the
+      remaining rules still run and the run ends PARTIAL.
+    - An engine-level failure marks the run FAILED and re-raises.
+
+    evaluation_time is the moment evidence freshness is judged against.
+    Live runs use the current time; offline evidence will use its capture
+    time (MVP Plan Phase 1).
+
+    Returns the assessment_run_id.
     """
-    evaluation_time = datetime.now(timezone.utc)
+    if evaluation_time is None:
+        evaluation_time = datetime.now(timezone.utc)
 
     assessment = load_assessment(conn, assessment_key)
     print("Assessment:")
@@ -740,115 +931,100 @@ def run_assessment(
         conn,
         assessment["assessment_id"],
         target_id,
-        evaluation_time,
+        datetime.now(timezone.utc),
     )
+    conn.commit()
     print(f"Assessment Run ID: {assessment_run_id}")
 
-    rules = load_rules(conn, assessment["assessment_id"])
+    try:
+        rules = load_rules(conn, assessment["assessment_id"])
+        conn.commit()
 
-    # Cache evidence per source for this assessment run. Multiple rules can use
-    # the same source without querying the repository repeatedly.
-    evidence_cache = {}
+        # Cache evidence per source for this assessment run. Multiple rules
+        # can use the same source without querying the repository repeatedly.
+        evidence_cache = {}
+        error_count = 0
 
-    for rule in rules:
-        print()
-        print(f"Evaluating {rule['rule_key']} - {rule['name']}")
+        for rule in rules:
+            print()
+            print(f"Evaluating {rule['rule_key']} - {rule['name']}")
 
-        evaluator = RULE_EVALUATORS.get(rule["rule_key"])
-        if evaluator is None:
-            raise RuntimeError(
-                f"No evaluator registered for rule: {rule['rule_key']}"
-            )
+            try:
+                with conn.transaction():
+                    outcome, findings, reason = evaluate_rule(
+                        conn,
+                        rule,
+                        target_id,
+                        evaluation_time,
+                        evidence_cache,
+                    )
 
-        thresholds = load_thresholds(conn, rule["rule_id"])
-        evidence_requirements = load_evidence_requirements(
+                    for finding in findings:
+                        finding_id = insert_finding(
+                            conn,
+                            assessment_run_id,
+                            rule,
+                            finding,
+                        )
+                        print(
+                            f"Finding {finding_id}: "
+                            f"{finding['severity']} - {rule['name']}"
+                        )
+
+                    insert_assessment_result(
+                        conn,
+                        assessment_run_id,
+                        rule,
+                        outcome,
+                        highest_severity(findings),
+                        len(findings),
+                        reason,
+                        evaluation_time,
+                    )
+
+            except Exception as exc:
+                # The rule's transaction has been rolled back, including any
+                # findings it inserted. Record the failure for this rule only.
+                error_count += 1
+                outcome = OUTCOME_ERROR
+                reason = f"{type(exc).__name__}: {exc}"
+
+                with conn.transaction():
+                    insert_assessment_result(
+                        conn,
+                        assessment_run_id,
+                        rule,
+                        outcome,
+                        None,
+                        0,
+                        reason,
+                        evaluation_time,
+                    )
+
+            print(f"Outcome: {outcome}" + (f" ({reason})" if reason else ""))
+
+        status = "PARTIAL" if error_count else "SUCCESS"
+        status_message = (
+            f"{error_count} rule(s) ended with ERROR." if error_count else None
+        )
+
+        complete_assessment_run(
             conn,
-            rule["rule_id"],
+            assessment_run_id,
+            status,
+            status_message,
         )
+        conn.commit()
 
-        if not evidence_requirements:
-            raise RuntimeError(
-                f"No evidence requirements defined for rule: {rule['rule_key']}"
-            )
+    except Exception as exc:
+        mark_run_failed(conn, assessment_run_id, exc)
+        print(f"Assessment Run {assessment_run_id} FAILED: {exc}")
+        raise
 
-        print("Evidence requirements:")
-        for requirement in evidence_requirements:
-            print(requirement)
+    print()
+    print(f"Assessment Run {assessment_run_id} completed with status {status}.")
 
-        # MVP evaluators currently consume one evidence row-set. Keep evidence
-        # loading and freshness checks generic so new rules do not add branches
-        # to the orchestration loop. Expand the evaluator input contract only
-        # when a real multi-source rule requires it.
-        evidence_sets = []
-        evidence_valid = True
-
-        for requirement in evidence_requirements:
-            evidence_source = requirement["evidence_source"]
-            loader = EVIDENCE_LOADERS.get(evidence_source)
-
-            if loader is None:
-                raise RuntimeError(
-                    f"No evidence loader registered for source: {evidence_source}"
-                )
-
-            if evidence_source not in evidence_cache:
-                evidence_cache[evidence_source] = loader(conn, target_id)
-
-            rows = evidence_cache[evidence_source]
-            valid, reason = validate_evidence_freshness(
-                rows,
-                requirement,
-                evaluation_time,
-            )
-
-            if not valid:
-                print(f"Evaluation skipped for {evidence_source}: {reason}")
-                evidence_valid = False
-                break
-
-            evidence_sets.append(rows)
-
-        if not evidence_valid:
-            continue
-
-        if len(evidence_sets) != 1:
-            raise RuntimeError(
-                f"Rule {rule['rule_key']} has {len(evidence_sets)} evidence "
-                "sources; MVP evaluators currently support exactly one."
-            )
-
-        findings = evaluator(
-            evidence_sets[0],
-            rule,
-            thresholds,
-        )
-
-        if not findings:
-            print("No findings.")
-            continue
-
-        for finding in findings:
-            finding_id = insert_finding(
-                conn,
-                assessment_run_id,
-                rule,
-                finding,
-            )
-            print(
-                f"Finding {finding_id}: "
-                f"{finding['severity']} - {rule['name']}"
-            )
-
-    complete_assessment_run(
-        conn,
-        assessment_run_id,
-        "SUCCESS",
-    )
-
-    print(
-        f"Assessment Run {assessment_run_id} "
-        f"completed successfully."
-    )
+    return assessment_run_id
 
 
 # Development defaults. They keep `python -m repository.intelligence.assessment_engine`
