@@ -2627,19 +2627,10 @@ def finalize_failed_task(
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-def main():
-    """Recover stale tasks, then claim and process tasks in parallel until the queue is empty."""
-    print()
-    print("Keystone Worker")
-    print("===============")
-    print()
-
-    max_workers = 5
-    worker_id = str(uuid.uuid4())
-
-    print(f"Worker ID : {worker_id}")
-    print()
-
+def run_once(worker_id=None, max_workers=5, quiet_when_idle=False):
+    """Recover stale tasks, then claim and process tasks until the queue is empty; returns task count."""
+    worker_id = worker_id or str(uuid.uuid4())
+    processed = 0
 
     with connect_repository() as conn:
         stale_tasks = get_stale_tasks(conn)
@@ -2688,11 +2679,13 @@ def main():
             )
 
         if not tasks:
-            print("No eligible tasks found.")
+            if not (quiet_when_idle and processed == 0):
+                print("No eligible tasks found.")
             break
 
         print(f"{len(tasks)} task(s) claimed.")
         print()
+        processed += len(tasks)
 
         with ThreadPoolExecutor(
             max_workers=max_workers
@@ -2728,6 +2721,23 @@ def main():
                         f"Error   : "
                         f"{exc}"
                     )
+
+    return processed
+
+
+def main():
+    """One pass: drain the queue and exit (the agent calls run_once in a loop)."""
+    print()
+    print("Keystone Worker")
+    print("===============")
+    print()
+
+    worker_id = str(uuid.uuid4())
+
+    print(f"Worker ID : {worker_id}")
+    print()
+
+    run_once(worker_id=worker_id, max_workers=5)
 
 
 if __name__ == "__main__":
