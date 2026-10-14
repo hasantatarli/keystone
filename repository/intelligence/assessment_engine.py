@@ -11,9 +11,7 @@ from psycopg.rows import dict_row
 from repository.common.logging_config import configure_logging, get_logger
 
 
-# Console output, the log file and keystone.event_log all go through this
-# logger (ADR-0014). Without configure_logging() (for example in tests) INFO
-# records are not shown and WARNING+ fall back to stderr.
+# Console + log file + event_log (ADR-0014). Unconfigured: WARNING+ to stderr.
 logger = get_logger("assessment_engine")
 
 
@@ -429,12 +427,9 @@ SEVERITY_RANK = {"INFO": 1, "WARNING": 2, "CRITICAL": 3}
 
 
 def match_threshold(observed_value, thresholds, unit):
-    """Return the most severe threshold reached by observed_value, or None.
+    """Highest threshold reached (value >= threshold, same unit), or None.
 
-    A threshold is reached when observed_value >= threshold_value and its unit
-    matches. Among reached thresholds the highest threshold_value wins, so the
-    result does not depend on the order in which thresholds are supplied.
-    Thresholds with a different unit are ignored.
+    Independent of the order thresholds arrive in.
     """
     reached = [
         threshold
@@ -456,13 +451,9 @@ def match_threshold(observed_value, thresholds, unit):
 
 
 def evaluate_long_idle_transaction(rows, rule, thresholds):
-    """PG-TRAN-001: client sessions idle inside an open transaction.
+    """PG-TRAN-001: how long a session has been idle in a transaction.
 
-    The metric is how long the session has been idle, measured from
-    state_change (the moment it entered 'idle in transaction'), not from
-    transaction_start. A transaction that worked for ten minutes and has been
-    idle for one minute is idle for one minute. Transaction age regardless of
-    state is a separate concern (long-running transaction).
+    Measured from state_change, not transaction_start (age is PG-TRAN-003).
     """
     findings = []
 
@@ -516,12 +507,9 @@ EXCLUDED_LONG_RUNNING_STATES = {"idle in transaction (aborted)"}
 
 
 def evaluate_long_running_transaction(rows, rule, thresholds):
-    """PG-TRAN-003: client transactions open for a long time, any state.
+    """PG-TRAN-003: transaction age in any non-aborted state.
 
-    The metric is transaction age (captured_at - transaction_start). Unlike
-    PG-TRAN-001 it does not care whether the session is active or idle: an
-    old transaction holds the xmin horizon and its locks either way. A long
-    idle transaction may therefore match both rules; this is intentional.
+    A long idle transaction may also match PG-TRAN-001; that is intended.
     """
     findings = []
 
@@ -569,6 +557,7 @@ def evaluate_long_running_transaction(rows, rule, thresholds):
     return findings
 
 def evaluate_database_xid_wraparound(rows, rule, thresholds):
+    """PG-TRAN-002: per-database XID age against absolute thresholds."""
     findings = []
 
     for row in rows:
@@ -608,6 +597,7 @@ def evaluate_replication_slot_wal_retention_pressure(
     rule,
     thresholds,
 ):
+    """PG-REP-001: slots with wal_status extended; severity from the rule."""
     findings = []
 
     for row in rows:
@@ -639,6 +629,7 @@ def evaluate_replication_slot_wal_unavailable(
     rule,
     thresholds,
 ):
+    """PG-REP-002: slots with wal_status unreserved/lost; severity from the rule."""
     findings = []
 
     for row in rows:
@@ -666,6 +657,7 @@ def evaluate_replication_slot_wal_unavailable(
 
 
 def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
+    """PG-CONN-001: count of sessions idle in an aborted transaction."""
     findings = []
 
     for row in rows:
@@ -733,6 +725,7 @@ def validate_evidence_freshness(
     requirement,
     evaluation_time,
 ):
+    """(valid, reason): newest row must be within max_age_seconds of evaluation_time."""
     if not rows:
         if requirement["is_required"]:
             return False, "Required evidence is not available."
@@ -787,12 +780,9 @@ def highest_severity(findings):
 
 
 def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
-    """Evaluate one rule and return (outcome, findings, reason).
+    """Evaluate one rule -> (outcome, findings, reason).
 
-    Missing or stale required evidence is a normal result
-    (INSUFFICIENT_EVIDENCE), not an error. Configuration or code problems,
-    such as an unregistered evaluator, raise an exception; the caller records
-    them as an ERROR result for this rule only.
+    Missing/stale evidence returns INSUFFICIENT_EVIDENCE; real problems raise.
     """
     evaluator = RULE_EVALUATORS.get(rule["rule_key"])
     if evaluator is None:
@@ -870,11 +860,7 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
 
 
 def mark_run_failed(conn, assessment_run_id, exc):
-    """Record an engine-level failure so the run never disappears.
-
-    First try the run's own connection after a rollback. If that connection is
-    unusable (for example it was lost), try once with a fresh connection.
-    """
+    """Mark the run FAILED; falls back to a fresh connection if needed."""
     message = f"{type(exc).__name__}: {exc}"
 
     try:
@@ -908,27 +894,10 @@ def run_assessment(
     target_id,
     evaluation_time=None,
 ):
-    """Run enabled rules for one assessment against one target.
+    """Run all enabled rules of one assessment for one target; returns run id.
 
-    The orchestration is intentionally rule-agnostic: Dictionary metadata tells
-    the engine which evidence is required, registries resolve evidence loaders
-    and evaluators, and rule-specific engineering logic stays in evaluators.
-
-    Every evaluated rule produces an assessment_result (ADR-0014):
-    HEALTHY, ATTENTION_REQUIRED, INSUFFICIENT_EVIDENCE or ERROR.
-
-    Transactions:
-    - The run row is committed first, so it survives any later failure.
-    - Each rule runs in its own transaction. If it fails, its partial work
-      (findings) is rolled back and an ERROR result is recorded instead; the
-      remaining rules still run and the run ends PARTIAL.
-    - An engine-level failure marks the run FAILED and re-raises.
-
-    evaluation_time is the moment evidence freshness is judged against.
-    Live runs use the current time; offline evidence will use its capture
-    time (MVP Plan Phase 1).
-
-    Returns the assessment_run_id.
+    One transaction per rule: a failing rule becomes ERROR, others continue
+    (run PARTIAL). evaluation_time defaults to now. Details: ADR-0014.
     """
     if evaluation_time is None:
         evaluation_time = datetime.now(timezone.utc)
@@ -950,8 +919,7 @@ def run_assessment(
         rules = load_rules(conn, assessment["assessment_id"])
         conn.commit()
 
-        # Cache evidence per source for this assessment run. Multiple rules
-        # can use the same source without querying the repository repeatedly.
+        # One evidence load per source per run, shared by all rules.
         evidence_cache = {}
         error_count = 0
 
@@ -995,14 +963,12 @@ def run_assessment(
                     )
 
             except Exception as exc:
-                # The rule's transaction has been rolled back, including any
-                # findings it inserted. Record the failure for this rule only.
+                # Rule's work (incl. findings) was rolled back; record ERROR.
                 error_count += 1
                 outcome = OUTCOME_ERROR
                 reason = f"{type(exc).__name__}: {exc}"
 
-                # The traceback goes to the log file and event_log; the
-                # assessment result keeps the short message.
+                # Full traceback to log/event_log; result keeps the message.
                 logger.warning(
                     "Rule %s ended with ERROR in assessment run %s: %s",
                     rule["rule_key"],
@@ -1076,12 +1042,7 @@ DEFAULT_TARGET_ID = 1
 
 
 def parse_args(argv=None):
-    """Parse which assessment to run against which target.
-
-    Intentionally minimal: the CLI only selects an assessment and a target.
-    Rule behaviour (thresholds, evidence, multi-criteria logic) is configured
-    in the Dictionary and evaluators, never through command-line options.
-    """
+    """Select assessment and target only; rule behaviour is not a CLI option."""
     parser = argparse.ArgumentParser(
         prog="python -m repository.intelligence.assessment_engine",
         description="Run one Keystone assessment against one target.",
