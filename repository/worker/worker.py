@@ -2,13 +2,13 @@
 # Imports
 # -----------------------------------------------------------------------------
 import hashlib
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 import threading
 import psycopg
-import time
 import paramiko
 
 from psycopg.rows import dict_row
@@ -16,6 +16,8 @@ from repository.common.credentials import decrypt_credential
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg.errors import QueryCanceled
 from psycopg import OperationalError
+
+from repository.common.logging_config import configure_logging, get_logger
 
 class TaskOwnershipLost(RuntimeError):
     """Another worker took over the task (stale recovery); stop writing results."""
@@ -28,6 +30,32 @@ MAX_RETRY_COUNT = 3
 
 # Transaction-level advisory lock that serializes task claims across agents.
 CLAIM_LOCK_KEY = 0x4B45595351  # "KEYSQ"
+
+
+logger = get_logger("worker")
+
+
+def task_context(task):
+    """Identifiers attached to log records and event_log rows of a task."""
+    return {
+        "task_id": task.get("task_id"),
+        "assignment_id": task.get("assignment_id"),
+        "collector_key": task.get("collector_key"),
+        "target_id": task.get("target_id"),
+    }
+
+
+def log_ownership_lost(task, detail):
+    """Another worker took the task over (stale recovery); this one stops quietly."""
+    logger.warning("Task %s: ownership lost (%s).", task["task_id"], detail,
+                   extra={"context": task_context(task)})
+
+
+def log_task_outcome(task, status, exc):
+    """A collector run that ended TIMEOUT, CONNECTION_FAILED or FAILED (already in run history)."""
+    logger.warning("Task %s: %s on %s -> %s: %s", task["task_id"], task["collector_key"],
+                   task["target_name"], status, exc,
+                   extra={"context": task_context(task)})
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -307,33 +335,6 @@ def remove_task(conn, task_id, worker_id):
 
     return deleted_count
 
-def get_stale_tasks(conn, stale_after_seconds=90):
-    """RUNNING tasks whose heartbeat is older than stale_after_seconds (for reporting)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                q.task_id,
-                q.assignment_id,
-                q.status,
-                q.started_at,
-                q.worker_id,
-                q.heartbeat_at,
-                clock_timestamp() - q.heartbeat_at AS heartbeat_age
-            FROM keystone.collection_queue q
-            WHERE q.status = 'RUNNING'
-              AND q.heartbeat_at IS NOT NULL
-              AND q.heartbeat_at <
-                  clock_timestamp()
-                  - (%s * INTERVAL '1 second')
-            ORDER BY q.heartbeat_at;
-            """,
-            (stale_after_seconds,),
-        )
-
-        return cur.fetchall()
-
-
 def recover_stale_tasks(
     conn,
     stale_after_seconds=90,
@@ -499,11 +500,7 @@ def heartbeat_loop(
                 worker_id
             )
         except Exception as exc:
-            print()
-            print("HEARTBEAT UPDATE FAILED")
-            print("-----------------------")
-            print(f"Task ID : {task_id}")
-            print(f"Error   : {exc}")        
+            logger.warning("Task %s: heartbeat update failed: %s", task_id, exc)
 
 
 def verify_task_ownership(conn, task_id, worker_id):
@@ -2227,28 +2224,13 @@ def process_task(task):
 
     try:
         with connect_repository() as conn:
-            print()
-            print(f"Task ID       : {task['task_id']}")
-            print(f"Assignment ID : {task['assignment_id']}")
-            print(
-                f"Collector     : {task['component']} "
-                f"- {task['collector_name']}"
+            logger.info(
+                "Task %s: %s on %s (%s:%s) started.",
+                task["task_id"], task["collector_key"], task["target_name"],
+                task["host"], task["port"],
             )
-            print(f"Script        : {task['script_file']}")
-            print(
-                f"Target        : {task['target_id']} "
-                f"- {task['target_name']}"
-            )
-            print(f"Provider      : {task['provider']}")
-            print(f"Target Type   : {task['target_type']}")
-            print(f"Connection    : {task['host']}:{task['port']}")
-            print(f"Database      : {task['database_name']}")
-            print(f"Username      : {task['username']}")
 
             started_at = task["started_at"]
-
-            print()
-            print("Executing collector...")
 
             # ============================================================
             # PHASE 1 - TARGET / COLLECTOR EXECUTION
@@ -2299,15 +2281,7 @@ def process_task(task):
                 ):
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(
-                        "Error   : Ownership lost before "
-                        "TIMEOUT persistence."
-                    )
+                    log_ownership_lost(task, "before TIMEOUT persistence")
                     return
 
                 finished_at = datetime.now(timezone.utc)
@@ -2341,34 +2315,18 @@ def process_task(task):
                 except TaskOwnershipLost as ownership_exc:
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {ownership_exc}")
+                    log_ownership_lost(task, ownership_exc)
                     return
 
-                except Exception as repo_exc:
+                except Exception:
                     conn.rollback()
 
-                    print()
-                    print("REPOSITORY FINALIZATION FAILED")
-                    print("------------------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {repo_exc}")
+                    logger.error("Task %s: repository finalization failed.", task["task_id"],
+                                 exc_info=True, extra={"context": task_context(task)})
 
                     raise
 
-                print()
-                print("COLLECTOR EXECUTION TIMEOUT")
-                print("---------------------------")
-                print(f"Task ID   : {task['task_id']}")
-                print(f"Collector : {task['collector_name']}")
-                print(f"Target    : {task['target_name']}")
-                print("Timeout   : 300 seconds")
-                print(f"Error     : {exc}")
+                log_task_outcome(task, "TIMEOUT", exc)
                 return
 
             except OperationalError as exc:
@@ -2381,15 +2339,7 @@ def process_task(task):
                 ):
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(
-                        "Error   : Ownership lost before "
-                        "CONNECTION_FAILED persistence."
-                    )
+                    log_ownership_lost(task, "before CONNECTION_FAILED persistence")
                     return
 
                 finished_at = datetime.now(timezone.utc)
@@ -2424,33 +2374,18 @@ def process_task(task):
                 except TaskOwnershipLost as ownership_exc:
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {ownership_exc}")
+                    log_ownership_lost(task, ownership_exc)
                     return
 
-                except Exception as repo_exc:
+                except Exception:
                     conn.rollback()
 
-                    print()
-                    print("REPOSITORY FINALIZATION FAILED")
-                    print("------------------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {repo_exc}")
+                    logger.error("Task %s: repository finalization failed.", task["task_id"],
+                                 exc_info=True, extra={"context": task_context(task)})
 
                     raise
 
-                print()
-                print("TARGET CONNECTION FAILED")
-                print("------------------------")
-                print(f"Task ID   : {task['task_id']}")
-                print(f"Collector : {task['collector_name']}")
-                print(f"Target    : {task['target_name']}")
-                print(f"Error     : {exc}")
+                log_task_outcome(task, "CONNECTION_FAILED", exc)
                 return
 
             except Exception as exc:
@@ -2463,15 +2398,7 @@ def process_task(task):
                 ):
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(
-                        "Error   : Ownership lost before "
-                        "FAILED persistence."
-                    )
+                    log_ownership_lost(task, "before FAILED persistence")
                     return
 
                 finished_at = datetime.now(timezone.utc)
@@ -2505,33 +2432,18 @@ def process_task(task):
                 except TaskOwnershipLost as ownership_exc:
                     conn.rollback()
 
-                    print()
-                    print("TASK OWNERSHIP LOST")
-                    print("-------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {ownership_exc}")
+                    log_ownership_lost(task, ownership_exc)
                     return
 
-                except Exception as repo_exc:
+                except Exception:
                     conn.rollback()
 
-                    print()
-                    print("REPOSITORY FINALIZATION FAILED")
-                    print("------------------------------")
-                    print(f"Task ID : {task['task_id']}")
-                    print(f"Worker  : {task['worker_id']}")
-                    print(f"Error   : {repo_exc}")
+                    logger.error("Task %s: repository finalization failed.", task["task_id"],
+                                 exc_info=True, extra={"context": task_context(task)})
 
                     raise
 
-                print()
-                print("COLLECTOR EXECUTION FAILED")
-                print("--------------------------")
-                print(f"Task ID   : {task['task_id']}")
-                print(f"Collector : {task['collector_name']}")
-                print(f"Target    : {task['target_name']}")
-                print(f"Error     : {exc}")
+                log_task_outcome(task, "FAILED", exc)
                 return
 
            
@@ -2583,32 +2495,26 @@ def process_task(task):
 
                 conn.commit()
 
-                print(
-                    f"Collector returned {len(rows)} row(s)."
+                logger.info(
+                    "Task %s: %s on %s -> %s, %s row(s).",
+                    task["task_id"], task["collector_key"], task["target_name"],
+                    run_status, len(rows),
                 )
-
-                for row in rows:
-                    print(row)
+                # Rows may hold query text and client addresses: DEBUG only.
+                if logger.isEnabledFor(logging.DEBUG):
+                    for row in rows:
+                        logger.debug("Task %s row: %s", task["task_id"], row)
 
             except TaskOwnershipLost as exc:
                 conn.rollback()
 
-                print()
-                print("TASK OWNERSHIP LOST")
-                print("-------------------")
-                print(f"Task ID : {task['task_id']}")
-                print(f"Worker  : {task['worker_id']}")
-                print(f"Error   : {exc}")
+                log_ownership_lost(task, exc)
 
-            except Exception as exc:
+            except Exception:
                 conn.rollback()
 
-                print()
-                print("REPOSITORY FINALIZATION FAILED")
-                print("------------------------------")
-                print(f"Task ID : {task['task_id']}")
-                print(f"Worker  : {task['worker_id']}")
-                print(f"Error   : {exc}")
+                logger.error("Task %s: repository finalization failed.", task["task_id"],
+                             exc_info=True, extra={"context": task_context(task)})
 
                 raise
 
@@ -2671,41 +2577,11 @@ def run_once(worker_id=None, max_workers=5, quiet_when_idle=False):
     processed = 0
 
     with connect_repository() as conn:
-        stale_tasks = get_stale_tasks(conn)
-        
-    if stale_tasks:
-        print(
-            f"{len(stale_tasks)} stale task(s) found."
-        )
-
-        for task in stale_tasks:
-            print(
-                f"Task {task['task_id']} "
-                f"-> heartbeat age {task['heartbeat_age']}"
-            )
-
-        print()
-
-    with connect_repository() as conn:
         recovered_tasks = recover_stale_tasks(conn)
-        
 
-    if recovered_tasks:
-        for task in recovered_tasks:
-            if task["status"] == "RETRY_EXHAUSTED":
-                print(
-                    f"Task {task['task_id']} "
-                    f"-> RETRY_EXHAUSTED "
-                    f"(retry {task['retry_count']})"
-                )
-            else:
-                print(
-                    f"Task {task['task_id']} "
-                    f"-> returned to WAITING "
-                    f"(retry {task['retry_count']})"
-                )
-
-        print()
+    for task in recovered_tasks:
+        logger.warning("Stale task %s -> %s (retry %s).", task["task_id"],
+                       task["status"], task["retry_count"])
 
     while True:
 
@@ -2718,11 +2594,10 @@ def run_once(worker_id=None, max_workers=5, quiet_when_idle=False):
 
         if not tasks:
             if not (quiet_when_idle and processed == 0):
-                print("No eligible tasks found.")
+                logger.info("No eligible tasks found.")
             break
 
-        print(f"{len(tasks)} task(s) claimed.")
-        print()
+        logger.info("%s task(s) claimed.", len(tasks))
         processed += len(tasks)
 
         with ThreadPoolExecutor(
@@ -2744,36 +2619,19 @@ def run_once(worker_id=None, max_workers=5, quiet_when_idle=False):
                     future.result()
 
                 except Exception as exc:
-                    print()
-                    print("WORKER THREAD FAILED")
-                    print("--------------------")
-                    print(
-                        f"Task ID : "
-                        f"{task['task_id']}"
-                    )
-                    print(
-                        f"Target  : "
-                        f"{task['target_name']}"
-                    )
-                    print(
-                        f"Error   : "
-                        f"{exc}"
-                    )
+                    logger.error("Task %s on %s: worker thread failed: %s",
+                                 task["task_id"], task["target_name"], exc,
+                                 extra={"context": task_context(task)})
 
     return processed
 
 
 def main():
-    """One pass: drain the queue and exit (the agent calls run_once in a loop)."""
-    print()
-    print("Keystone Worker")
-    print("===============")
-    print()
+    """One pass: drain the queue and exit (the agent runs tasks continuously)."""
+    configure_logging("worker", connect=connect_repository)
 
     worker_id = str(uuid.uuid4())
-
-    print(f"Worker ID : {worker_id}")
-    print()
+    logger.info("Keystone Worker %s started.", worker_id)
 
     run_once(worker_id=worker_id, max_workers=5)
 

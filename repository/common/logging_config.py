@@ -124,17 +124,22 @@ def configure_logging(
     component,
     connect=None,
     log_dir=None,
-    level=logging.INFO,
+    level=None,
     console=True,
 ):
     """Set up console, logs/<component>.log and (if connect given) event_log.
 
-    Safe to call again; replaces the previous setup.
+    Level defaults to KEYSTONE_LOG_LEVEL (e.g. DEBUG) or INFO. Safe to call
+    again; replaces the previous setup.
     """
     shutdown_logging()
 
+    level = level or os.getenv("KEYSTONE_LOG_LEVEL", "INFO").upper()
     root = logging.getLogger(ROOT_LOGGER_NAME)
-    root.setLevel(level)
+    try:
+        root.setLevel(level)
+    except (ValueError, TypeError):
+        root.setLevel(logging.INFO)   # unknown KEYSTONE_LOG_LEVEL: do not stop the service
     root.propagate = False
 
     if console:
