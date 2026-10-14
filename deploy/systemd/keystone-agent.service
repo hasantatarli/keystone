@@ -1,0 +1,25 @@
+# Keystone Agent as a Linux service (ADR-0015).
+# Copy to /etc/systemd/system/, adjust paths/user, put secrets in the
+# EnvironmentFile (chmod 600), then:
+#   systemctl daemon-reload && systemctl enable --now keystone-agent
+
+[Unit]
+Description=Keystone Agent (scheduler and worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=keystone
+WorkingDirectory=/opt/keystone
+# KEYSTONE_REPOSITORY_HOST/PORT/DB/USER/PASSWORD, KEYSTONE_MASTER_KEY, KEYSTONE_LOG_DIR
+EnvironmentFile=/etc/keystone/agent.env
+ExecStart=/usr/bin/python3 -m repository.agent.agent
+Restart=always
+RestartSec=10
+# SIGTERM lets the current cycle finish and logs "Keystone Agent stopped".
+KillSignal=SIGTERM
+TimeoutStopSec=330
+
+[Install]
+WantedBy=multi-user.target

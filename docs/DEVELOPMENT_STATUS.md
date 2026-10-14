@@ -101,6 +101,8 @@ Controlled evidence means rows named `keystone_test_*` were inserted into the la
 
 Runs are started with `python -m repository.intelligence.assessment_engine --assessment <assessment_key> --target <target_id>`; without arguments the engine runs `PG_CONNECTION_HEALTH` for target 1.
 
+Keystone Agent (ADR-0015): `python -m repository.agent.agent [--poll-seconds 10]` runs continuously: every cycle it queues due `SCHEDULED` collector assignments (only the instance holding the scheduler advisory lock) and drains the queue with the worker. Stop with Ctrl+C or SIGTERM. Linux service example: `deploy/systemd/keystone-agent.service`. `python -m repository.worker.worker` still drains the queue once and exits.
+
 Technical logs (ADR-0014): the engine writes its console output also to `logs/assessment_engine.log` (rotating; directory overridable with `KEYSTONE_LOG_DIR`), and WARNING and above to `keystone.event_log`:
 
 `SELECT logged_at, level, component, message, context FROM keystone.event_log ORDER BY logged_at DESC LIMIT 20;`
