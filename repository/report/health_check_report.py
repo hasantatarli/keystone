@@ -315,7 +315,7 @@ h3{font-size:15px;margin:20px 0 8px}
 table{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0 10px}
 th{text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;background:var(--soft)}
 td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
-td.num{text-align:right;white-space:nowrap}
+td.num,th.num{text-align:right;white-space:nowrap}
 .badge{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-CRITICAL,.b-ERROR{background:var(--crit-bg);color:var(--crit)}
 .b-WARNING,.b-ATTENTION_REQUIRED{background:var(--warn-bg);color:var(--warn)}
@@ -340,7 +340,9 @@ body{font-size:12px}}
 
 
 def table(headers, rows, numeric=()):
-    head = "".join(f"<th>{e(h)}</th>" for h in headers)
+    # Numeric columns: header right-aligned like the values under it.
+    head = "".join(f'<th class="num">{e(h)}</th>' if i in numeric else f"<th>{e(h)}</th>"
+                   for i, h in enumerate(headers))
     body = "".join(
         "<tr>" + "".join(
             f'<td class="num">{cell}</td>' if i in numeric else f"<td>{cell}</td>"
@@ -390,7 +392,9 @@ def render_html(data, lang="tr"):
         for n in data["nodes"]:
             role = "" if n["in_recovery"] is None else (
                 t["role_replica"] if n["in_recovery"] else t["role_primary"])
-            os_text = " ".join(x for x in (n["os_name"], n["os_version"]) if x)
+            os_text = n["os_name"] or ""
+            if n["os_version"] and n["os_version"] not in os_text:   # "Ubuntu 24.04.4 LTS" already has it
+                os_text = f"{os_text} {n['os_version']}".strip()
             rows.append([e(n["name"]),
                          e(f"{n['server_address']}:{n['server_port']}" if n["server_address"] else ""),
                          e(role), e(n["server_version"]),

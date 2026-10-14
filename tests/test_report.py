@@ -112,6 +112,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         with self.assertRaises(ValueError):
             report.load_report_data(self.conn, 999999)
 
+    def test_numeric_headers_align_with_values(self):
+        html = report.table(["Name", "Size"], [["a", "1 GB"]], numeric=(1,))
+        self.assertIn('<th class="num">Size</th>', html)
+        self.assertIn('<td class="num">1 GB</td>', html)
+
     def test_format_helpers(self):
         self.assertEqual(report.fmt_bytes(1536), "1.5 KB")
         self.assertEqual(report.fmt_bytes(None), "")
