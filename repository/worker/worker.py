@@ -28,6 +28,14 @@ class TaskOwnershipLost(RuntimeError):
 # -----------------------------------------------------------------------------
 MAX_RETRY_COUNT = 3
 
+# Probe an idle target socket after 60 s, every 10 s, 6 probes (Windows uses its own count).
+TARGET_KEEPALIVE = {
+    "keepalives": 1,
+    "keepalives_idle": 60,
+    "keepalives_interval": 10,
+    "keepalives_count": 6,
+}
+
 # Transaction-level advisory lock that serializes task claims across agents.
 CLAIM_LOCK_KEY = 0x4B45595351  # "KEYSQ"
 
@@ -92,7 +100,7 @@ def connect_repository():
 # -----------------------------------------------------------------------------
 
 def connect_target(task, database_name=None):
-    """SQL connection to the target database; 300 s statement timeout."""
+    """SQL connection to the target database; 300 s statement timeout, TCP keepalive."""
     password = resolve_password(task)
 
     conn=  psycopg.connect(
@@ -102,6 +110,9 @@ def connect_target(task, database_name=None):
         user=task["username"],
         password=password,
         connect_timeout=10,
+        # A silently lost target fails in about 2-3 min instead of hanging forever;
+        # short network blips are not noticed.
+        **TARGET_KEEPALIVE,
         row_factory=dict_row,
     )
 

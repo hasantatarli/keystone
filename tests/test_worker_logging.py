@@ -74,6 +74,20 @@ class WorkerLoggingTests(unittest.TestCase):
         self.assertNotIn("keystone", " ".join(o.split(":", 2)[2] for o in output))
 
 
+class TargetConnectionTests(unittest.TestCase):
+    def test_target_connection_uses_tcp_keepalive(self):
+        task = make_task()
+        task["auth_type"], task["credential_data"] = "PASSWORD", "x"
+        with patch.object(worker, "resolve_password", return_value="secret"), \
+                patch.object(worker.psycopg, "connect") as connect:
+            worker.connect_target(task)
+
+        kwargs = connect.call_args.kwargs
+        self.assertEqual(kwargs["keepalives"], 1)
+        self.assertEqual((kwargs["keepalives_idle"], kwargs["keepalives_interval"],
+                          kwargs["keepalives_count"]), (60, 10, 6))
+
+
 class LogLevelTests(unittest.TestCase):
     def tearDown(self):
         logging_config.shutdown_logging()
