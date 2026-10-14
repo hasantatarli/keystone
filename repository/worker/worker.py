@@ -28,6 +28,14 @@ class TaskOwnershipLost(RuntimeError):
 # -----------------------------------------------------------------------------
 MAX_RETRY_COUNT = 3
 
+# Probe an idle target socket after 60 s, every 10 s, 6 probes (Windows uses its own count).
+TARGET_KEEPALIVE = {
+    "keepalives": 1,
+    "keepalives_idle": 60,
+    "keepalives_interval": 10,
+    "keepalives_count": 6,
+}
+
 # Transaction-level advisory lock that serializes task claims across agents.
 CLAIM_LOCK_KEY = 0x4B45595351  # "KEYSQ"
 
@@ -43,6 +51,13 @@ def task_context(task):
         "collector_key": task.get("collector_key"),
         "target_id": task.get("target_id"),
     }
+
+
+def format_database_errors(errors):
+    """'db1: error; db2: error' for run history, so a DBA sees which database failed and why."""
+    return "; ".join(
+        f"{e['database_name']}: {' '.join(str(e['error']).split())}" for e in errors
+    )
 
 
 def log_ownership_lost(task, detail):
@@ -92,7 +107,7 @@ def connect_repository():
 # -----------------------------------------------------------------------------
 
 def connect_target(task, database_name=None):
-    """SQL connection to the target database; 300 s statement timeout."""
+    """SQL connection to the target database; 300 s statement timeout, TCP keepalive."""
     password = resolve_password(task)
 
     conn=  psycopg.connect(
@@ -102,6 +117,9 @@ def connect_target(task, database_name=None):
         user=task["username"],
         password=password,
         connect_timeout=10,
+        # A silently lost target fails in about 2-3 min instead of hanging forever;
+        # short network blips are not noticed.
+        **TARGET_KEEPALIVE,
         row_factory=dict_row,
     )
 
@@ -2239,6 +2257,7 @@ def process_task(task):
                 execution_info = None
                 run_status = "SUCCESS"
                 status_message = None
+                error_message = None
 
                 if task["execution_type"] == "SSH":
                     rows = execute_ssh_collector(task)
@@ -2258,10 +2277,12 @@ def process_task(task):
                     successful_count = execution_info["successful_database_count"]
                     failed_count = execution_info["failed_database_count"]
 
+                    database_errors = format_database_errors(execution_info["errors"])
+
                     if successful_count == 0:
                         raise RuntimeError(
                             f"DATABASE-scoped collector failed for all "
-                            f"{database_count} database(s)."
+                            f"{database_count} database(s). {database_errors}"
                         )
 
                     if failed_count > 0:
@@ -2269,6 +2290,13 @@ def process_task(task):
                         status_message = (
                             f"Collector succeeded for {successful_count}/{database_count} "
                             f"database(s); {failed_count} database(s) failed."
+                        )
+                        error_message = database_errors
+                        logger.warning(
+                            "Task %s: %s on %s: %s %s", task["task_id"],
+                            task["collector_key"], task["target_name"],
+                            status_message, database_errors,
+                            extra={"context": task_context(task)},
                         )
 
             except QueryCanceled as exc:
@@ -2479,6 +2507,7 @@ def process_task(task):
                     status=run_status,
                     rows_collected=len(rows),
                     status_message=status_message,
+                    error_message=error_message,
                 )
 
                 deleted_count = remove_task(

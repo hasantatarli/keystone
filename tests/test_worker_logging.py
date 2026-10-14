@@ -74,6 +74,53 @@ class WorkerLoggingTests(unittest.TestCase):
         self.assertNotIn("keystone", " ".join(o.split(":", 2)[2] for o in output))
 
 
+class DatabaseScopedErrorTests(unittest.TestCase):
+    def run_scoped(self, errors, successful):
+        task = make_task()
+        task["execution_scope"] = "DATABASE"
+        info = {"database_count": successful + len(errors),
+                "successful_database_count": successful,
+                "failed_database_count": len(errors), "errors": errors}
+        with fake_repository(), \
+                patch.object(worker, "execute_database_scoped_collector",
+                             return_value=([], info)), \
+                self.assertLogs("keystone.worker", level="WARNING") as logs:
+            worker.process_task(task)
+            history = worker.write_run_history.call_args.kwargs
+        return history, logs.output
+
+    def test_failed_database_and_reason_are_recorded(self):
+        errors = [{"database_name": "postgres",
+                   "error": "consuming input failed:\n server closed the connection unexpectedly"}]
+        history, output = self.run_scoped(errors, successful=2)
+
+        self.assertEqual(history["status"], "PARTIAL_SUCCESS")
+        self.assertEqual(history["error_message"],
+                         "postgres: consuming input failed: server closed the connection unexpectedly")
+        self.assertIn("postgres: consuming input failed", output[0])
+
+    def test_all_databases_failed_keeps_the_reasons(self):
+        errors = [{"database_name": "a", "error": "x"}, {"database_name": "b", "error": "y"}]
+        history, _ = self.run_scoped(errors, successful=0)
+
+        self.assertEqual(history["status"], "FAILED")
+        self.assertIn("a: x; b: y", history["error_message"])
+
+
+class TargetConnectionTests(unittest.TestCase):
+    def test_target_connection_uses_tcp_keepalive(self):
+        task = make_task()
+        task["auth_type"], task["credential_data"] = "PASSWORD", "x"
+        with patch.object(worker, "resolve_password", return_value="secret"), \
+                patch.object(worker.psycopg, "connect") as connect:
+            worker.connect_target(task)
+
+        kwargs = connect.call_args.kwargs
+        self.assertEqual(kwargs["keepalives"], 1)
+        self.assertEqual((kwargs["keepalives_idle"], kwargs["keepalives_interval"],
+                          kwargs["keepalives_count"]), (60, 10, 6))
+
+
 class LogLevelTests(unittest.TestCase):
     def tearDown(self):
         logging_config.shutdown_logging()

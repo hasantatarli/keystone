@@ -22,7 +22,8 @@ from psycopg.rows import dict_row
 
 from repository.agent.agent import Agent
 from repository.agent.jobs import CollectorJobs
-from repository.agent.pool import WorkerPool
+from repository.agent import pool as pool_module
+from repository.agent.pool import WorkerPool, load_duration_stats, long_running_threshold
 from repository.agent.scheduler import (
     JobAdapter,
     ScheduledItem,
@@ -407,6 +408,29 @@ class SchedulerRepositoryTests(unittest.TestCase):
         self.tick(datetime.now(timezone.utc))
         self.assertEqual(self.queued(), [assignment])
 
+    # ------------------------------------------------------- long-running stats
+
+    def test_duration_stats_use_recent_successful_runs_only(self):
+        assignment = self.assign("PG_ACTIVITY_SNAPSHOT", interval=60)
+        start = datetime.now(timezone.utc) - timedelta(hours=1)
+        durations = [1000] * 6 + [3_000_000]           # one 50-minute outlier
+        for i, ms in enumerate(durations):
+            self.conn.execute(
+                "INSERT INTO keystone.collector_run_history (assignment_id, started_at, "
+                "finished_at, status, execution_time_ms, executed_by) "
+                "VALUES (%s, %s, %s, 'SUCCESS', %s, 'test')",
+                (assignment, start + timedelta(minutes=i), start + timedelta(minutes=i), ms))
+        self.record_run(assignment, start + timedelta(minutes=30), status="TIMEOUT")
+        self.conn.commit()
+
+        median, runs, expected = load_duration_stats(self.conn, [assignment])[assignment]
+        self.assertEqual((median, runs, expected), (1.0, 7, None))
+
+        self.conn.execute("UPDATE keystone.collector_assignment SET expected_max_seconds = 3600 "
+                          "WHERE assignment_id = %s", (assignment,))
+        self.conn.commit()
+        self.assertEqual(load_duration_stats(self.conn, [assignment])[assignment][2], 3600)
+
     # --------------------------------------------------------------- claiming
 
     def test_claim_respects_per_target_limit(self):
@@ -557,10 +581,55 @@ class WorkerPoolTests(unittest.TestCase):
         start = T0 + timedelta(seconds=45)
         self.waiting = self.tasks(1, 2, scheduled_at=T0, started_at=start)
         pool = self.make_pool(max_workers=5)
+        pool.started_at = T0 - timedelta(hours=1)
 
         with self.assertLogs("keystone.pool", level="WARNING") as logs:
             pool.fill()
         self.assertEqual(len([r for r in logs.records if r.levelname == "WARNING"]), 1)
+
+    def test_backlog_from_before_agent_start_does_not_warn(self):
+        # Queued while the agent was down: delay is downtime, not slot shortage.
+        self.waiting = self.tasks(1, scheduled_at=T0, started_at=T0 + timedelta(seconds=70))
+        pool = self.make_pool()
+        pool.started_at = T0 + timedelta(seconds=69)
+        with self.assertNoLogs("keystone.pool", level="WARNING"):
+            pool.fill()
+
+    def test_long_running_threshold(self):
+        self.assertEqual(long_running_threshold(None, 0), 600)          # no history
+        self.assertEqual(long_running_threshold(30, 4), 600)            # too little history
+        self.assertEqual(long_running_threshold(30, 5), 120)            # floor 2 min
+        self.assertEqual(long_running_threshold(60, 30), 180)           # weekend example: 3 min
+        self.assertEqual(long_running_threshold(60, 30, 3600), 3600)    # manual override
+
+    def test_long_running_task_is_reported_once_and_not_stopped(self):
+        clock = [0.0]
+        self.waiting = self.tasks(1, collector_key="PG_TABLE_CAPACITY", target_name="lab")
+        pool = self.make_pool(monotonic=lambda: clock[0])
+        pool.fill()
+
+        stats = {1: (60.0, 30, None)}                 # usually 1 min -> threshold 180 s
+        with patch.object(pool_module, "load_duration_stats", return_value=stats):
+            clock[0] = 170
+            with self.assertNoLogs("keystone.pool", level="WARNING"):
+                pool.check_long_running()
+            clock[0] = 200
+            with self.assertLogs("keystone.pool", level="WARNING") as logs:
+                pool.check_long_running()
+            clock[0] = 400
+            with self.assertNoLogs("keystone.pool", level="WARNING"):
+                pool.check_long_running()
+
+        self.assertIn("PG_TABLE_CAPACITY on lab running for 3 min", logs.output[0])
+        self.assertEqual(pool.running_count, 1)       # still running
+
+    def test_short_tasks_do_not_touch_the_repository(self):
+        self.waiting = self.tasks(1)
+        pool = self.make_pool(monotonic=lambda: 0.0)
+        pool.fill()
+        with patch.object(pool_module, "load_duration_stats") as stats:
+            pool.check_long_running()
+        stats.assert_not_called()
 
     def test_run_stops_when_stop_event_is_set(self):
         pool = self.make_pool()
