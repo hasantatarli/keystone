@@ -103,11 +103,17 @@ Runs are started with `python -m repository.intelligence.assessment_engine --ass
 
 ## Known Issues / Open Design Decisions
 
-### 1. Assessment run failure handling
+### 1. Assessment run failure handling — resolved by V023 / ADR-0014
+
+The run row is now committed first; engine failures end FAILED with `status_message`, rule failures end that rule as ERROR and the run as PARTIAL. Original note:
+
 
 An exception during evaluation can currently leave an `assessment_run` in RUNNING state. This was observed during refactor testing. The engine needs explicit exception handling so technical execution failures finish the run as FAILED before the exception is propagated or reported.
 
-### 2. Assessment outcome vs technical status
+### 2. Assessment outcome vs technical status — resolved by V023 / ADR-0014
+
+Outcomes are persisted per rule in `keystone.assessment_result`. Original note:
+
 
 A rule can be skipped because required evidence is missing or stale while the assessment run still finishes with status SUCCESS.
 

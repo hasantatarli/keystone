@@ -38,9 +38,11 @@ For each enabled rule of an assessment:
 1. Load the rule's evidence requirements.
 2. Load each evidence source once per run (`EVIDENCE_LOADERS`) and reuse it for other rules in the same run.
 3. Validate freshness: the newest evidence row must be no older than `max_age_seconds` at evaluation time.
-4. If required evidence is missing or stale, the rule is **not evaluated**.
+4. If required evidence is missing or stale, the rule is **not evaluated** and its result is INSUFFICIENT_EVIDENCE.
 5. Otherwise call the evaluator, which returns zero or more findings.
-6. Persist each finding with the rule's finding template and recommendation.
+6. Persist each finding with the rule's finding template and recommendation, and the rule's result (HEALTHY or ATTENTION_REQUIRED with the highest severity).
+
+Each rule runs in its own transaction. If anything fails, the rule's partial work is rolled back and its result is ERROR with the error message.
 
 ## Common semantics
 
@@ -55,7 +57,7 @@ For each enabled rule of an assessment:
 
 These apply to every rule and are tracked in `docs/DEVELOPMENT_STATUS.md`:
 
-- **Assessment outcome is not yet persisted.** A rule skipped for missing or stale evidence is only reported on the console, and a run with skipped rules still ends SUCCESS. The architecture requires HEALTHY / ATTENTION_REQUIRED / INSUFFICIENT_EVIDENCE per check; this is MVP Plan Phase 0.
+- **Outcomes are persisted per rule (since V023, ADR-0014).** Every evaluated rule records HEALTHY, ATTENTION_REQUIRED, INSUFFICIENT_EVIDENCE (with the evidence source and age) or ERROR in `keystone.assessment_result`. A rule that fails technically does not stop the others; the run then ends PARTIAL.
 - **Empty evidence looks like missing evidence.** A collector that legitimately returns no rows (for example no replication slots) cannot be distinguished from a collector that never ran.
 - **Findings can persist after recovery within the freshness window.** If a condition is resolved but no new evidence has been collected, the previous snapshot still produces the finding until fresh evidence arrives or the evidence becomes stale.
 - **No finding lifecycle yet.** Every run creates new findings; the same condition seen in consecutive runs is not linked. Required for continuous assessment (MVP Plan Phase 2).
