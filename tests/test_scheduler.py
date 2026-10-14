@@ -178,6 +178,57 @@ class SchedulerRuleTests(unittest.TestCase):
         self.assertEqual(adapter.runs, [self.at(37)])
         self.assertEqual(adapter.planned, [self.at(37)])   # late: planned "now", not 12:00
 
+    def test_slot_start_with_offset(self):
+        now = datetime(2026, 10, 14, 12, 34, 56, tzinfo=timezone.utc)
+        self.assertEqual(slot_start(now, 60, 30), now.replace(second=30))
+        early = now.replace(second=10)
+        self.assertEqual(slot_start(early, 60, 30), now.replace(minute=33, second=30))
+
+    def test_item_with_offset_runs_after_the_boundary(self):
+        clock = self.clock
+
+        class OffsetAdapter(FakeAdapter):
+            def list_items(self, conn):
+                return [ScheduledItem("FAKE", ("o",), 60, self.history, self.finished,
+                                      offset_seconds=30)]
+
+        adapter = OffsetAdapter(clock)
+        adapter.history = adapter.finished = T0 - timedelta(seconds=10)   # 11:59:50
+        scheduler = Scheduler([adapter], clock=clock)
+
+        self.tick(scheduler, 29)          # 12:00:29
+        self.assertEqual(adapter.runs, [])
+        self.tick(scheduler, 1)           # 12:00:30
+        self.assertEqual(adapter.planned, [self.at(30)])
+        self.assertEqual(scheduler.next_wake_at, self.at(90))
+
+    def no_catch_up_adapter(self):
+        class NoCatchUpAdapter(FakeAdapter):
+            def list_items(self, conn):
+                return [ScheduledItem("FAKE", ("n",), 60, self.history, self.finished,
+                                      offset_seconds=30, catch_up=False)]
+        return NoCatchUpAdapter(self.clock)
+
+    def test_without_catch_up_a_late_start_waits_for_next_slot(self):
+        # Agent starts at 12:00:50, 20 s after the 12:00:30 slot: wait for 12:01:30.
+        adapter = self.no_catch_up_adapter()
+        adapter.history = adapter.finished = T0 - timedelta(hours=3)
+        scheduler = Scheduler([adapter], clock=self.clock)
+
+        self.tick(scheduler, 50)          # 12:00:50, 20 s late
+        self.assertEqual(adapter.runs, [])
+        self.tick(scheduler, 40)          # 12:01:30
+        self.assertEqual(adapter.planned, [self.at(90)])
+
+    def test_without_catch_up_never_run_item_also_waits(self):
+        adapter = self.no_catch_up_adapter()
+        scheduler = Scheduler([adapter], clock=self.clock)
+
+        self.tick(scheduler, 50)
+        self.assertEqual(adapter.runs, [])
+        self.tick(scheduler, 40)
+        self.assertEqual(adapter.planned, [self.at(90)])
+
     def test_next_wake_is_the_next_slot_boundary(self):
         scheduler = Scheduler([self.adapter(interval=60)], clock=self.clock)
         self.tick(scheduler, 10)

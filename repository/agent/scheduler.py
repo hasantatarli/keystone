@@ -29,6 +29,8 @@ class ScheduledItem:
     last_started_at: datetime = None          # from the adapter's own history
     last_finished_at: datetime = None         # finish of that same run
     is_busy: bool = False                     # queued or running right now
+    offset_seconds: int = 0                   # run this long after each slot
+    catch_up: bool = True                     # run once at once when overdue
     payload: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -43,10 +45,17 @@ class JobAdapter:
     def run(self, conn, item, planned_at):
         raise NotImplementedError
 
+    def on_start(self, conn):
+        """Called once when this agent becomes the scheduler (cleanup, checks)."""
 
-def slot_start(now, interval_seconds):
-    """Start of the fixed time slot containing now (grid anchored to the Unix epoch)."""
-    start = (int(now.timestamp()) // interval_seconds) * interval_seconds
+    def shutdown(self):
+        """Called when the agent stops; wait for work the adapter started itself."""
+
+
+def slot_start(now, interval_seconds, offset_seconds=0):
+    """Start of the fixed time slot containing now (grid anchored to the Unix epoch + offset)."""
+    shifted = int(now.timestamp()) - offset_seconds
+    start = (shifted // interval_seconds) * interval_seconds + offset_seconds
     return datetime.fromtimestamp(start, tz=timezone.utc)
 
 
@@ -56,7 +65,8 @@ class Scheduler:
     Rules: items run on a fixed grid (every interval, aligned to the clock);
     a slot that began while the previous run was still going is skipped;
     a failed run counts as run; after downtime an item runs once at once
-    (no catch-up of every missed slot); an in-memory dispatch time covers
+    (no catch-up of every missed slot), unless catch_up is off: then it
+    waits for the next slot; an in-memory dispatch time covers
     the case where the run could not be recorded in the repository.
     """
 
@@ -81,19 +91,20 @@ class Scheduler:
     def is_due(self, item, now):
         if item.is_busy:
             return False
+        slot = slot_start(now, item.interval_seconds, item.offset_seconds)
+        if not item.catch_up and now - slot > self.grace:
+            return False                # no catch-up: wait for the next slot
         started, finished = self.last_run(item)
         if started is None:
             return True
-
-        slot = slot_start(now, item.interval_seconds)
         # Already ran in this slot, or the slot began while the previous run was busy.
         return started < slot and finished <= slot
 
     def planned_time(self, item, now):
         """The slot start when on time; now for a first run or a late catch-up."""
-        slot = slot_start(now, item.interval_seconds)
+        slot = slot_start(now, item.interval_seconds, item.offset_seconds)
         started, _ = self.last_run(item)
-        if started is None or now - slot > self.grace:
+        if item.catch_up and (started is None or now - slot > self.grace):
             return now
         return slot
 
@@ -115,7 +126,7 @@ class Scheduler:
                 continue
 
             for item in items:
-                boundary = (slot_start(now, item.interval_seconds)
+                boundary = (slot_start(now, item.interval_seconds, item.offset_seconds)
                             + timedelta(seconds=item.interval_seconds))
                 next_wake = boundary if next_wake is None else min(next_wake, boundary)
 
