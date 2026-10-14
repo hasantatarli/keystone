@@ -51,6 +51,10 @@ XID_THRESHOLDS = [
     threshold("WARNING", 1_500_000_000, "TRANSACTION"),
     threshold("CRITICAL", 1_800_000_000, "TRANSACTION"),
 ]
+LONG_RUNNING_THRESHOLDS = [
+    threshold("WARNING", 1800, "SECOND"),
+    threshold("CRITICAL", 3600, "SECOND"),
+]
 ABORTED_CONNECTION_THRESHOLDS = [
     threshold("WARNING", 1, "CONNECTION"),
 ]
@@ -158,6 +162,91 @@ class LongIdleTransactionTests(unittest.TestCase):
     def test_thresholds_with_other_units_are_ignored(self):
         thresholds = [threshold("CRITICAL", 1, "TRANSACTION")]
         self.assertEqual(self.evaluate(self.session(950), thresholds=thresholds), [])
+
+
+class LongRunningTransactionTests(unittest.TestCase):
+    """PG-TRAN-003"""
+
+    def session(self, transaction_age_seconds, state="active", **overrides):
+        row = {
+            "snapshot_id": 1,
+            "captured_at": NOW,
+            "pid": 5151,
+            "backend_type": "client backend",
+            "state": state,
+            "transaction_start": NOW - timedelta(seconds=transaction_age_seconds),
+            "state_change": NOW - timedelta(seconds=5),
+        }
+        row.update(overrides)
+        return row
+
+    def evaluate(self, *rows, thresholds=LONG_RUNNING_THRESHOLDS):
+        return engine.evaluate_long_running_transaction(
+            list(rows), rule(), thresholds
+        )
+
+    def test_below_warning_threshold_produces_no_finding(self):
+        self.assertEqual(self.evaluate(self.session(1799.9)), [])
+
+    def test_exactly_warning_threshold_is_warning(self):
+        self.assertEqual(severities(self.evaluate(self.session(1800))), ["WARNING"])
+
+    def test_exactly_critical_threshold_is_critical(self):
+        self.assertEqual(severities(self.evaluate(self.session(3600))), ["CRITICAL"])
+
+    def test_threshold_order_does_not_change_severity(self):
+        for thresholds in (LONG_RUNNING_THRESHOLDS,
+                           list(reversed(LONG_RUNNING_THRESHOLDS))):
+            with self.subTest(order=[t["severity"] for t in thresholds]):
+                self.assertEqual(
+                    severities(self.evaluate(self.session(4000),
+                                             thresholds=thresholds)),
+                    ["CRITICAL"],
+                )
+
+    def test_any_working_or_idle_state_is_measured(self):
+        for state in ("active", "idle in transaction", "fastpath function call"):
+            with self.subTest(state=state):
+                self.assertEqual(
+                    severities(self.evaluate(self.session(2000, state=state))),
+                    ["WARNING"],
+                )
+
+    def test_aborted_transactions_are_excluded(self):
+        # Covered by PG-CONN-001; the failed top-level transaction has
+        # already released its snapshot and locks.
+        row = self.session(5000, state="idle in transaction (aborted)")
+        self.assertEqual(self.evaluate(row), [])
+
+    def test_sessions_without_transaction_are_ignored(self):
+        self.assertEqual(self.evaluate(self.session(5000, state="idle",
+                                                    transaction_start=None)), [])
+
+    def test_non_client_backends_are_ignored(self):
+        row = self.session(5000, backend_type="autovacuum worker")
+        self.assertEqual(self.evaluate(row), [])
+
+    def test_metric_is_transaction_age_not_idle_time(self):
+        # Idle for 5 s inside a 2000 s old transaction: reported here,
+        # while PG-TRAN-001 would report nothing.
+        row = self.session(2000, state="idle in transaction")
+        finding = self.evaluate(row)[0]
+        self.assertAlmostEqual(finding["observed_value"], 2000)
+        self.assertEqual(
+            engine.evaluate_long_idle_transaction([row], rule(),
+                                                  IDLE_TRANSACTION_THRESHOLDS),
+            [],
+        )
+
+    def test_finding_describes_the_session_and_its_state(self):
+        finding = self.evaluate(self.session(2000, state="active"))[0]
+        self.assertEqual(finding["subject_type"], "SESSION")
+        self.assertEqual(finding["subject_identifier"], "5151")
+        self.assertEqual(finding["observed_unit"], "SECOND")
+        self.assertEqual(
+            finding["template_values"],
+            {"pid": 5151, "duration_seconds": "2000.0", "state": "active"},
+        )
 
 
 class DatabaseXidWraparoundTests(unittest.TestCase):
