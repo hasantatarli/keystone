@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 import psycopg
 from psycopg.rows import dict_row
 
+from repository.common.logging_config import configure_logging, get_logger
+
+
+# Console output, the log file and keystone.event_log all go through this
+# logger (ADR-0014). Without configure_logging() (for example in tests) INFO
+# records are not shown and WARNING+ fall back to stderr.
+logger = get_logger("assessment_engine")
+
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -803,9 +811,9 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
             f"No evidence requirements defined for rule: {rule['rule_key']}"
         )
 
-    print("Evidence requirements:")
+    logger.info("Evidence requirements:")
     for requirement in evidence_requirements:
-        print(requirement)
+        logger.info("%s", requirement)
 
     # MVP evaluators currently consume one evidence row-set. Keep evidence
     # loading and freshness checks generic so new rules do not add branches
@@ -886,9 +894,11 @@ def mark_run_failed(conn, assessment_run_id, exc):
                 message,
             )
     except Exception as mark_exc:
-        print(
-            f"WARNING: could not mark assessment run {assessment_run_id} "
-            f"as FAILED: {mark_exc}"
+        logger.critical(
+            "Could not mark assessment run %s as FAILED: %s",
+            assessment_run_id,
+            mark_exc,
+            extra={"context": {"assessment_run_id": assessment_run_id}},
         )
 
 
@@ -924,8 +934,8 @@ def run_assessment(
         evaluation_time = datetime.now(timezone.utc)
 
     assessment = load_assessment(conn, assessment_key)
-    print("Assessment:")
-    print(assessment)
+    logger.info("Assessment:")
+    logger.info("%s", assessment)
 
     assessment_run_id = create_assessment_run(
         conn,
@@ -934,7 +944,7 @@ def run_assessment(
         datetime.now(timezone.utc),
     )
     conn.commit()
-    print(f"Assessment Run ID: {assessment_run_id}")
+    logger.info("Assessment Run ID: %s", assessment_run_id)
 
     try:
         rules = load_rules(conn, assessment["assessment_id"])
@@ -946,8 +956,8 @@ def run_assessment(
         error_count = 0
 
         for rule in rules:
-            print()
-            print(f"Evaluating {rule['rule_key']} - {rule['name']}")
+            logger.info("")
+            logger.info("Evaluating %s - %s", rule["rule_key"], rule["name"])
 
             try:
                 with conn.transaction():
@@ -966,9 +976,11 @@ def run_assessment(
                             rule,
                             finding,
                         )
-                        print(
-                            f"Finding {finding_id}: "
-                            f"{finding['severity']} - {rule['name']}"
+                        logger.info(
+                            "Finding %s: %s - %s",
+                            finding_id,
+                            finding["severity"],
+                            rule["name"],
                         )
 
                     insert_assessment_result(
@@ -989,6 +1001,22 @@ def run_assessment(
                 outcome = OUTCOME_ERROR
                 reason = f"{type(exc).__name__}: {exc}"
 
+                # The traceback goes to the log file and event_log; the
+                # assessment result keeps the short message.
+                logger.warning(
+                    "Rule %s ended with ERROR in assessment run %s: %s",
+                    rule["rule_key"],
+                    assessment_run_id,
+                    reason,
+                    exc_info=True,
+                    extra={
+                        "context": {
+                            "assessment_run_id": assessment_run_id,
+                            "rule_key": rule["rule_key"],
+                        }
+                    },
+                )
+
                 with conn.transaction():
                     insert_assessment_result(
                         conn,
@@ -1001,7 +1029,11 @@ def run_assessment(
                         evaluation_time,
                     )
 
-            print(f"Outcome: {outcome}" + (f" ({reason})" if reason else ""))
+            logger.info(
+                "Outcome: %s%s",
+                outcome,
+                f" ({reason})" if reason else "",
+            )
 
         status = "PARTIAL" if error_count else "SUCCESS"
         status_message = (
@@ -1018,11 +1050,21 @@ def run_assessment(
 
     except Exception as exc:
         mark_run_failed(conn, assessment_run_id, exc)
-        print(f"Assessment Run {assessment_run_id} FAILED: {exc}")
+        logger.error(
+            "Assessment run %s FAILED: %s",
+            assessment_run_id,
+            exc,
+            exc_info=True,
+            extra={"context": {"assessment_run_id": assessment_run_id}},
+        )
         raise
 
-    print()
-    print(f"Assessment Run {assessment_run_id} completed with status {status}.")
+    logger.info("")
+    logger.info(
+        "Assessment Run %s completed with status %s.",
+        assessment_run_id,
+        status,
+    )
 
     return assessment_run_id
 
@@ -1063,6 +1105,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    configure_logging("assessment_engine", connect=connect_repository)
 
     with connect_repository() as conn:
         run_assessment(

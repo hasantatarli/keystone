@@ -10,3 +10,6 @@ __pycache__/
 # Local environment / secrets
 .env
 .env.*
+
+# Local log files (ADR-0014)
+logs/

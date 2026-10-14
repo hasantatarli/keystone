@@ -101,6 +101,10 @@ Controlled evidence means rows named `keystone_test_*` were inserted into the la
 
 Runs are started with `python -m repository.intelligence.assessment_engine --assessment <assessment_key> --target <target_id>`; without arguments the engine runs `PG_CONNECTION_HEALTH` for target 1.
 
+Technical logs (ADR-0014): the engine writes its console output also to `logs/assessment_engine.log` (rotating; directory overridable with `KEYSTONE_LOG_DIR`), and WARNING and above to `keystone.event_log`:
+
+`SELECT logged_at, level, component, message, context FROM keystone.event_log ORDER BY logged_at DESC LIMIT 20;`
+
 ## Known Issues / Open Design Decisions
 
 ### 1. Assessment run failure handling — resolved by V023 / ADR-0014
