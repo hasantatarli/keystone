@@ -581,10 +581,19 @@ class WorkerPoolTests(unittest.TestCase):
         start = T0 + timedelta(seconds=45)
         self.waiting = self.tasks(1, 2, scheduled_at=T0, started_at=start)
         pool = self.make_pool(max_workers=5)
+        pool.started_at = T0 - timedelta(hours=1)
 
         with self.assertLogs("keystone.pool", level="WARNING") as logs:
             pool.fill()
         self.assertEqual(len([r for r in logs.records if r.levelname == "WARNING"]), 1)
+
+    def test_backlog_from_before_agent_start_does_not_warn(self):
+        # Queued while the agent was down: delay is downtime, not slot shortage.
+        self.waiting = self.tasks(1, scheduled_at=T0, started_at=T0 + timedelta(seconds=70))
+        pool = self.make_pool()
+        pool.started_at = T0 + timedelta(seconds=69)
+        with self.assertNoLogs("keystone.pool", level="WARNING"):
+            pool.fill()
 
     def test_long_running_threshold(self):
         self.assertEqual(long_running_threshold(None, 0), 600)          # no history

@@ -53,6 +53,13 @@ def task_context(task):
     }
 
 
+def format_database_errors(errors):
+    """'db1: error; db2: error' for run history, so a DBA sees which database failed and why."""
+    return "; ".join(
+        f"{e['database_name']}: {' '.join(str(e['error']).split())}" for e in errors
+    )
+
+
 def log_ownership_lost(task, detail):
     """Another worker took the task over (stale recovery); this one stops quietly."""
     logger.warning("Task %s: ownership lost (%s).", task["task_id"], detail,
@@ -2250,6 +2257,7 @@ def process_task(task):
                 execution_info = None
                 run_status = "SUCCESS"
                 status_message = None
+                error_message = None
 
                 if task["execution_type"] == "SSH":
                     rows = execute_ssh_collector(task)
@@ -2269,10 +2277,12 @@ def process_task(task):
                     successful_count = execution_info["successful_database_count"]
                     failed_count = execution_info["failed_database_count"]
 
+                    database_errors = format_database_errors(execution_info["errors"])
+
                     if successful_count == 0:
                         raise RuntimeError(
                             f"DATABASE-scoped collector failed for all "
-                            f"{database_count} database(s)."
+                            f"{database_count} database(s). {database_errors}"
                         )
 
                     if failed_count > 0:
@@ -2280,6 +2290,13 @@ def process_task(task):
                         status_message = (
                             f"Collector succeeded for {successful_count}/{database_count} "
                             f"database(s); {failed_count} database(s) failed."
+                        )
+                        error_message = database_errors
+                        logger.warning(
+                            "Task %s: %s on %s: %s %s", task["task_id"],
+                            task["collector_key"], task["target_name"],
+                            status_message, database_errors,
+                            extra={"context": task_context(task)},
                         )
 
             except QueryCanceled as exc:
@@ -2490,6 +2507,7 @@ def process_task(task):
                     status=run_status,
                     rows_collected=len(rows),
                     status_message=status_message,
+                    error_message=error_message,
                 )
 
                 deleted_count = remove_task(

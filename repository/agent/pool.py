@@ -1,5 +1,6 @@
 """Continuous worker pool (ADR-0015): a freed slot claims the next task at once."""
 
+from datetime import datetime, timezone
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -87,6 +88,7 @@ class WorkerPool:
         self.recover = recover or worker.recover_stale_tasks
         self.lag_warning_seconds = lag_warning_seconds
         self.monotonic = monotonic
+        self.started_at = datetime.now(timezone.utc)
 
         self.executor = ThreadPoolExecutor(max_workers=max_workers,
                                            thread_name_prefix="keystone-task")
@@ -145,6 +147,8 @@ class WorkerPool:
         scheduled, started = task.get("scheduled_at"), task.get("started_at")
         if scheduled is None or started is None:
             return
+        if scheduled < self.started_at:
+            return      # queued while no agent was running: not a slot shortage
         lag = (started - scheduled).total_seconds()
         if lag <= self.lag_warning_seconds:
             return
