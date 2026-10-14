@@ -195,7 +195,11 @@ One-command health check done (2026-10-14, PR #15, lab-verified): `python -m rep
 
 Next (MVP Plan Phase 1):
 
-1. HTML report from a health check (Turkish/English frame) — content and layout to be agreed first.
+1. HTML report from a health check (Turkish/English frame): first draft in PR #16 (draft), lab report generated 2026-10-14. To discuss next session:
+   - Plain-language results ("explain it to a non-DBA"): per rule a healthy statement, meaning / likely cause, and impact, stored in the Dictionary per language (rule text table: rule, language, text type, text); report groups rules by topic (replication, transactions, connections…) with one plain sentence each. Revisits the 2026-10-14 decision that rule texts stay English. Claude drafts TR/EN texts for the six rules, Hasan reviews as DBA.
+   - Later, Engineering Intelligence: combine findings into one diagnosis (advanced RCA).
+   - Open report questions: logo / company name, customer name, extra sections, PDF output.
+   - Several independent systems of one customer: per-system report plus an overview page; needs a customer concept in the data model.
 2. Default collector intervals from collector header metadata.
 3. Windows service setup for the agent.
 
