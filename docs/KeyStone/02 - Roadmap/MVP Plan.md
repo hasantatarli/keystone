@@ -31,6 +31,7 @@ Design constraint from Phase 1: collectors remain plain SQL so the offline bundl
 
 - **One-command health check:** run a set of assessments against a target and collect the required evidence first, through the existing execution engine. Replaces the manual queue / worker / engine sequence.
 - **Report:** a readable health check report generated from a run: coverage, healthy areas, findings, insufficient evidence, recommendations.
+  - **Language (decided 2026-10-14):** the report frame (headings, summary, section labels such as healthy areas and areas not assessed) is produced in Turkish and English; rule finding and recommendation texts remain English in the Dictionary for now. Turkey is the initial market; a multilingual Dictionary is added when a real customer needs translated rule texts. The report generator must not hard-code a single language.
 
 - **Offline evidence (no installation on the customer side):** many customers allow only a GUI client such as pgAdmin on a monitored jump server, with no CLI and no permission to install software. For them the health check must also accept evidence collected without a Keystone connection:
   - **Customer side:** a read-only SQL bundle script, generated automatically from the existing collector SQL (never maintained by hand), that returns one JSON document in one cell. It runs in pgAdmin, psql or DBeaver and creates no objects. One script for SYSTEM-scoped collectors, one to run in each database for DATABASE-scoped collectors.
