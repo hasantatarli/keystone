@@ -407,6 +407,8 @@ def parse_args(argv=None):
     parser.add_argument("--assessment", help="only this assessment_key (default: all enabled)")
     parser.add_argument("--wait-minutes", type=int, default=DEFAULT_WAIT_MINUTES,
                         help=f"per-collector wait limit (default: {DEFAULT_WAIT_MINUTES})")
+    parser.add_argument("--report", choices=["tr", "en"],
+                        help="also write the HTML report in this language")
     return parser.parse_args(argv)
 
 
@@ -422,6 +424,10 @@ def main(argv=None):
                                        args.assessment, args.wait_minutes, requested_by=user)
     with worker.connect_repository() as conn:
         print_summary(conn, health_check_id)
+        if args.report:
+            from repository.report.health_check_report import write_report
+            path = write_report(conn, health_check_id, args.report)
+            print(f"\nReport: {path.resolve()}")
 
 
 if __name__ == "__main__":

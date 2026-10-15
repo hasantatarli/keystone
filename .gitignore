@@ -13,3 +13,6 @@ __pycache__/
 
 # Local log files (ADR-0014)
 logs/
+
+# Generated health check reports (may contain customer data)
+reports/
