@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 import psycopg
+from psycopg.types.json import Jsonb
 from psycopg.rows import dict_row
 
 from repository.common.logging_config import configure_logging, get_logger
@@ -261,12 +262,13 @@ def insert_finding(
                 observed_value,
                 observed_unit,
                 subject_type,
-                subject_identifier
+                subject_identifier,
+                details
             )
             VALUES
             (
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s
             )
             RETURNING finding_id
             """,
@@ -281,6 +283,7 @@ def insert_finding(
                 finding["observed_unit"],
                 finding["subject_type"],
                 finding["subject_identifier"],
+                Jsonb(finding["details"]) if finding.get("details") else None,
             ),
         )
 
@@ -301,6 +304,8 @@ def load_latest_activity_snapshot(conn, target_id):
                 pid,
                 user_name,
                 application_name,
+                host(client_addr) AS client_addr,
+                client_hostname,
                 transaction_start,
                 query_start,
                 state_change,
@@ -459,6 +464,27 @@ def match_threshold(observed_value, thresholds, unit):
     )
 
 
+# Last query is trimmed: enough to recognise the work, less customer data.
+QUERY_PREVIEW_CHARS = 200
+
+
+def session_details(row):
+    """Who / where of a session for the finding (shown in technical reports only)."""
+    query = " ".join((row.get("query_text") or "").split())
+    if len(query) > QUERY_PREVIEW_CHARS:
+        query = query[:QUERY_PREVIEW_CHARS] + "..."
+    details = {
+        "database": row.get("database_name"),
+        "user": row.get("user_name"),
+        "application": row.get("application_name"),
+        "client_addr": row.get("client_addr"),
+        "client_hostname": row.get("client_hostname"),
+        "state": row.get("state"),
+        "last_query": query or None,
+    }
+    return {key: value for key, value in details.items() if value not in (None, "")}
+
+
 def evaluate_long_idle_transaction(rows, rule, thresholds):
     """PG-TRAN-001: how long a session has been idle in a transaction.
 
@@ -503,6 +529,7 @@ def evaluate_long_idle_transaction(rows, rule, thresholds):
                 "observed_unit": "SECOND",
                 "subject_type": "SESSION",
                 "subject_identifier": str(row["pid"]),
+                "details": session_details(row),
             }
         )
 
@@ -560,6 +587,7 @@ def evaluate_long_running_transaction(rows, rule, thresholds):
                 "observed_unit": "SECOND",
                 "subject_type": "SESSION",
                 "subject_identifier": str(row["pid"]),
+                "details": session_details(row),
             }
         )
 

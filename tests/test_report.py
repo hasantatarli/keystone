@@ -44,9 +44,12 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.execute(
             "INSERT INTO keystone.finding (assessment_run_id, rule_id, severity, title, "
             "finding_text, recommendation, observed_value, observed_unit, subject_type, "
-            "subject_identifier) VALUES (%s, %s, %s, 'Long Idle Transaction', "
+            "subject_identifier, details) VALUES (%s, %s, %s, 'Long Idle Transaction', "
             "'Session 4711 idle <script>alert(1)</script>', 'Review the application.', "
-            "1200, 'SECOND', 'SESSION', '4711')", (run["assessment_run_id"], run["rule_id"], severity))
+            "1200, 'SECOND', 'SESSION', '4711', %s)",
+            (run["assessment_run_id"], run["rule_id"], severity,
+             '{"application": "billing-api", "user": "app_user", "client_addr": "10.0.5.21", '
+             '"database": "orders", "last_query": "UPDATE invoices SET paid = true"}'))
         self.conn.execute(
             "UPDATE keystone.assessment_result SET outcome = 'ATTENTION_REQUIRED', "
             "max_severity = %s, finding_count = 1, reason = NULL "
@@ -63,8 +66,7 @@ class ReportTests(test_health_check.HealthCheckTests):
 
         self.assertIn('<html lang="tr">', page)
         self.assertIn("Veritabanı Sağlık Kontrolü Raporu", page)
-        self.assertIn("Dikkat gerektiren bulgular var.", page)
-        self.assertIn("Review the application.", page)            # Dictionary text stays English
+        self.assertIn("Dikkat gerektiren sorunlar var.", page)
         self.assertIn("1,200 SECOND", page)
         self.assertIn("Primary", page)
         self.assertIn("Replica", page)
@@ -75,11 +77,41 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("connection refused", page)                 # why a source is missing
         self.assertIn("Bağlantı hatası", page)
 
-    def test_english_frame(self):
+    def test_two_parts_executive_first(self):
+        page = self.render(self.make_check(), "tr")
+        self.assertLess(page.index("Yönetici Özeti"), page.index("Teknik Detaylar"))
+        executive = page[:page.index("Teknik Detaylar")]
+        # Plain-language Dictionary texts in the executive part, no technical context.
+        self.assertIn("Uzun süre boşta bekleyen transaction", executive)
+        self.assertIn("Olası sebep", executive)
+        self.assertNotIn("billing-api", executive)
+        self.assertNotIn("Session 4711", executive)
+
+    def test_impact_categories_and_topics(self):
+        page = self.render(self.make_check(), "tr")
+        executive = page[:page.index("Teknik Detaylar")]
+        self.assertIn("Etkilenen alanlar", executive)
+        self.assertIn("Performans", executive)                    # PG-TRAN-001 categories
+        self.assertIn("Kapasite", executive)
+        self.assertIn("Bu kontrolde incelenmedi", executive)      # Security has no rules yet
+        self.assertIn("Transaction yönetimi", executive)
+        self.assertIn("Değerlendirilemedi", executive)            # replication not assessed
+
+    def test_technical_part_shows_who_and_where(self):
+        page = self.render(self.make_check(), "tr")
+        technical = page[page.index("Teknik Detaylar"):]
+        self.assertIn("billing-api", technical)
+        self.assertIn("app_user", technical)
+        self.assertIn("10.0.5.21", technical)
+        self.assertIn("UPDATE invoices SET paid = true", technical)
+        self.assertIn("idle_in_transaction_session_timeout", technical)   # full recommendation
+
+    def test_english_frame_and_texts(self):
         page = self.render(self.make_check(), "en")
         self.assertIn("Database Health Check Report", page)
-        self.assertIn("Areas Not Assessed", page)
-        self.assertNotIn("Bulgular", page)
+        self.assertIn("Executive Summary", page)
+        self.assertIn("Long idle transaction", page)
+        self.assertNotIn("Yönetici", page)
 
     def test_database_text_is_escaped(self):
         page = self.render(self.make_check(), "tr")
@@ -88,13 +120,19 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_critical_finding_sets_the_verdict(self):
         page = self.render(self.make_check(critical=True), "en")
-        self.assertIn("There are findings that need immediate action.", page)
+        self.assertIn("There are problems that need immediate action.", page)
 
     def test_report_without_context_data_still_renders(self):
         check_id = self.run_check()
         page = self.render(check_id, "tr")
-        self.assertIn("Özet", page)
+        self.assertIn("Yönetici Özeti", page)
         self.assertIn("Bulgu yok.", page)
+
+    def test_first_sentence(self):
+        self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")
+        self.assertEqual(report.first_sentence("max_wal_size değeri 1.5 GB. Sonra"),
+                         "max_wal_size değeri 1.5 GB.")
+        self.assertEqual(report.first_sentence(""), "")
 
     def test_write_report_and_latest_check(self):
         check_id = self.make_check()
