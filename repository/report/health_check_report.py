@@ -44,7 +44,7 @@ TEXTS = {
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
         "verdict_healthy": "Değerlendirilen alanlarda sorun bulunmadı.",
         "verdict_none": "Hiçbir kontrol değerlendirilemedi; veri toplanamadı.",
-        "coverage": "{evaluated} / {total} kontrol değerlendirildi",
+        "coverage": "Bu değerlendirmeye dahil {total} kontrolden {evaluated} tanesi sonuç verdi",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "count_findings": "Bulgu", "count_critical": "Kritik", "count_warning": "Uyarı",
         "count_healthy": "Sağlıklı", "count_not_assessed": "Değerlendirilemedi",
@@ -77,7 +77,11 @@ TEXTS = {
         "meaning": "Anlamı", "impact": "Etkisi", "recommendation": "Öneri",
         "observed": "Ölçülen", "subject": "Konu",
         "detail_application": "Uygulama", "detail_user": "Kullanıcı", "detail_database": "Veritabanı",
-        "detail_client": "İstemci", "detail_state": "Durum", "detail_last_query": "Son sorgu",
+        "detail_client": "İstemci", "detail_state": "Durum", "detail_last_query": "Son gözlenen sorgu",
+        "detail_transaction_start": "Transaction başlangıcı", "detail_state_change": "Bu duruma geçiş",
+        "detail_captured_at": "Kanıt zamanı", "threshold": "Eşik",
+        "impact_note": "Bir bulgu birden fazla alanı etkileyebilir.",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -109,7 +113,7 @@ TEXTS = {
         "verdict_warning": "There are problems that need attention.",
         "verdict_healthy": "No problems were found in the assessed areas.",
         "verdict_none": "No check could be evaluated; data could not be collected.",
-        "coverage": "{evaluated} of {total} checks evaluated",
+        "coverage": "{evaluated} of the {total} checks in this assessment produced a result",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "count_findings": "Findings", "count_critical": "Critical", "count_warning": "Warning",
         "count_healthy": "Healthy", "count_not_assessed": "Not assessed",
@@ -141,7 +145,11 @@ TEXTS = {
         "meaning": "Meaning", "impact": "Impact", "recommendation": "Recommendation",
         "observed": "Observed", "subject": "Subject",
         "detail_application": "Application", "detail_user": "User", "detail_database": "Database",
-        "detail_client": "Client", "detail_state": "State", "detail_last_query": "Last query",
+        "detail_client": "Client", "detail_state": "State", "detail_last_query": "Last observed query",
+        "detail_transaction_start": "Transaction start", "detail_state_change": "In this state since",
+        "detail_captured_at": "Evidence time", "threshold": "Threshold",
+        "impact_note": "One finding can affect more than one area.",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -189,10 +197,10 @@ def load_dictionary_texts(conn):
 
     topics = {}
     for r in conn.execute(
-            "SELECT d.topic_key, d.display_order, t.language_code, t.name, t.healthy_text "
+            "SELECT d.topic_key, d.display_order, t.language_code, t.name "
             "FROM keystone.dictionary_topic d JOIN keystone.dictionary_topic_text t USING (topic_key)"):
         topic = topics.setdefault(r["topic_key"], {"order": r["display_order"], "text": {}})
-        topic["text"][r["language_code"]] = {"name": r["name"], "healthy": r["healthy_text"]}
+        topic["text"][r["language_code"]] = {"name": r["name"]}
 
     categories = {}
     for r in conn.execute(
@@ -225,7 +233,13 @@ def load_report_data(conn, health_check_id):
     results = conn.execute(
         """
         SELECT ad.assessment_key, rd.rule_id, rd.rule_key, rd.name AS rule_name, rd.topic_key,
-               res.outcome, res.max_severity, res.reason, ar.assessment_run_id
+               res.outcome, res.max_severity, res.reason, ar.assessment_run_id,
+               COALESCE(res.thresholds_used, (
+                   SELECT jsonb_agg(jsonb_build_object('severity', th.severity,
+                                                       'value', th.threshold_value,
+                                                       'unit', th.threshold_unit))
+                   FROM keystone.rule_threshold th WHERE th.rule_id = rd.rule_id
+               )) AS thresholds
         FROM keystone.assessment_run ar
         JOIN keystone.assessment_definition ad ON ad.assessment_id = ar.assessment_id
         JOIN keystone.assessment_result res ON res.assessment_run_id = ar.assessment_run_id
@@ -333,11 +347,48 @@ def fmt_uptime(start, as_of, t):
     return fmt_duration((as_of - start).total_seconds(), t)
 
 
-def fmt_observed(value, unit):
+def fmt_quantity(value, unit, t):
+    """A measured value or threshold in readable form: '5 dakika', '1.5 milyar transaction'."""
     if value is None:
         return ""
+    value = float(value)
+    if unit == "SECOND":
+        return fmt_duration(value, t)
+    if unit == "TRANSACTION" and value >= 1e9:
+        return f"{value / 1e9:g} {t['billion']} {t['unit_TRANSACTION']}"
+    number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
+    return f"{number} {t.get('unit_' + (unit or ''), unit or '')}".strip()
+
+
+def fmt_observed(value, unit, t=None):
+    if value is None:
+        return ""
+    if t is not None:
+        return fmt_quantity(value, unit, t)
     number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
     return f"{number} {unit or ''}".strip()
+
+
+def threshold_values(result, t):
+    """{'warning': '5 dakika', 'critical': '15 dakika'} from the thresholds used."""
+    values = {}
+    for th in result.get("thresholds") or []:
+        values[th["severity"].lower()] = fmt_quantity(th["value"], th["unit"], t)
+    return values
+
+
+def healthy_text(data, result, lang, t):
+    """The rule's HEALTHY text with its limits filled from the thresholds used."""
+    text = rule_text(data, result["rule_id"], lang, "HEALTHY")
+    values = threshold_values(result, t)
+    return re.sub(r"\{(warning|critical)\}", lambda m: values.get(m.group(1), m.group(0)), text)
+
+
+def threshold_line(result, t):
+    values = threshold_values(result, t)
+    parts = [f"{t['severity'][sev]} ≥ {values[sev.lower()]}" for sev in ("WARNING", "CRITICAL")
+             if sev.lower() in values]
+    return f"{t['threshold']}: " + " · ".join(parts) if parts else ""
 
 
 def fmt_duration(seconds, t):
@@ -672,8 +723,9 @@ def render_impact_chart(data, lang, t):
               f'<span><i style="background:var(--crit-bar)"></i>{e(t["severity"]["CRITICAL"])}</span>'
               f'<span><i style="background:var(--warn-bar)"></i>{e(t["severity"]["WARNING"])}</span>'
               "</div>")
+    note = f'<p class="note">{e(t["impact_note"])}</p>' if data["findings"] else ""
     return (f"<h2>{e(t['impact_title'])}</h2><div class=\"impact\">{''.join(rows)}</div>"
-            + (legend if data["findings"] else ""))
+            + (legend if data["findings"] else "") + note)
 
 
 def render_topics(data, lang, t):
@@ -683,7 +735,9 @@ def render_topics(data, lang, t):
         name = localized(entry, lang, "name") if entry else key
         status = topic["status"]
         if status == "ok":
-            text = localized(entry, lang, "healthy") if entry else ""
+            # Built from the rules' own scoped statements: no claim beyond what was checked.
+            text = " ".join(healthy_text(data, r, lang, t) for r in topic["results"]
+                            if r["outcome"] == "HEALTHY")
         elif status == "unknown":
             text = t["topic_unknown_text"]
         else:
@@ -730,9 +784,8 @@ def render_executive(data, lang, t):
             f'<p class="note">{coverage}</p><div class="tiles">'
             + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
                       for n, label in tiles)
-            + "</div>" + render_inventory(data, t) + render_impact_chart(data, lang, t)
-            + render_topics(data, lang, t)
-            + render_main_problems(data, lang, t))
+            + "</div>" + render_main_problems(data, lang, t) + render_inventory(data, t)
+            + render_impact_chart(data, lang, t) + render_topics(data, lang, t))
 
 
 def render_system(data, t):
@@ -781,11 +834,24 @@ DETAIL_LABELS = (("application", "detail_application"), ("user", "detail_user"),
                  ("state", "detail_state"))
 
 
+TIME_LABELS = (("transaction_start", "detail_transaction_start"),
+               ("state_change", "detail_state_change"),
+               ("captured_at", "detail_captured_at"))
+
+
+def fmt_clock(value):
+    """ISO time from finding details -> 'YYYY-MM-DD HH:MM:SS' (local to the repository)."""
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def render_instance(f, t):
     """One finding: technical text, measured value, subject and context (who / where)."""
     facts = []
     if f["observed_value"] is not None:
-        facts.append(f"{e(t['observed'])}: {e(fmt_observed(f['observed_value'], f['observed_unit']))}")
+        facts.append(f"{e(t['observed'])}: <b>{e(fmt_observed(f['observed_value'], f['observed_unit'], t))}</b>")
     if f["subject_identifier"]:
         facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
     details = dict(f["details"] or {})
@@ -794,12 +860,15 @@ def render_instance(f, t):
             x for x in (details.get("client_addr"), f"({details['client_hostname']})") if x)
     context = [f"{e(t[label])}: <b>{e(details[key])}</b>" for key, label in DETAIL_LABELS
                if details.get(key)]
+    times = [f"{e(t[label])}: {e(fmt_clock(details[key]))}" for key, label in TIME_LABELS
+             if details.get(key)]
     query = (f'<div class="facts">{e(t["detail_last_query"])}: '
              f'<code>{e(details["last_query"])}</code></div>' if details.get("last_query") else "")
     return (f'<div class="instance">{badge(f["severity"], t["severity"].get(f["severity"], f["severity"]))} '
             f"{e(f['finding_text'])}"
             + (f'<div class="facts">{" · ".join(facts)}</div>' if facts else "")
             + (f'<div class="facts">{" · ".join(context)}</div>' if context else "")
+            + (f'<div class="facts">{" · ".join(times)}</div>' if times else "")
             + query + "</div>")
 
 
@@ -810,7 +879,9 @@ def render_findings_detail(data, lang, t):
         rid = result["rule_id"]
         cards.append(
             f'<div class="card {e(worst)}"><h3>{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
-            f'<span class="rule">{e(result["rule_key"])}</span></h3><dl>'
+            f'<span class="rule">{e(result["rule_key"])}</span></h3>'
+            + (f'<div class="facts">{e(threshold_line(result, t))}</div>' if threshold_line(result, t) else "")
+            + "<dl>"
             f"<dt>{e(t['meaning'])}</dt><dd>{e(rule_text(data, rid, lang, 'MEANING'))}</dd>"
             f"<dt>{e(t['impact'])}</dt><dd>{e(rule_text(data, rid, lang, 'IMPACT'))}</dd>"
             f"<dt>{e(t['recommendation'])}</dt><dd>{e(rule_text(data, rid, lang, 'RECOMMENDATION', findings[0]['recommendation']))}</dd>"
@@ -827,9 +898,9 @@ def render_results(data, lang, t):
         for r in topic["results"]:
             name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
             if r["outcome"] == "HEALTHY":
-                note = rule_text(data, r["rule_id"], lang, "HEALTHY")
+                note = healthy_text(data, r, lang, t)
             elif r["outcome"] == "ATTENTION_REQUIRED":
-                note = ""
+                note = threshold_line(r, t)
             else:
                 note = explain_reason(r["reason"], data, t)
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',

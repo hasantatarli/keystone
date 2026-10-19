@@ -104,11 +104,15 @@ class LongIdleTransactionTests(unittest.TestCase):
             950, application_name="billing-api", user_name="app_user",
             client_addr="10.0.5.21", database_name="orders",
             query_text="UPDATE   invoices\n SET paid = true"))[0]
-        self.assertEqual(finding["details"], {
+        expected = {
             "application": "billing-api", "user": "app_user", "client_addr": "10.0.5.21",
             "database": "orders", "state": "idle in transaction",
             "last_query": "UPDATE invoices SET paid = true",
-        })
+            "captured_at": NOW.isoformat(),
+            "state_change": (NOW - timedelta(seconds=950)).isoformat(),
+            "transaction_start": (NOW - timedelta(seconds=950)).isoformat(),
+        }
+        self.assertEqual(finding["details"], expected)
 
     def test_last_query_is_trimmed(self):
         finding = self.evaluate(self.session(950, query_text="SELECT " + "x" * 500))[0]

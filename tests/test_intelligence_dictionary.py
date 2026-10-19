@@ -238,6 +238,25 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
         )
         self.assertEqual(missing, [])
 
+    def test_healthy_text_placeholders_have_thresholds(self):
+        # A {warning}/{critical} limit in a HEALTHY text must come from a real threshold.
+        rows = self.query(
+            """
+            SELECT rd.rule_key, t.text,
+                   array_agg(lower(th.severity)) FILTER (WHERE th.severity IS NOT NULL)
+            FROM keystone.rule_text t
+            JOIN keystone.rule_definition rd USING (rule_id)
+            LEFT JOIN keystone.rule_threshold th ON th.rule_id = rd.rule_id
+            WHERE t.text_type = 'HEALTHY'
+            GROUP BY rd.rule_key, t.text
+            """
+        )
+        import re
+        broken = [(key, text) for key, text, severities in rows
+                  for name in re.findall(r"\{(\w+)\}", text)
+                  if name not in (severities or [])]
+        self.assertEqual(broken, [])
+
     def test_every_topic_and_category_has_texts_in_every_language(self):
         missing = self.query(
             """

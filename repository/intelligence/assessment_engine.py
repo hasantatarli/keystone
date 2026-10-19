@@ -210,8 +210,9 @@ def insert_assessment_result(
     finding_count,
     reason,
     evaluated_at,
+    thresholds=None,
 ):
-    """Persist the outcome of one rule in one run (ADR-0014)."""
+    """Persist the outcome of one rule in one run (ADR-0014), with the thresholds used."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -223,9 +224,10 @@ def insert_assessment_result(
                 max_severity,
                 finding_count,
                 reason,
-                evaluated_at
+                evaluated_at,
+                thresholds_used
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 assessment_run_id,
@@ -235,8 +237,18 @@ def insert_assessment_result(
                 finding_count,
                 reason,
                 evaluated_at,
+                Jsonb(thresholds_snapshot(thresholds)) if thresholds is not None else None,
             ),
         )
+
+
+def thresholds_snapshot(thresholds):
+    """Thresholds as evaluated, so reports stay correct after the Dictionary changes."""
+    return [
+        {"severity": t["severity"], "value": float(t["threshold_value"]),
+         "unit": t["threshold_unit"]}
+        for t in thresholds
+    ]
 
 def insert_finding(
     conn,
@@ -468,6 +480,10 @@ def match_threshold(observed_value, thresholds, unit):
 QUERY_PREVIEW_CHARS = 200
 
 
+def iso(value):
+    return value.isoformat() if value is not None else None
+
+
 def session_details(row):
     """Who / where of a session for the finding (shown in technical reports only)."""
     query = " ".join((row.get("query_text") or "").split())
@@ -481,6 +497,9 @@ def session_details(row):
         "client_hostname": row.get("client_hostname"),
         "state": row.get("state"),
         "last_query": query or None,
+        "transaction_start": iso(row.get("transaction_start")),
+        "state_change": iso(row.get("state_change")),
+        "captured_at": iso(row.get("captured_at")),
     }
     return {key: value for key, value in details.items() if value not in (None, "")}
 
@@ -1003,6 +1022,7 @@ def run_assessment(
                         len(findings),
                         reason,
                         evaluation_time,
+                        load_thresholds(conn, rule["rule_id"]),
                     )
 
             except Exception as exc:

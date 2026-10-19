@@ -74,7 +74,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn('<html lang="tr">', page)
         self.assertIn("Veritabanı Sağlık Kontrolü Raporu", page)
         self.assertIn("Dikkat gerektiren sorunlar var.", page)
-        self.assertIn("1,200 SECOND", page)
+        self.assertIn("Ölçülen: <b>20 dakika</b>", page)
+        self.assertIn("Eşik: Uyarı ≥ 5 dakika · Kritik ≥ 15 dakika", page)
+        self.assertIn("Son gözlenen sorgu", page)
         self.assertIn("Primary", page)
         self.assertIn("Replica", page)
         self.assertIn("3 gün", page)
@@ -209,6 +211,38 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("30.0 / 100.0 GB", executive)
         self.assertIn("%30 dolu", executive)
         self.assertIn("1 veritabanı", executive)
+
+    def test_healthy_text_states_the_limit_used(self):
+        check_id = self.make_check()
+        # PG-TRAN-003 healthy, evaluated with a 30-minute warning threshold.
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'HEALTHY', reason = NULL, "
+            "thresholds_used = '[{\"severity\": \"WARNING\", \"value\": 1800, \"unit\": \"SECOND\"}, "
+            "{\"severity\": \"CRITICAL\", \"value\": 3600, \"unit\": \"SECOND\"}]' "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id "
+            "AND rd.rule_key = 'PG-TRAN-003'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("Açık kalma süresi 30 dakika sınırını aşan transaction yok.", page)
+        self.assertNotIn("{warning}", page)
+
+    def test_thresholds_used_win_over_current_dictionary(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET thresholds_used = "
+            "'[{\"severity\": \"WARNING\", \"value\": 120, \"unit\": \"SECOND\"}]' "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id "
+            "AND rd.rule_key = 'PG-TRAN-001'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("Eşik: Uyarı ≥ 2 dakika", page)
+        self.assertNotIn("Uyarı ≥ 5 dakika", page)
+
+    def test_quantities_are_readable(self):
+        t = report.TEXTS["tr"]
+        self.assertEqual(report.fmt_quantity(1_500_000_000, "TRANSACTION", t), "1.5 milyar transaction")
+        self.assertEqual(report.fmt_quantity(1, "CONNECTION", t), "1 bağlantı")
+        self.assertEqual(report.fmt_quantity(900, "SECOND", t), "15 dakika")
 
     def test_first_sentence(self):
         self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")
