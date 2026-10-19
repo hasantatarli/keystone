@@ -193,6 +193,12 @@ Hardening done (2026-10-14, PR #14, lab-verified): TCP keepalive on target conne
 
 One-command health check done (2026-10-14, PR #15, lab-verified): `python -m repository.healthcheck.health_check --target <id>`; V028 (`health_check`, `health_check_collection`, `assessment_run.health_check_id`); SYSTEM target includes its NODE targets; first lab run collected 9 tasks in 4.5 s, all six rules evaluated.
 
+Report review decisions (2026-10-19, Hasan + external review):
+- Reports claim only what was checked: HEALTHY texts state the check and its limit, filled from the thresholds used (stored per result, V030). What a rule does not evaluate is not listed in customer reports; it stays in the Rule Catalog known limitations and drives new rules.
+- Next rule: replication lag / replica connection state from `PG_REPLICATION_STATUS` (already collected, not evaluated).
+- Two-level reporting: per-target report plus an overview of all targets of a customer as the single entry point (one command writes the overview and the per-target reports to one folder; rows link to the reports). Overview summarizes existing assessment results (no second evaluation), shows freshness, keeps node-level problems visible. Needs a customer concept: ADR-0016. HTML first; a web application for DBAs doing live follow-up later, reusing the same overview query.
+- Executive inventory per server for small systems; for large estates only totals and exceptions (disk above limits, replicas smaller than the primary).
+
 Next (MVP Plan Phase 1):
 
 1. HTML report from a health check (Turkish/English frame): first draft in PR #16 (draft), lab report generated 2026-10-14. To discuss next session:

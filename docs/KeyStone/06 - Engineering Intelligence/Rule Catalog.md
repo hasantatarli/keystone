@@ -257,6 +257,8 @@ Lab 2026-10-05: no finding at 0, WARNING with one `BEGIN; SELECT 1/0;` session, 
 
 # Adding a Rule
 
+Texts (V029, V030): every rule has NAME, HEALTHY, MEANING, IMPACT and RECOMMENDATION in every Dictionary language, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
+
 1. Write the catalog entry first: purpose, evidence, condition, metric, thresholds, subject, limitations.
 2. Confirm the evidence is collected; if not, the collector or migration comes first.
 3. Add the Dictionary rows in a **migration** — never by hand in a repository.
