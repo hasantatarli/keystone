@@ -50,6 +50,10 @@ class ReportTests(test_health_check.HealthCheckTests):
             (run["assessment_run_id"], run["rule_id"], severity,
              '{"application": "billing-api", "user": "app_user", "client_addr": "10.0.5.21", '
              '"database": "orders", "last_query": "UPDATE invoices SET paid = true"}'))
+        # The context above belongs to this check's time window.
+        self.conn.execute(
+            "UPDATE keystone.health_check SET started_at = now() - interval '5 minutes', "
+            "finished_at = now() + interval '1 second' WHERE health_check_id = %s", (check_id,))
         self.conn.execute(
             "UPDATE keystone.assessment_result SET outcome = 'ATTENTION_REQUIRED', "
             "max_severity = %s, finding_count = 1, reason = NULL "
@@ -127,6 +131,22 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         self.assertIn("Yönetici Özeti", page)
         self.assertIn("Bulgu yok.", page)
+
+    def test_context_from_an_earlier_check_is_not_shown(self):
+        old_check = self.make_check()
+        new_check = self.run_check()          # nothing collected into the context tables
+        self.assertNotEqual(old_check, new_check)
+        page = self.render(new_check, "tr")
+        self.assertNotIn("orders", page)
+        self.assertNotIn("16.4", page)
+        self.assertIn("Bu kontrolde toplanamadı.", page)
+
+    def test_failed_collection_is_summarized_for_executives(self):
+        self.failing = {"PG_REPLICATION_SLOTS"}
+        page = self.render(self.run_check(), "tr")
+        executive = page[:page.index("Teknik Detaylar")]
+        self.assertIn("Veri toplama: 6 / 8 başarılı", executive)   # + node-3 has no connection
+        self.assertIn("connection refused", executive)
 
     def test_first_sentence(self):
         self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")

@@ -64,6 +64,9 @@ TEXTS = {
         "storage": "Disk kullanımı", "mount": "Bağlama noktası", "used": "Kullanılan",
         "total": "Toplam",
         "databases": "Veritabanları", "database": "Veritabanı", "owner": "Sahip", "size": "Boyut",
+        "not_collected_here": "Bu kontrolde toplanamadı.",
+        "collection_summary": "Veri toplama: {ok} / {total} başarılı",
+        "collection_errors": "Hata",
         "findings": "Bulgular", "no_findings": "Bulgu yok.",
         "meaning": "Anlamı", "impact": "Etkisi", "recommendation": "Öneri",
         "observed": "Ölçülen", "subject": "Konu",
@@ -116,6 +119,9 @@ TEXTS = {
         "up_since": "Uptime", "os": "Operating system", "cpu": "CPU", "memory": "Memory",
         "storage": "Disk usage", "mount": "Mount point", "used": "Used", "total": "Total",
         "databases": "Databases", "database": "Database", "owner": "Owner", "size": "Size",
+        "not_collected_here": "Not collected in this check.",
+        "collection_summary": "Data collection: {ok} of {total} succeeded",
+        "collection_errors": "Error",
         "findings": "Findings", "no_findings": "No findings.",
         "meaning": "Meaning", "impact": "Impact", "recommendation": "Recommendation",
         "observed": "Observed", "subject": "Subject",
@@ -195,6 +201,8 @@ def load_report_data(conn, health_check_id):
     if check is None:
         raise ValueError(f"Health check {health_check_id} does not exist.")
     as_of = check["finished_at"] or datetime.now(timezone.utc)
+    # Context data only from this check: a report is a snapshot of that moment.
+    since = check["started_at"]
 
     results = conn.execute(
         """
@@ -232,16 +240,17 @@ def load_report_data(conn, health_check_id):
                hs.hostname, hs.os_name, hs.os_version, hs.logical_cpu_count,
                hs.memory_total_bytes, hs.captured_at AS host_captured_at
         FROM keystone.target t
-        LEFT JOIN postgresql.instance_inventory ii ON ii.target_id = t.target_id
+        LEFT JOIN postgresql.instance_inventory ii
+            ON ii.target_id = t.target_id AND ii.last_collected_at BETWEEN %s AND %s
         LEFT JOIN LATERAL (
             SELECT * FROM postgresql.host_snapshot h
-            WHERE h.target_id = t.target_id AND h.captured_at <= %s
+            WHERE h.target_id = t.target_id AND h.captured_at BETWEEN %s AND %s
             ORDER BY h.captured_at DESC LIMIT 1
         ) hs ON TRUE
         WHERE (t.parent_target_id = %s AND t.target_type = 'NODE' AND t.is_active)
            OR (t.target_id = %s AND t.target_type = 'NODE')
         ORDER BY t.target_id
-        """, (as_of, check["target_id"], check["target_id"])).fetchall()
+        """, (since, as_of, since, as_of, check["target_id"], check["target_id"])).fetchall()
 
     storage = conn.execute(
         """
@@ -249,14 +258,14 @@ def load_report_data(conn, health_check_id):
         FROM keystone.target t
         JOIN LATERAL (
             SELECT max(captured_at) AS captured_at FROM postgresql.storage_snapshot
-            WHERE target_id = t.target_id AND captured_at <= %s
+            WHERE target_id = t.target_id AND captured_at BETWEEN %s AND %s
         ) last ON last.captured_at IS NOT NULL
         JOIN postgresql.storage_snapshot s
             ON s.target_id = t.target_id AND s.captured_at = last.captured_at
         WHERE (t.parent_target_id = %s AND t.target_type = 'NODE' AND t.is_active)
            OR (t.target_id = %s AND t.target_type = 'NODE')
         ORDER BY t.target_id, s.mount_point
-        """, (as_of, check["target_id"], check["target_id"])).fetchall()
+        """, (since, as_of, check["target_id"], check["target_id"])).fetchall()
 
     databases = conn.execute(
         """
@@ -264,10 +273,10 @@ def load_report_data(conn, health_check_id):
         FROM postgresql.database_snapshot d
         WHERE d.target_id = %s
           AND d.captured_at = (SELECT max(captured_at) FROM postgresql.database_snapshot
-                               WHERE target_id = %s AND captured_at <= %s)
+                               WHERE target_id = %s AND captured_at BETWEEN %s AND %s)
           AND NOT COALESCE(d.is_template, FALSE)
         ORDER BY d.database_size_bytes DESC NULLS LAST, d.database_name
-        """, (check["target_id"], check["target_id"], as_of)).fetchall()
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchall()
 
     dictionary = load_dictionary_texts(conn)
     conn.commit()
@@ -593,6 +602,13 @@ def render_executive(data, lang, t):
     coverage = e(t["coverage"].format(**counts)) + (
         f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
         if counts["not_assessed"] else "")
+    collections = data["collections"]
+    ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
+    if collections and ok < len(collections):
+        errors = sorted({c["status_message"] for c in collections
+                         if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
+        coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
+                     + (f" · {e(t['collection_errors'])}: {e('; '.join(errors[:3]))}" if errors else ""))
     return (f'<div class="part">{e(t["part_exec"])}</div>'
             f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}</div>'
             f'<p class="note">{coverage}</p><div class="tiles">'
@@ -604,9 +620,14 @@ def render_executive(data, lang, t):
 
 def render_system(data, t):
     parts = [f"<h2>{e(t['system'])}</h2>"]
+    missing = f'<p class="note">{e(t["not_collected_here"])}</p>'
     if data["nodes"]:
         rows = []
         for n in data["nodes"]:
+            if n["server_version"] is None and n["os_name"] is None:
+                rows.append([e(n["name"]), f'<span class="note">{e(t["not_collected_here"])}</span>',
+                             "", "", "", "", "", ""])
+                continue
             role = "" if n["in_recovery"] is None else (
                 t["role_replica"] if n["in_recovery"] else t["role_primary"])
             os_text = n["os_name"] or ""
@@ -627,11 +648,14 @@ def render_system(data, t):
               e(fmt_bytes(s["total_bytes"])),
               e(f"{100 * s['used_bytes'] / s['total_bytes']:.0f}%" if s["total_bytes"] else "")]
              for s in data["storage"]], numeric=(2, 3, 4)))
+    parts.append(f"<h3>{e(t['databases'])}</h3>")
     if data["databases"]:
-        parts.append(f"<h3>{e(t['databases'])}</h3>" + table(
+        parts.append(table(
             [t["database"], t["owner"], t["size"]],
             [[e(d["database_name"]), e(d["database_owner"]), e(fmt_bytes(d["database_size_bytes"]))]
              for d in data["databases"]], numeric=(2,)))
+    else:
+        parts.append(missing)
     return "".join(parts)
 
 
