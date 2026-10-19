@@ -806,14 +806,18 @@ def write_report(conn, health_check_id, lang="tr", output=None):
     path = Path(output) if output else Path(DEFAULT_OUTPUT_DIR) / default_file_name(data, lang)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_html(data, lang), encoding="utf-8")
-    logger.info("Report written: %s", path)
+    # Say which check: this command reports an existing check, it does not collect.
+    logger.info("Report of health check %s (%s, started %s) written: %s",
+                health_check_id, data["check"]["target_name"],
+                fmt_time(data["check"]["started_at"]), path)
     return path
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="python -m repository.report.health_check_report",
-        description="Write the HTML report of a health check.",
+        description="Write the HTML report of an existing health check (does not collect; "
+                    "run repository.healthcheck.health_check for a new check).",
     )
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--health-check", type=int, help="health_check_id")
