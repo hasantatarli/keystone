@@ -48,6 +48,12 @@ TEXTS = {
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "count_findings": "Bulgu", "count_critical": "Kritik", "count_warning": "Uyarı",
         "count_healthy": "Sağlıklı", "count_not_assessed": "Değerlendirilemedi",
+        "inventory_title": "Sistem envanteri",
+        "inv_servers": "Sunucu", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Bellek",
+        "inv_data": "Veri", "inv_disk": "Disk",
+        "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} çekirdek",
+        "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
+        "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun yok", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
@@ -107,6 +113,12 @@ TEXTS = {
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "count_findings": "Findings", "count_critical": "Critical", "count_warning": "Warning",
         "count_healthy": "Healthy", "count_not_assessed": "Not assessed",
+        "inventory_title": "System inventory",
+        "inv_servers": "Servers", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Memory",
+        "inv_data": "Data", "inv_disk": "Disk",
+        "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} cores",
+        "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
+        "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
         "impact_title": "Affected areas",
         "impact_none": "No problems", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
@@ -496,6 +508,11 @@ h3{font-size:15px;margin:20px 0 8px}
 .tile .n{font-size:24px;font-weight:700;line-height:1.2}
 .tile .l{color:var(--muted);font-size:13px}
 .note{color:var(--muted);font-size:14px}
+.inv{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0}
+.inv>div{background:var(--soft);border-radius:8px;padding:10px 14px}
+.inv .l{color:var(--muted);font-size:13px}
+.inv .v{font-size:19px;font-weight:700;line-height:1.3}
+.inv .s{color:var(--muted);font-size:12px}
 .impact{display:grid;grid-template-columns:minmax(120px,170px) 1fr minmax(110px,auto);gap:8px 14px;align-items:center}
 .impact .name{font-weight:600}
 .impact .track{height:14px;display:flex;gap:2px}
@@ -578,6 +595,55 @@ def render_header(data, t):
             f"<h1>{e(t['title'])}</h1><div class=\"meta\">"
             + "".join(f"<span>{e(label)}: <b>{e(value)}</b></span>" for label, value in meta)
             + "</div></header>")
+
+
+def short_version(version):
+    """'17.10 (Ubuntu 17.10-1.pgdg24.04+1)' -> '17.10'."""
+    return (version or "").split(" ")[0]
+
+
+def render_inventory(data, t):
+    """Executive view of the estate: counts and sizes, no usage ratios."""
+    nodes = data["nodes"]
+    known = [n for n in nodes if n["server_version"] is not None]
+    hosts = [n for n in nodes if n["logical_cpu_count"] is not None or n["memory_total_bytes"] is not None]
+    total = len(nodes)
+
+    def partial(count):
+        return t["inv_partial"].format(known=count, total=total) if total and count < total else ""
+
+    items = []
+    if total:
+        primary = sum(1 for n in known if n["in_recovery"] is False)
+        replica = sum(1 for n in known if n["in_recovery"])
+        items.append((t["inv_servers"], str(total),
+                      t["inv_roles"].format(primary=primary, replica=replica) if known else ""))
+        versions = sorted({short_version(n["server_version"]) for n in known})
+        items.append((t["inv_version"], ", ".join(versions) or t["inv_unknown"], partial(len(known))))
+        if hosts:
+            cores = sum(n["logical_cpu_count"] or 0 for n in hosts)
+            memory = sum(n["memory_total_bytes"] or 0 for n in hosts)
+            items.append((t["inv_cpu"], t["inv_cores"].format(n=cores), partial(len(hosts))))
+            items.append((t["inv_memory"], fmt_bytes(memory), partial(len(hosts))))
+    if data["databases"]:
+        size = sum(d["database_size_bytes"] or 0 for d in data["databases"])
+        items.append((t["inv_data"], fmt_bytes(size), t["inv_databases"].format(n=len(data["databases"]))))
+    if data["storage"]:
+        used = sum(s_["used_bytes"] or 0 for s_ in data["storage"])
+        size = sum(s_["total_bytes"] or 0 for s_ in data["storage"])
+        disk_nodes = len({s_["node_name"] for s_ in data["storage"]})
+        pct = t["inv_full"].format(p=t["percent"].format(n=round(100 * used / size))) if size else ""
+        used_text, size_text = fmt_bytes(used), fmt_bytes(size)
+        if used_text.split()[-1] == size_text.split()[-1]:          # "7.8 / 13.1 GB"
+            used_text = used_text.rsplit(" ", 1)[0]
+        items.append((t["inv_disk"], f"{used_text} / {size_text}",
+                      " · ".join(x for x in (pct, partial(disk_nodes)) if x)))
+    if not items:
+        return ""
+    return (f"<h2>{e(t['inventory_title'])}</h2><div class=\"inv\">"
+            + "".join(f'<div><div class="l">{e(label)}</div><div class="v">{e(value)}</div>'
+                      f'<div class="s">{e(sub)}</div></div>' for label, value, sub in items)
+            + "</div>")
 
 
 def render_impact_chart(data, lang, t):
@@ -664,7 +730,8 @@ def render_executive(data, lang, t):
             f'<p class="note">{coverage}</p><div class="tiles">'
             + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
                       for n, label in tiles)
-            + "</div>" + render_impact_chart(data, lang, t) + render_topics(data, lang, t)
+            + "</div>" + render_inventory(data, t) + render_impact_chart(data, lang, t)
+            + render_topics(data, lang, t)
             + render_main_problems(data, lang, t))
 
 

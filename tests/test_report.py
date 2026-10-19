@@ -187,6 +187,29 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertNotIn("<script", page)
         self.assertIn(".tabs>.panel{display:block!important", page)     # print shows both
 
+    def test_executive_inventory_with_partial_host_data(self):
+        check_id = self.make_check()
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        self.conn.execute(
+            "INSERT INTO postgresql.host_snapshot (target_id, captured_at, source_type, "
+            "logical_cpu_count, memory_total_bytes) VALUES (%s, %s, 'AUTOMATED', 4, %s)",
+            (self.node1, now, 16 * 1024 ** 3))
+        self.conn.execute(
+            "INSERT INTO postgresql.storage_snapshot (target_id, captured_at, source_type, "
+            "mount_point, used_bytes, total_bytes) VALUES (%s, %s, 'AUTOMATED', '/', %s, %s)",
+            (self.node1, now, 30 * 1024 ** 3, 100 * 1024 ** 3))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("Sistem envanteri", executive)
+        self.assertIn("1 primary, 2 replica", executive)
+        self.assertIn("4 çekirdek", executive)
+        self.assertIn("16.0 GB", executive)
+        self.assertIn("1 / 3 sunucu için", executive)      # host data only for one server
+        self.assertIn("30.0 / 100.0 GB", executive)
+        self.assertIn("%30 dolu", executive)
+        self.assertIn("1 veritabanı", executive)
+
     def test_first_sentence(self):
         self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")
         self.assertEqual(report.first_sentence("max_wal_size değeri 1.5 GB. Sonra"),
