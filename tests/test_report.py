@@ -148,6 +148,35 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Veri toplama: 6 / 8 başarılı", executive)   # + node-3 has no connection
         self.assertIn("connection refused", executive)
 
+    def test_reasons_are_explained_in_plain_words(self):
+        t = report.TEXTS["tr"]
+        data = {"collections": [{"collector_key": "PG_ACTIVITY_SNAPSHOT",
+                                 "status": "CONNECTION_FAILED",
+                                 "status_message": "connection timeout expired"}]}
+        self.assertEqual(
+            report.explain_reason("PG_ACTIVITY_SNAPSHOT: Evidence is stale. Age=409325.3s, "
+                                  "MaxAge=600s", data, t),
+            "PG_ACTIVITY_SNAPSHOT bu kontrolde toplanamadı "
+            "(Bağlantı hatası: connection timeout expired).")
+        self.assertEqual(
+            report.explain_reason("PG_TRANSACTION_WRAPAROUND: Evidence is stale. "
+                                  "Age=409324.2s, MaxAge=86400s", data, t),
+            "PG_TRANSACTION_WRAPAROUND verisi 4 gün 17 saat önce toplanmış; "
+            "bu kontrol için en fazla 1 gün eski veri kabul ediliyor.")
+        self.assertEqual(report.explain_reason("something else", data, t), "something else")
+
+    def test_failed_collection_explains_the_rule_reason(self):
+        self.failing = {"PG_REPLICATION_SLOTS"}
+        page = self.render(self.run_check(), "tr")
+        self.assertIn("PG_REPLICATION_SLOTS bu kontrolde toplanamadı", page)
+
+    def test_default_file_name_has_target_and_check_time(self):
+        check_id = self.make_check()
+        data = report.load_report_data(self.conn, check_id)
+        name = report.default_file_name(data, "tr")
+        stamp = data["check"]["started_at"].strftime("%Y%m%d-%H%M")
+        self.assertEqual(name, f"cluster_{stamp}_hc{check_id}_tr.html")
+
     def test_first_sentence(self):
         self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")
         self.assertEqual(report.first_sentence("max_wal_size değeri 1.5 GB. Sonra"),

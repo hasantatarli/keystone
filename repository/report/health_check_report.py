@@ -90,7 +90,10 @@ TEXTS = {
                               "FAILED": "Başarısız", "CONNECTION_FAILED": "Bağlantı hatası",
                               "TIMEOUT": "Zaman aşımı", "STALE": "Yarıda kaldı",
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
-        "days": "gün", "hours": "saat",
+        "days": "gün", "hours": "saat", "minutes": "dakika",
+        "reason_not_collected": "{source} bu kontrolde toplanamadı ({status}: {message}).",
+        "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
+        "reason_missing": "{source} verisi yok.",
     },
     "en": {
         "title": "Database Health Check Report",
@@ -145,7 +148,10 @@ TEXTS = {
                               "FAILED": "Failed", "CONNECTION_FAILED": "Connection failed",
                               "TIMEOUT": "Timed out", "STALE": "Interrupted",
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
-        "days": "days", "hours": "hours",
+        "days": "days", "hours": "hours", "minutes": "minutes",
+        "reason_not_collected": "{source} could not be collected in this check ({status}: {message}).",
+        "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
+        "reason_missing": "No {source} data.",
     },
 }
 
@@ -322,6 +328,41 @@ def fmt_observed(value, unit):
         return ""
     number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
     return f"{number} {unit or ''}".strip()
+
+
+def fmt_duration(seconds, t):
+    """Rough human duration: '4 gün 17 saat', '10 dakika'."""
+    seconds = int(max(seconds, 0))
+    days, hours, minutes = seconds // 86400, seconds % 86400 // 3600, seconds % 3600 // 60
+    if days:
+        return f"{days} {t['days']}" + (f" {hours} {t['hours']}" if hours else "")
+    if hours:
+        return f"{hours} {t['hours']}" + (f" {minutes} {t['minutes']}" if minutes else "")
+    return f"{max(minutes, 1)} {t['minutes']}"
+
+
+REASON_PATTERN = re.compile(
+    r"^(?P<source>[A-Z0-9_]+): (?:Evidence is stale\. Age=(?P<age>[\d.]+)s, MaxAge=(?P<max>\d+)s"
+    r"|(?P<missing>Required evidence is not available\.))$")
+
+
+def explain_reason(reason, data, t):
+    """Engine reason in plain words; says when this check failed to collect the source."""
+    match = REASON_PATTERN.match(reason or "")
+    if not match:
+        return reason or ""
+    source = match.group("source")
+    failed = [c for c in data["collections"] if c["collector_key"] == source
+              and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")]
+    if failed:
+        c = failed[0]
+        return t["reason_not_collected"].format(
+            source=source, status=t["collection_status"].get(c["status"], c["status"]),
+            message=c["status_message"] or "-")
+    if match.group("missing"):
+        return t["reason_missing"].format(source=source)
+    return t["reason_stale"].format(source=source, age=fmt_duration(float(match.group("age")), t),
+                                    limit=fmt_duration(int(match.group("max")), t))
 
 
 def first_sentence(text):
@@ -714,7 +755,7 @@ def render_results(data, lang, t):
             elif r["outcome"] == "ATTENTION_REQUIRED":
                 note = ""
             else:
-                note = r["reason"] or ""
+                note = explain_reason(r["reason"], data, t)
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',
                          badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"])), e(note)])
     return f"<h2>{e(t['results'])}</h2>" + table(
@@ -749,13 +790,20 @@ def render_html(data, lang="tr"):
             f"</head><body><main>{body}</main></body></html>")
 
 
+def default_file_name(data, lang):
+    """<target>_<check start yyyymmdd-hhmm>_hc<id>_<lang>.html; sorts by time in a folder."""
+    check = data["check"]
+    target = re.sub(r"[^A-Za-z0-9_-]+", "-", check["target_name"]).strip("-") or "target"
+    stamp = check["started_at"].strftime("%Y%m%d-%H%M")
+    return f"{target}_{stamp}_hc{check['health_check_id']}_{lang}.html"
+
+
 def write_report(conn, health_check_id, lang="tr", output=None):
     """Render and write the report; returns the file path."""
     if lang not in TEXTS:
         raise ValueError(f"Unsupported report language: {lang} (available: {', '.join(TEXTS)})")
     data = load_report_data(conn, health_check_id)
-    path = Path(output) if output else (
-        Path(DEFAULT_OUTPUT_DIR) / f"health_check_{health_check_id}_{lang}.html")
+    path = Path(output) if output else Path(DEFAULT_OUTPUT_DIR) / default_file_name(data, lang)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_html(data, lang), encoding="utf-8")
     logger.info("Report written: %s", path)
@@ -771,7 +819,7 @@ def parse_args(argv=None):
     which.add_argument("--health-check", type=int, help="health_check_id")
     which.add_argument("--target", type=int, help="latest completed health check of this target")
     parser.add_argument("--lang", default="tr", choices=sorted(TEXTS), help="report language (default: tr)")
-    parser.add_argument("--output", help=f"file path (default: {DEFAULT_OUTPUT_DIR}/health_check_<id>_<lang>.html)")
+    parser.add_argument("--output", help=f"file path (default: {DEFAULT_OUTPUT_DIR}/<target>_<yyyymmdd-hhmm>_hc<id>_<lang>.html)")
     return parser.parse_args(argv)
 
 
