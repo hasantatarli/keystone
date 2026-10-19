@@ -13,6 +13,9 @@ from repository.report import health_check_report as report
 import test_health_check
 
 
+TECH_PANEL = 'class="panel panel-tech"'
+
+
 class ReportTests(test_health_check.HealthCheckTests):
     """Reuses the health check fixture (disposable repository, cluster with 3 nodes)."""
 
@@ -83,8 +86,8 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_two_parts_executive_first(self):
         page = self.render(self.make_check(), "tr")
-        self.assertLess(page.index("Yönetici Özeti"), page.index("Teknik Detaylar"))
-        executive = page[:page.index("Teknik Detaylar")]
+        self.assertLess(page.index("panel panel-exec"), page.index(TECH_PANEL))
+        executive = page[:page.index(TECH_PANEL)]
         # Plain-language Dictionary texts in the executive part, no technical context.
         self.assertIn("Uzun süre boşta bekleyen transaction", executive)
         self.assertIn("Olası sebep", executive)
@@ -93,7 +96,7 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_impact_categories_and_topics(self):
         page = self.render(self.make_check(), "tr")
-        executive = page[:page.index("Teknik Detaylar")]
+        executive = page[:page.index(TECH_PANEL)]
         self.assertIn("Etkilenen alanlar", executive)
         self.assertIn("Performans", executive)                    # PG-TRAN-001 categories
         self.assertIn("Kapasite", executive)
@@ -103,7 +106,7 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_technical_part_shows_who_and_where(self):
         page = self.render(self.make_check(), "tr")
-        technical = page[page.index("Teknik Detaylar"):]
+        technical = page[page.index(TECH_PANEL):]
         self.assertIn("billing-api", technical)
         self.assertIn("app_user", technical)
         self.assertIn("10.0.5.21", technical)
@@ -144,7 +147,7 @@ class ReportTests(test_health_check.HealthCheckTests):
     def test_failed_collection_is_summarized_for_executives(self):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
-        executive = page[:page.index("Teknik Detaylar")]
+        executive = page[:page.index(TECH_PANEL)]
         self.assertIn("Veri toplama: 6 / 8 başarılı", executive)   # + node-3 has no connection
         self.assertIn("connection refused", executive)
 
@@ -176,6 +179,13 @@ class ReportTests(test_health_check.HealthCheckTests):
         name = report.default_file_name(data, "tr")
         stamp = data["check"]["started_at"].strftime("%Y%m%d-%H%M")
         self.assertEqual(name, f"cluster_{stamp}_hc{check_id}_tr.html")
+
+    def test_parts_are_css_tabs_and_both_print(self):
+        page = self.render(self.make_check(), "tr")
+        self.assertIn('id="tab-exec" checked', page)
+        self.assertIn('<label for="tab-tech">Teknik Detaylar</label>', page)
+        self.assertNotIn("<script", page)
+        self.assertIn(".tabs>.panel{display:block!important", page)     # print shows both
 
     def test_first_sentence(self):
         self.assertEqual(report.first_sentence("Bir. İki."), "Bir.")

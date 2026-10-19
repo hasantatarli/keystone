@@ -318,9 +318,7 @@ def fmt_bytes(value):
 def fmt_uptime(start, as_of, t):
     if not start:
         return ""
-    seconds = max((as_of - start).total_seconds(), 0)
-    days, hours = int(seconds // 86400), int(seconds % 86400 // 3600)
-    return f"{days} {t['days']} {hours} {t['hours']}"
+    return fmt_duration((as_of - start).total_seconds(), t)
 
 
 def fmt_observed(value, unit):
@@ -533,12 +531,23 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .instance code{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .facts{color:var(--muted);font-size:13px;margin-top:4px}
 .rule{color:var(--muted);font-size:12px;font-family:Consolas,monospace;white-space:nowrap}
+.tabs>input{position:absolute;opacity:0;pointer-events:none}
+.tabs>label{display:inline-block;padding:10px 18px;margin:24px 4px 0 0;border:1px solid var(--line);
+border-bottom:none;border-radius:8px 8px 0 0;background:var(--soft);color:var(--muted);cursor:pointer;
+font-size:13px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.tabs>input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.tabs>input:checked+label{background:#fff;color:var(--accent);border-color:var(--accent);
+box-shadow:inset 0 3px 0 var(--accent)}
+.tabs>.panel{display:none;border-top:2px solid var(--accent)}
+#tab-exec:checked~.panel-exec,#tab-tech:checked~.panel-tech{display:block}
+.tabs .part{display:none}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
 table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .text{grid-column:1/-1}
 .impact{grid-template-columns:110px 1fr}.impact .val{grid-column:2}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
-.part-tech{break-before:page}body{font-size:12px}
+.tabs>label{display:none}.tabs>.panel{display:block!important;border-top:none}.tabs .part{display:block}
+.panel-tech{break-before:page}body{font-size:12px}
 .seg,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 """
 
@@ -781,7 +790,13 @@ def render_technical(data, lang, t):
 
 def render_html(data, lang="tr"):
     t = TEXTS[lang]
-    body = (render_header(data, t) + render_executive(data, lang, t) + render_technical(data, lang, t)
+    # CSS-only tabs (no script): works in mail clients and locked-down browsers; print shows both.
+    tabs = ('<div class="tabs">'
+            f'<input type="radio" name="part" id="tab-exec" checked><label for="tab-exec">{e(t["part_exec"])}</label>'
+            f'<input type="radio" name="part" id="tab-tech"><label for="tab-tech">{e(t["part_tech"])}</label>'
+            f'<div class="panel panel-exec">{render_executive(data, lang, t)}</div>'
+            f'<div class="panel panel-tech">{render_technical(data, lang, t)}</div></div>')
+    body = (render_header(data, t) + tabs
             + f"<footer>{e(t['generated'])}: {e(fmt_time(datetime.now(timezone.utc).astimezone()))}"
             " · Keystone</footer>")
     return (f'<!DOCTYPE html><html lang="{lang}"><head><meta charset="utf-8">'
