@@ -1,6 +1,6 @@
 # PostgreSQL V1 Assessment Catalogue
 
-**Status:** Draft — priorities proposed, to be confirmed by Hasan  
+**Status:** Draft — review decisions of 2026-10-20 below  
 **Last Updated:** 2026-10-20
 
 ## Purpose
@@ -46,8 +46,8 @@ Sources combined:
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | PG-CONF-001 | Pending restart | A setting was changed but needs a restart (`pending_restart`) — WARNING | Ready: PG-002 | DB parameters | P1 |
-| PG-CONF-002 | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — INFO (a conscious choice in some systems) | Ready: PG-002 | DB parameters | P1 |
-| PG-CONF-003 | Memory settings out of proportion | `shared_buffers` left at the default on a host with ≥ 4 GB; `shared_buffers` > 40 % of RAM; `max_connections × work_mem` far beyond RAM | Ready: PG-002 + host memory | Memory setting | P1 |
+| PG-CONF-002 | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING (may be a conscious choice) | Ready: PG-002 | DB parameters | P1 |
+| PG-CONF-003 | Settings far from the recommendation for this server | Current value far outside the recommended range computed from the server's facts (memory, CPUs, storage, connections, workload); first: memory settings. Recommendations are shown for every covered setting, findings only for large deviations | Ready: PG-002 + host memory/CPU · Gap: storage type, workload type | Memory setting | P1 |
 | PG-CONF-004 | Autovacuum disabled | `autovacuum = off` — CRITICAL; per-table `autovacuum_enabled = false` on large tables — WARNING | Ready (global): PG-002 · Gap (per table): reloptions in PG-005 | Vacuum & Statistics | P1 |
 | PG-CONF-005 | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later | Ready: PG-002 | pg_stat_statements extension | P2 |
 | PG-CONF-006 | No safety timeouts | `idle_in_transaction_session_timeout = 0` while PG-TRAN-001 findings exist — recommendation, not a stand-alone finding | Ready: PG-002 | — | P3 |
@@ -233,10 +233,18 @@ With the 17 ready P1 checks Keystone reaches 24 checks without new collectors. C
 
 Beyond pg_collector: host and disk capacity, replication lag and topology, failover detection, WAL archiving, version and OS lifecycle, synchronous replication safety.
 
+## Review decisions (2026-10-20)
+
+1. **Order:** P1 first, then P2, then P3.
+2. **Configuration becomes a recommendation capability, not only checks.** Most customers struggle with "which values should I set for my server?". Keystone computes recommended values from the server's facts (memory, CPUs, storage type, connections, version, workload) using documented best practice, shows current vs recommended with the reason, and raises findings only for large deviations. Design in a separate decision record before implementation.
+3. **Security:** the essential checks first (PG-SEC-001…004), details later.
+4. **Backup:** PostgreSQL has no backup catalogue like SQL Server's `msdb`. Keystone detects the method in use and reports backups through that method. First signal without SSH: `archive_command` (pgBackRest `archive-push`, Barman `barman-wal-archive`, WAL-G `wal-push`, pg_probackup); then the tool's own status over SSH (`pgbackrest info --output=json` and equivalents) and `pg_dump` jobs in cron. Barman usually runs on a separate backup server.
+5. **Conscious choices** (`synchronous_commit = off`, `archive_mode = off` and similar) are WARNING by default. A customer's explicit acceptance ("accepted risk" with a reason) belongs to the finding lifecycle (MVP Plan Phase 2).
+
 ## Open questions for review
 
-1. **Priorities** — the P1 / P2 / P3 column is a proposal.
+1. ~~Priorities~~ — decided: P1 → P3.
 2. **Default thresholds** — especially PG-MAINT-001, PG-IDX-001, PG-REP-003 and PG-CONF-003, where experience matters more than documentation.
 3. **Superuser-only evidence** (`pg_hba_file_rules`, password hashes in `pg_authid`): accept as optional, or only in a separate security profile?
-4. **Backup tools** — which ones appear at customers (pgBackRest, Barman, pg_dump scripts, storage snapshots)?
-5. **Severity of conscious choices** such as `synchronous_commit = off` or `archive_mode = off`: INFO or WARNING by default?
+4. ~~Backup tools~~ — decided: detect the method in use (see decisions).
+5. ~~Severity of conscious choices~~ — decided: WARNING.
