@@ -150,7 +150,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 6 / 8 başarılı", executive)   # + node-3 has no connection
+        self.assertIn("Veri toplama: 8 / 11 başarılı", executive)  # + node-3 has no connection
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -211,6 +211,79 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("30.0 / 100.0 GB", executive)
         self.assertIn("%30 dolu", executive)
         self.assertIn("1 veritabanı", executive)
+
+    def add_host(self, node, cpu, memory_gb, mounts, data_directory=None):
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        self.conn.execute(
+            "INSERT INTO postgresql.host_snapshot (target_id, captured_at, source_type, "
+            "logical_cpu_count, memory_total_bytes) VALUES (%s, %s, 'AUTOMATED', %s, %s)",
+            (node, now, cpu, memory_gb * 1024 ** 3))
+        for mount, used_gb, total_gb in mounts:
+            self.conn.execute(
+                "INSERT INTO postgresql.storage_snapshot (target_id, captured_at, source_type, "
+                "mount_point, used_bytes, total_bytes) VALUES (%s, %s, 'AUTOMATED', %s, %s, %s)",
+                (node, now, mount, used_gb * 1024 ** 3, total_gb * 1024 ** 3))
+        if data_directory:
+            self.conn.execute(
+                "INSERT INTO postgresql.configuration_snapshot (target_id, captured_at, "
+                "setting_name, setting_value) VALUES (%s, %s, 'data_directory', %s)",
+                (node, now, data_directory))
+
+    def test_executive_inventory_per_server_with_notes(self):
+        check_id = self.make_check()
+        self.add_host(self.node1, 4, 16, [("/", 30, 100), ("/var/lib/postgresql", 46, 50)],
+                      "/var/lib/postgresql/16/main")
+        self.add_host(self.node2, 2, 8, [("/", 41, 50)], "/var/lib/postgresql/16/main")
+        self.conn.execute("UPDATE postgresql.instance_inventory SET server_version = '16.3' "
+                          "WHERE target_id = %s", (self.node3,))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+
+        self.assertIn("<th>Veri diski</th>", executive)            # a row per server
+        self.assertIn("46.0 / 50.0 GB · %92", executive)           # data mount, not /
+        self.assertIn("41.0 / 50.0 GB · %82", executive)           # data dir on /
+        self.assertIn("87.0 / 100.0 GB", executive)                # tile: data disks only
+        self.assertIn("Bilinmiyor", executive)                     # node-3: no host data
+        self.assertIn("Dikkat çeken noktalar", executive)
+        self.assertIn("farklı PostgreSQL sürümleri var: 16.3, 16.4", executive)
+        self.assertIn("CPU 2 / 4 çekirdek, bellek 8.0 GB / 16.0 GB", executive)
+        self.assertIn("veri diski %92 dolu", executive)
+        # Critical before warning.
+        self.assertLess(executive.index("veri diski %92"), executive.index("veri diski %82"))
+        technical = page[page.index(TECH_PANEL):]
+        self.assertIn('/var/lib/postgresql <span class="note">(veri)</span>', technical)
+
+    def test_data_disk_is_the_longest_matching_mount(self):
+        node = {"target_id": 1, "data_directory": "/var/lib/pgsql/data"}
+        storage = [{"target_id": 1, "mount_point": "/", "total_bytes": 10},
+                   {"target_id": 1, "mount_point": "/var/lib/pg", "total_bytes": 10},
+                   {"target_id": 1, "mount_point": "/var/lib/pgsql", "total_bytes": 10},
+                   {"target_id": 2, "mount_point": "/var/lib/pgsql/data", "total_bytes": 10}]
+        self.assertEqual(report.data_disk(node, storage)["mount_point"], "/var/lib/pgsql")
+        self.assertIsNone(report.data_disk({"target_id": 1, "data_directory": None}, storage))
+        windows = {"target_id": 3, "data_directory": "C:/Program Files/PostgreSQL/17/data"}
+        self.assertIsNone(report.data_disk(windows, storage))
+
+    def test_large_estate_shows_totals_and_exceptions_only(self):
+        t = report.TEXTS["tr"]
+        nodes, storage = [], []
+        for i in range(30):
+            nodes.append({"target_id": i, "name": f"pg-{i:02d}", "server_version": "17.10",
+                          "in_recovery": i % 3 != 0, "logical_cpu_count": 8,
+                          "memory_total_bytes": 32 * 1024 ** 3,
+                          "data_directory": "/data/pg"})
+            used = 95 if i == 7 else 40
+            storage.append({"target_id": i, "node_name": f"pg-{i:02d}", "mount_point": "/data",
+                            "used_bytes": used * 1024 ** 3, "total_bytes": 100 * 1024 ** 3})
+        html = report.render_inventory({"nodes": nodes, "storage": storage, "databases": []}, t)
+        self.assertNotIn("<table>", html)
+        self.assertIn("30", html)
+        self.assertIn("10 primary, 20 replica", html)
+        self.assertIn("240 çekirdek", html)
+        self.assertIn("Teknik Detaylar bölümünde", html)
+        self.assertIn("pg-07 veri diski %95 dolu", html)
+        self.assertEqual(html.count("<li>"), 1)                    # only the exception
 
     def test_healthy_text_states_the_limit_used(self):
         check_id = self.make_check()

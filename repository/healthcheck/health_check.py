@@ -25,7 +25,7 @@ logger = get_logger("health_check")
 # Optional ones run only where they are already assigned (e.g. SSH host access).
 REPORT_CONTEXT_COLLECTORS = {
     "PostgreSQL": {
-        "required": ["PG_DATABASE_INVENTORY", "PG_INSTANCE_INVENTORY"],
+        "required": ["PG_DATABASE_INVENTORY", "PG_INSTANCE_INVENTORY", "PG_CONFIGURATION_SNAPSHOT"],
         "optional": ["PG_HOST_SNAPSHOT"],
     },
 }

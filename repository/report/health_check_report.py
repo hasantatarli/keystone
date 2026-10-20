@@ -54,6 +54,15 @@ TEXTS = {
         "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} çekirdek",
         "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
         "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
+        "inv_data_disk": "Veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
+        "inv_notes_title": "Dikkat çeken noktalar",
+        "inv_note_versions": "Sunucularda farklı PostgreSQL sürümleri var: {versions}.",
+        "inv_note_smaller": ("{node} (replica), primary {primary} sunucusundan küçük: {what}. "
+                             "Failover sonrası aynı yükü taşıyamayabilir."),
+        "inv_note_cpu": "CPU {replica} / {primary} çekirdek", "inv_note_memory": "bellek {replica} / {primary}",
+        "inv_note_disk": "{node} veri diski {p} dolu ({used} / {total}).",
+        "inv_large_note": "Sunucu bazlı ayrıntı Teknik Detaylar bölümünde.",
+        "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun yok", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
@@ -123,6 +132,15 @@ TEXTS = {
         "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} cores",
         "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
         "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
+        "inv_data_disk": "Data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
+        "inv_notes_title": "Points to note",
+        "inv_note_versions": "Servers run different PostgreSQL versions: {versions}.",
+        "inv_note_smaller": ("{node} (replica) is smaller than the primary {primary}: {what}. "
+                             "It may not carry the same load after a failover."),
+        "inv_note_cpu": "CPU {replica} / {primary} cores", "inv_note_memory": "memory {replica} / {primary}",
+        "inv_note_disk": "{node} data disk is {p} full ({used} / {total}).",
+        "inv_large_note": "Per-server details are in the Technical Details part.",
+        "data_mount": "data",
         "impact_title": "Affected areas",
         "impact_none": "No problems", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
@@ -270,7 +288,8 @@ def load_report_data(conn, health_check_id):
         SELECT t.target_id, t.name, ii.server_address, ii.server_port, ii.server_version,
                ii.in_recovery, ii.postmaster_start_time,
                hs.hostname, hs.os_name, hs.os_version, hs.logical_cpu_count,
-               hs.memory_total_bytes, hs.captured_at AS host_captured_at
+               hs.memory_total_bytes, hs.captured_at AS host_captured_at,
+               cs.setting_value AS data_directory
         FROM keystone.target t
         LEFT JOIN postgresql.instance_inventory ii
             ON ii.target_id = t.target_id AND ii.last_collected_at BETWEEN %s AND %s
@@ -279,14 +298,21 @@ def load_report_data(conn, health_check_id):
             WHERE h.target_id = t.target_id AND h.captured_at BETWEEN %s AND %s
             ORDER BY h.captured_at DESC LIMIT 1
         ) hs ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT c.setting_value FROM postgresql.configuration_snapshot c
+            WHERE c.target_id = t.target_id AND c.setting_name = 'data_directory'
+              AND c.captured_at BETWEEN %s AND %s
+            ORDER BY c.captured_at DESC LIMIT 1
+        ) cs ON TRUE
         WHERE (t.parent_target_id = %s AND t.target_type = 'NODE' AND t.is_active)
            OR (t.target_id = %s AND t.target_type = 'NODE')
         ORDER BY t.target_id
-        """, (since, as_of, since, as_of, check["target_id"], check["target_id"])).fetchall()
+        """, (since, as_of, since, as_of, since, as_of,
+              check["target_id"], check["target_id"])).fetchall()
 
     storage = conn.execute(
         """
-        SELECT t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes
+        SELECT t.target_id, t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes
         FROM keystone.target t
         JOIN LATERAL (
             SELECT max(captured_at) AS captured_at FROM postgresql.storage_snapshot
@@ -536,7 +562,7 @@ def findings_by_rule(data):
 STYLE = """
 :root{--ink:#1d2430;--muted:#5b6575;--line:#d9dee5;--soft:#f4f6f9;--accent:#1f4e79;
 --crit:#b42318;--crit-bg:#fdecea;--warn:#93600a;--warn-bg:#fdf3df;--ok:#1e6b3a;--ok-bg:#e7f4ec;
---na:#5b6575;--na-bg:#eef0f3;--crit-bar:#d92d20;--warn-bar:#e0a100}
+--na:#5b6575;--na-bg:#eef0f3;--crit-bar:#d92d20;--warn-bar:#e0a100;--ok-bar:#3a8f5c}
 *{box-sizing:border-box}
 body{margin:0;background:#fff;color:var(--ink);font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif}
 main{max-width:980px;margin:0 auto;padding:40px 32px 64px}
@@ -564,6 +590,12 @@ h3{font-size:15px;margin:20px 0 8px}
 .inv .l{color:var(--muted);font-size:13px}
 .inv .v{font-size:19px;font-weight:700;line-height:1.3}
 .inv .s{color:var(--muted);font-size:12px}
+.meter{display:inline-block;width:60px;height:8px;background:var(--line);border-radius:4px;margin-right:8px;vertical-align:middle;overflow:hidden}
+.meter i{display:block;height:100%}
+.m-ok{background:var(--ok-bar)}.m-warn{background:var(--warn-bar)}.m-crit{background:var(--crit-bar)}
+.inv-notes{list-style:none;padding:0;margin:6px 0}
+.inv-notes li{margin:6px 0}
+.inv-notes .badge{margin-right:8px}
 .impact{display:grid;grid-template-columns:minmax(120px,170px) 1fr minmax(110px,auto);gap:8px 14px;align-items:center}
 .impact .name{font-weight:600}
 .impact .track{height:14px;display:flex;gap:2px}
@@ -653,11 +685,98 @@ def short_version(version):
     return (version or "").split(" ")[0]
 
 
+# Executive inventory: a row per server up to this many, beyond that totals and exceptions.
+INVENTORY_TABLE_LIMIT = 10
+DISK_WARNING_PERCENT, DISK_CRITICAL_PERCENT = 80, 90
+
+
+def data_disk(node, storage):
+    """The mount holding data_directory (longest matching mount point), or None."""
+    path = node.get("data_directory")
+    if not path:
+        return None
+    best = None
+    for s_ in storage:
+        mount = s_["mount_point"]
+        if s_["target_id"] != node["target_id"] or not s_["total_bytes"]:
+            continue
+        if path == mount or path.startswith(mount.rstrip("/") + "/"):
+            if best is None or len(mount) > len(best["mount_point"]):
+                best = s_
+    return best
+
+
+def disk_percent(disk):
+    return round(100 * (disk["used_bytes"] or 0) / disk["total_bytes"])
+
+
+def fmt_used_of(used, total):
+    used_text, size_text = fmt_bytes(used), fmt_bytes(total)
+    if used_text.split()[-1] == size_text.split()[-1]:          # "7.8 / 13.1 GB"
+        used_text = used_text.rsplit(" ", 1)[0]
+    return f"{used_text} / {size_text}"
+
+
+def role_of(node, t):
+    if node["in_recovery"] is None:
+        return ""
+    return t["role_replica"] if node["in_recovery"] else t["role_primary"]
+
+
+def inventory_notes(nodes, disks, t):
+    """[(severity, text)]: facts an executive should not miss; observations, not rule findings."""
+    notes = []
+    versions = sorted({short_version(n["server_version"]) for n in nodes if n["server_version"]})
+    if len(versions) > 1:
+        notes.append(("WARNING", t["inv_note_versions"].format(versions=", ".join(versions))))
+
+    primary = next((n for n in nodes if n["in_recovery"] is False), None)
+    for n in nodes:
+        if primary is None or not n["in_recovery"]:
+            continue
+        what = []
+        if n["logical_cpu_count"] and primary["logical_cpu_count"] \
+                and n["logical_cpu_count"] < primary["logical_cpu_count"]:
+            what.append(t["inv_note_cpu"].format(replica=n["logical_cpu_count"],
+                                                 primary=primary["logical_cpu_count"]))
+        # Small differences in reported memory are normal (kernel reservations).
+        if n["memory_total_bytes"] and primary["memory_total_bytes"] \
+                and n["memory_total_bytes"] < 0.9 * primary["memory_total_bytes"]:
+            what.append(t["inv_note_memory"].format(replica=fmt_bytes(n["memory_total_bytes"]),
+                                                    primary=fmt_bytes(primary["memory_total_bytes"])))
+        if what:
+            notes.append(("WARNING", t["inv_note_smaller"].format(
+                node=n["name"], primary=primary["name"], what=", ".join(what))))
+
+    for n in nodes:
+        disk = disks.get(n["target_id"])
+        if disk is None:
+            continue
+        pct = disk_percent(disk)
+        if pct >= DISK_WARNING_PERCENT:
+            notes.append(("CRITICAL" if pct >= DISK_CRITICAL_PERCENT else "WARNING",
+                          t["inv_note_disk"].format(node=n["name"], p=t["percent"].format(n=pct),
+                                                    used=fmt_bytes(disk["used_bytes"]),
+                                                    total=fmt_bytes(disk["total_bytes"]))))
+    return sorted(notes, key=lambda note: SEVERITY_ORDER.get(note[0], 9))
+
+
+def disk_cell(disk, t):
+    if disk is None:
+        return f'<span class="note">{e(t["inv_disk_unknown"])}</span>'
+    pct = disk_percent(disk)
+    level = "crit" if pct >= DISK_CRITICAL_PERCENT else "warn" if pct >= DISK_WARNING_PERCENT else "ok"
+    return (f'<span class="meter"><i class="m-{level}" style="width:{min(pct, 100)}%"></i></span>'
+            f'{e(fmt_used_of(disk["used_bytes"], disk["total_bytes"]))} · '
+            f'{e(t["percent"].format(n=pct))}')
+
+
 def render_inventory(data, t):
-    """Executive view of the estate: counts and sizes, no usage ratios."""
+    """Executive view of the estate: totals, a row per server when few, and what stands out."""
     nodes = data["nodes"]
     known = [n for n in nodes if n["server_version"] is not None]
     hosts = [n for n in nodes if n["logical_cpu_count"] is not None or n["memory_total_bytes"] is not None]
+    disks = {n["target_id"]: d for n in nodes if (d := data_disk(n, data["storage"])) is not None}
     total = len(nodes)
 
     def partial(count):
@@ -679,22 +798,40 @@ def render_inventory(data, t):
     if data["databases"]:
         size = sum(d["database_size_bytes"] or 0 for d in data["databases"])
         items.append((t["inv_data"], fmt_bytes(size), t["inv_databases"].format(n=len(data["databases"]))))
-    if data["storage"]:
-        used = sum(s_["used_bytes"] or 0 for s_ in data["storage"])
-        size = sum(s_["total_bytes"] or 0 for s_ in data["storage"])
-        disk_nodes = len({s_["node_name"] for s_ in data["storage"]})
+    # Data disks when known: other mounts (/boot, backups) would distort the ratio.
+    disk_rows = list(disks.values()) or data["storage"]
+    if disk_rows:
+        used = sum(s_["used_bytes"] or 0 for s_ in disk_rows)
+        size = sum(s_["total_bytes"] or 0 for s_ in disk_rows)
+        disk_nodes = len({s_["target_id"] for s_ in disk_rows})
         pct = t["inv_full"].format(p=t["percent"].format(n=round(100 * used / size))) if size else ""
-        used_text, size_text = fmt_bytes(used), fmt_bytes(size)
-        if used_text.split()[-1] == size_text.split()[-1]:          # "7.8 / 13.1 GB"
-            used_text = used_text.rsplit(" ", 1)[0]
-        items.append((t["inv_disk"], f"{used_text} / {size_text}",
+        items.append((t["inv_data_disk"] if disks else t["inv_disk"], fmt_used_of(used, size),
                       " · ".join(x for x in (pct, partial(disk_nodes)) if x)))
     if not items:
         return ""
-    return (f"<h2>{e(t['inventory_title'])}</h2><div class=\"inv\">"
-            + "".join(f'<div><div class="l">{e(label)}</div><div class="v">{e(value)}</div>'
-                      f'<div class="s">{e(sub)}</div></div>' for label, value, sub in items)
-            + "</div>")
+
+    parts = [f"<h2>{e(t['inventory_title'])}</h2><div class=\"inv\">"
+             + "".join(f'<div><div class="l">{e(label)}</div><div class="v">{e(value)}</div>'
+                       f'<div class="s">{e(sub)}</div></div>' for label, value, sub in items)
+             + "</div>"]
+    shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
+             or n in hosts]
+    if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
+        rows = [[e(n["name"]), e(role_of(n, t)),
+                 e(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else ""),
+                 e(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else ""),
+                 disk_cell(disks.get(n["target_id"]), t)] for n in nodes]
+        parts.append(table([t["inv_servers"], t["inv_role"], t["inv_cpu"], t["inv_memory"],
+                            t["inv_data_disk"]], rows, numeric=(2, 3)))
+    elif shown:
+        parts.append(f'<p class="note">{e(t["inv_large_note"])}</p>')
+
+    notes = inventory_notes(nodes, disks, t)
+    if notes:
+        parts.append(f"<h3>{e(t['inv_notes_title'])}</h3><ul class=\"inv-notes\">"
+                     + "".join(f"<li>{badge(sev, t['severity'][sev])}{e(text)}</li>"
+                               for sev, text in notes) + "</ul>")
+    return "".join(parts)
 
 
 def render_impact_chart(data, lang, t):
@@ -812,9 +949,13 @@ def render_system(data, t):
             [t["node"], t["address"], t["role"], t["version"], t["up_since"], t["os"], t["cpu"],
              t["memory"]], rows, numeric=(6, 7)))
     if data["storage"]:
+        data_mounts = {id(d) for n in data["nodes"] if (d := data_disk(n, data["storage"]))}
         parts.append(f"<h3>{e(t['storage'])}</h3>" + table(
             [t["node"], t["mount"], t["used"], t["total"], "%"],
-            [[e(s["node_name"]), e(s["mount_point"]), e(fmt_bytes(s["used_bytes"])),
+            [[e(s["node_name"]),
+              e(s["mount_point"]) + (f' <span class="note">({e(t["data_mount"])})</span>'
+                                     if id(s) in data_mounts else ""),
+              e(fmt_bytes(s["used_bytes"])),
               e(fmt_bytes(s["total_bytes"])),
               e(f"{100 * s['used_bytes'] / s['total_bytes']:.0f}%" if s["total_bytes"] else "")]
              for s in data["storage"]], numeric=(2, 3, 4)))
