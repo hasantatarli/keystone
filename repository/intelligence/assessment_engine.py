@@ -791,6 +791,18 @@ def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
     return findings
 
 
+def usage_percent(used_bytes, available_bytes, total_bytes):
+    """Used share of the space PostgreSQL can use, like df's Use%.
+
+    Root-reserved blocks (ext4: 5 %) are not available to the postgres user,
+    so used / (used + available) is used when available is known.
+    """
+    used = used_bytes or 0
+    if available_bytes is not None and used + available_bytes > 0:
+        return 100 * used / (used + available_bytes)
+    return 100 * used / total_bytes if total_bytes else None
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
@@ -816,7 +828,8 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
         mount = data_mount(directory, mounts)
         if mount is None:
             continue
-        used_percent = round(100 * (mount["used_bytes"] or 0) / mount["total_bytes"], 1)
+        used_percent = round(usage_percent(mount["used_bytes"], mount["available_bytes"],
+                                           mount["total_bytes"]), 1)
         matched_threshold = match_threshold(used_percent, thresholds, "PERCENT")
         if matched_threshold is None:
             continue

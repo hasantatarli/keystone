@@ -212,7 +212,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("%30 dolu", executive)
         self.assertIn("1 veritabanı", executive)
 
-    def add_host(self, node, cpu, memory_gb, mounts, data_directory=None):
+    def add_host(self, node, cpu, memory_gb, mounts, data_directory=None, available_gb=None):
         now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
         self.conn.execute(
             "INSERT INTO postgresql.host_snapshot (target_id, captured_at, source_type, "
@@ -221,8 +221,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         for mount, used_gb, total_gb in mounts:
             self.conn.execute(
                 "INSERT INTO postgresql.storage_snapshot (target_id, captured_at, source_type, "
-                "mount_point, used_bytes, total_bytes) VALUES (%s, %s, 'AUTOMATED', %s, %s, %s)",
-                (node, now, mount, used_gb * 1024 ** 3, total_gb * 1024 ** 3))
+                "mount_point, used_bytes, total_bytes, available_bytes) "
+                "VALUES (%s, %s, 'AUTOMATED', %s, %s, %s, %s)",
+                (node, now, mount, used_gb * 1024 ** 3, total_gb * 1024 ** 3,
+                 None if available_gb is None else available_gb * 1024 ** 3))
         if data_directory:
             self.conn.execute(
                 "INSERT INTO postgresql.configuration_snapshot (target_id, captured_at, "
@@ -277,6 +279,15 @@ class ReportTests(test_health_check.HealthCheckTests):
             "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-CAP-001' "
             "ORDER BY res.assessment_result_id DESC LIMIT 1").fetchone()
         self.assertEqual(row["outcome"], "INSUFFICIENT_EVIDENCE")
+
+    def test_disk_percent_matches_df(self):
+        check_id = self.make_check()
+        self.add_host(self.node1, 2, 4, [("/", 8.7, 11.2)], "/var/lib/postgresql/17/main",
+                      available_gb=2.0)
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("8.7 / 11.2 GB · %81", page[:page.index(TECH_PANEL)])
+        self.assertNotIn("%78", page)
 
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()

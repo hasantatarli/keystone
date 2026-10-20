@@ -266,7 +266,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 | --- | --- |
 | Evidence | `PG_HOST_SNAPSHOT` (`postgresql.storage_snapshot`), required; `PG_CONFIGURATION_SNAPSHOT` (`data_directory`), required |
 | Freshness | 3600 seconds (host), 86400 seconds (configuration) |
-| Metric | used / total of the data disk, in percent (one decimal) |
+| Metric | used / (used + available) of the data disk, in percent (one decimal) — the same as `df` Use% |
 | Thresholds | WARNING ≥ 80 %, CRITICAL ≥ 90 % |
 | Subject | NODE (one finding per node) |
 | Finding | The data disk {mount_point} on {node_name} is {used_percent}% full (data_directory {data_directory}). |
@@ -277,6 +277,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 - First rule on NODE-scoped evidence and first rule with two evidence sources. Loaders read the target itself if it is a NODE, otherwise its active NODE children. Evaluators of multi-source rules receive `{evidence_source: rows}`; single-source evaluators are unchanged.
 - The data disk is the mount with the longest mount point that contains `data_directory` as a whole directory (`/var/lib/pg` does not contain `/var/lib/pgsql`). The report inventory uses the same function, so the table and the rule always agree.
 - Other mounts (`/`, `/boot`, backup disks) are not judged by this rule.
+- Root-reserved blocks (ext4: 5 %) are not available to the postgres user, so they count as used. Lab 2026-10-20: used / size gave 77 % while `df` showed 82 % and PostgreSQL would fail at 100 % of the available space; used / (used + available) matches `df`.
 - Introduced 2026-10-20 because the report showed disk usage as an inventory remark while the Capacity summary said "no problems found". Judgements are rules; the inventory only displays.
 
 **Known limitations**

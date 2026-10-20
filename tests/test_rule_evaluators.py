@@ -506,6 +506,19 @@ class DataDiskUsageTests(unittest.TestCase):
         self.assertEqual(engine.evaluate_data_disk_usage(evidence, rule(), DATA_DISK_THRESHOLDS), [])
         self.assertEqual(self.evaluate({1: ("relative/path", [("/data", 95, 100)])}), [])
 
+    def test_root_reserved_blocks_count_as_used_like_df(self):
+        # Lab postgre-1: df shows 8.7G used, 2.0G available, Use% 82; used/size alone is 77.
+        evidence = self.evidence({1: ("/var/lib/postgresql/17/main", [("/", 8.7, 11.2)])})
+        evidence["PG_HOST_SNAPSHOT"][0]["available_bytes"] = 2.0 * GB
+        findings = engine.evaluate_data_disk_usage(evidence, rule(), DATA_DISK_THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])
+        self.assertEqual(findings[0]["observed_value"], 81.3)
+
+    def test_usage_without_available_falls_back_to_total(self):
+        self.assertEqual(engine.usage_percent(30, None, 100), 30)
+        self.assertEqual(engine.usage_percent(8, 2, 11), 80)
+        self.assertIsNone(engine.usage_percent(0, None, 0))
+
     def test_finding_describes_node_disk_and_directory(self):
         finding = self.evaluate({1: ("/var/lib/pg/17/main", [("/", 91.5, 100)])})[0]
         self.assertEqual(finding["observed_unit"], "PERCENT")

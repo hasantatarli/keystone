@@ -21,7 +21,7 @@ from pathlib import Path
 import re
 
 from repository.common.logging_config import configure_logging, get_logger
-from repository.intelligence.assessment_engine import data_mount
+from repository.intelligence.assessment_engine import data_mount, usage_percent
 from repository.worker import worker
 
 
@@ -307,7 +307,8 @@ def load_report_data(conn, health_check_id):
 
     storage = conn.execute(
         """
-        SELECT t.target_id, t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes
+        SELECT t.target_id, t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes,
+               s.available_bytes
         FROM keystone.target t
         JOIN LATERAL (
             SELECT max(captured_at) AS captured_at FROM postgresql.storage_snapshot
@@ -702,7 +703,7 @@ def disk_limits(data):
 
 
 def disk_percent(disk):
-    return round(100 * (disk["used_bytes"] or 0) / disk["total_bytes"])
+    return round(usage_percent(disk["used_bytes"], disk.get("available_bytes"), disk["total_bytes"]))
 
 
 def fmt_used_of(used, total):
@@ -762,7 +763,10 @@ def render_inventory(data, t):
         used = sum(s_["used_bytes"] or 0 for s_ in disk_rows)
         size = sum(s_["total_bytes"] or 0 for s_ in disk_rows)
         disk_nodes = len({s_["target_id"] for s_ in disk_rows})
-        pct = t["inv_full"].format(p=t["percent"].format(n=round(100 * used / size))) if size else ""
+        available = (sum(s_["available_bytes"] for s_ in disk_rows)
+                     if all(s_.get("available_bytes") is not None for s_ in disk_rows) else None)
+        share = usage_percent(used, available, size)
+        pct = t["inv_full"].format(p=t["percent"].format(n=round(share))) if share is not None else ""
         items.append((t["inv_data_disk"] if disks else t["inv_disk"], fmt_used_of(used, size),
                       " · ".join(x for x in (pct, partial(disk_nodes)) if x)))
     if not items:
@@ -912,7 +916,7 @@ def render_system(data, t):
                                      if id(s) in data_mounts else ""),
               e(fmt_bytes(s["used_bytes"])),
               e(fmt_bytes(s["total_bytes"])),
-              e(f"{100 * s['used_bytes'] / s['total_bytes']:.0f}%" if s["total_bytes"] else "")]
+              e(t["percent"].format(n=disk_percent(s)) if s["total_bytes"] else "")]
              for s in data["storage"]], numeric=(2, 3, 4)))
     parts.append(f"<h3>{e(t['databases'])}</h3>")
     if data["databases"]:
