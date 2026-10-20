@@ -322,3 +322,4 @@ Not implemented; recorded so they are not lost.
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
 | Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
 | Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |
+| Unplanned failover / primary changed | Lab 2026-10-20: host laptop slept, Patroni promoted postgre-2 unnoticed | Partly: role per node is collected; needs role history (instance inventory keeps only the current row) or the timeline ID (`pg_control_checkpoint()`), which increases on every promotion |
