@@ -45,9 +45,9 @@ TEXTS = {
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
         "verdict_healthy": "Değerlendirilen alanlarda sorun bulunmadı.",
         "verdict_none": "Hiçbir kontrol değerlendirilemedi; veri toplanamadı.",
-        "coverage": "Bu değerlendirmeye dahil {total} kontrolden {evaluated} tanesi sonuç verdi",
+        "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
-        "count_findings": "Bulgu", "count_critical": "Kritik", "count_warning": "Uyarı",
+        "count_critical": "Kritik", "count_warning": "Uyarı",
         "count_healthy": "Sağlıklı", "count_not_assessed": "Değerlendirilemedi",
         "inventory_title": "Sistem envanteri",
         "inv_servers": "Sunucu", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Bellek",
@@ -84,7 +84,7 @@ TEXTS = {
         "detail_client": "İstemci", "detail_state": "Durum", "detail_last_query": "Son gözlenen sorgu",
         "detail_transaction_start": "Transaction başlangıcı", "detail_state_change": "Bu duruma geçiş",
         "detail_captured_at": "Kanıt zamanı", "threshold": "Eşik",
-        "impact_note": "Bir bulgu birden fazla alanı etkileyebilir.",
+        "impact_note": "Aynı sorun birden fazla alanı etkileyebilir; her alanda adıyla gösterilir.",
         "scope_note": "Yalnızca bu kontrolde değerlendirilen kurallara göre.",
         "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
         "detail_usage": "Kullanım",
@@ -120,9 +120,9 @@ TEXTS = {
         "verdict_warning": "There are problems that need attention.",
         "verdict_healthy": "No problems were found in the assessed areas.",
         "verdict_none": "No check could be evaluated; data could not be collected.",
-        "coverage": "{evaluated} of the {total} checks in this assessment produced a result",
+        "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
-        "count_findings": "Findings", "count_critical": "Critical", "count_warning": "Warning",
+        "count_critical": "Critical", "count_warning": "Warning",
         "count_healthy": "Healthy", "count_not_assessed": "Not assessed",
         "inventory_title": "System inventory",
         "inv_servers": "Servers", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Memory",
@@ -158,7 +158,7 @@ TEXTS = {
         "detail_client": "Client", "detail_state": "State", "detail_last_query": "Last observed query",
         "detail_transaction_start": "Transaction start", "detail_state_change": "In this state since",
         "detail_captured_at": "Evidence time", "threshold": "Threshold",
-        "impact_note": "One finding can affect more than one area.",
+        "impact_note": "The same problem can affect more than one area; it is shown by name in each.",
         "scope_note": "Based only on the rules evaluated in this check.",
         "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
         "detail_usage": "Usage",
@@ -485,17 +485,16 @@ def summarize(data):
             counts["attention"] += 1
         else:
             counts["not_assessed"] += 1
-    for f in data["findings"]:
-        if f["severity"] == "CRITICAL":
-            counts["critical"] += 1
-        elif f["severity"] == "WARNING":
-            counts["warning"] += 1
+    # Tiles count checks, so they add up to the total; findings are counted per problem card.
+    for r in results:
+        if r["outcome"] == "ATTENTION_REQUIRED":
+            counts["critical" if r["max_severity"] == "CRITICAL" else "warning"] += 1
     counts["findings"] = len(data["findings"])
     counts["evaluated"] = counts["healthy"] + counts["attention"]
 
     if counts["critical"]:
         verdict = "critical"
-    elif counts["findings"]:
+    elif counts["attention"] or counts["findings"]:
         verdict = "warning"
     elif counts["evaluated"]:
         verdict = "healthy"
@@ -505,11 +504,10 @@ def summarize(data):
 
 
 def impact_summary(data):
-    """Per category: findings by severity and whether any of its rules was evaluated."""
+    """Per category: the problems (rules with findings, worst severity) and whether it was checked."""
     evaluated = {r["rule_id"] for r in data["results"]
                  if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED")}
-    summary = {key: {"CRITICAL": 0, "WARNING": 0, "INFO": 0, "checked": False}
-               for key in data["categories"]}
+    summary = {key: {"problems": {}, "checked": False} for key in data["categories"]}
     for rule_id, keys in data["rule_categories"].items():
         for key in keys:
             if rule_id in evaluated and key in summary:
@@ -517,7 +515,10 @@ def impact_summary(data):
     for f in data["findings"]:
         for key in data["rule_categories"].get(f["rule_id"], ()):
             if key in summary:
-                summary[key][f["severity"]] = summary[key].get(f["severity"], 0) + 1
+                problems = summary[key]["problems"]
+                current = problems.get(f["rule_id"])
+                if current is None or SEVERITY_ORDER.get(f["severity"], 9) < SEVERITY_ORDER.get(current, 9):
+                    problems[f["rule_id"]] = f["severity"]
     return summary
 
 
@@ -591,16 +592,10 @@ h3{font-size:15px;margin:20px 0 8px}
 .meter{display:inline-block;width:60px;height:8px;background:var(--line);border-radius:4px;margin-right:8px;vertical-align:middle;overflow:hidden}
 .meter i{display:block;height:100%}
 .m-ok{background:var(--ok-bar)}.m-warn{background:var(--warn-bar)}.m-crit{background:var(--crit-bar)}
-.impact{display:grid;grid-template-columns:minmax(120px,170px) 1fr minmax(110px,auto);gap:8px 14px;align-items:center}
+.impact{display:grid;grid-template-columns:minmax(120px,170px) 1fr;gap:10px 14px;align-items:baseline}
 .impact .name{font-weight:600}
-.impact .track{height:14px;display:flex;gap:2px}
-.impact .seg{height:14px}
-.impact .seg:first-child{border-radius:4px 0 0 4px}.impact .seg:last-child{border-radius:0 4px 4px 0}
-.impact .seg:only-child{border-radius:4px}
-.seg.CRITICAL{background:var(--crit-bar)}.seg.WARNING{background:var(--warn-bar)}.seg.INFO{background:#98a2b3}
-.impact .val{font-size:14px;color:var(--muted);white-space:nowrap}
-.legend{display:flex;gap:16px;font-size:13px;color:var(--muted);margin-top:10px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.impact .val{font-size:14px;display:flex;flex-wrap:wrap;gap:6px 16px}
+.problem .badge{margin-right:6px}
 .topic{display:grid;grid-template-columns:minmax(160px,220px) auto 1fr;gap:6px 14px;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line)}
 .topic .name{font-weight:600}
@@ -639,11 +634,11 @@ box-shadow:inset 0 3px 0 var(--accent)}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
 table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .text{grid-column:1/-1}
-.impact{grid-template-columns:110px 1fr}.impact .val{grid-column:2}.card dl{grid-template-columns:1fr}}
+.impact{grid-template-columns:1fr}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
 .tabs>label{display:none}.tabs>.panel{display:block!important;border-top:none}.tabs .part{display:block}
 .panel-tech{break-before:page}body{font-size:12px}
-.seg,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.meter i,.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 """
 
 
@@ -792,35 +787,27 @@ def render_inventory(data, t):
 
 
 def render_impact_chart(data, lang, t):
-    """Horizontal bars: findings per impact category, split by severity; labels carry the values."""
+    """Areas and the problems affecting them, by name: the same problem is recognisable in each area."""
     summary = impact_summary(data)
-    biggest = max([sum(s[k] for k in SEVERITY_ORDER) for s in summary.values()] + [1])
+    names = {r["rule_id"]: r["rule_name"] for r in data["results"]}
     rows = []
     for key, entry in sorted(data["categories"].items(), key=lambda item: item[1]["order"]):
-        s = summary[key]
-        total = sum(s[k] for k in SEVERITY_ORDER)
+        s_ = summary[key]
         name = localized(entry, lang, "name")
-        if total:
-            segments = "".join(
-                f'<div class="seg {sev}" style="width:{100 * s[sev] / biggest:.1f}%" '
-                f'title="{e(name)}: {s[sev]} {e(t["severity"][sev])}"></div>'
-                for sev in SEVERITY_ORDER if s[sev])
-            value = f"{total} {e(t['findings_word'])}"
+        if s_["problems"]:
+            ordered = sorted(s_["problems"].items(), key=lambda item: SEVERITY_ORDER.get(item[1], 9))
+            value = "".join(
+                f'<span class="problem">{badge(sev, t["severity"].get(sev, sev))}'
+                f'{e(rule_text(data, rule_id, lang, "NAME", names.get(rule_id, "")))}</span>'
+                for rule_id, sev in ordered)
         else:
-            segments = ""
-            value = badge("ok", t["impact_none"]) if s["checked"] else badge(
+            value = badge("ok", t["impact_none"]) if s_["checked"] else badge(
                 "unknown", t["impact_not_checked"])
         rows.append(f'<div class="name" title="{e(localized(entry, lang, "description"))}">'
-                    f"{e(name)}</div><div class=\"track\">{segments}</div>"
-                    f'<div class="val">{value}</div>')
-    legend = ('<div class="legend">'
-              f'<span><i style="background:var(--crit-bar)"></i>{e(t["severity"]["CRITICAL"])}</span>'
-              f'<span><i style="background:var(--warn-bar)"></i>{e(t["severity"]["WARNING"])}</span>'
-              "</div>")
+                    f'{e(name)}</div><div class="val">{value}</div>')
     note = ('<p class="note">' + e(t["scope_note"])
             + (f' {e(t["impact_note"])}' if data["findings"] else "") + "</p>")
-    return (f"<h2>{e(t['impact_title'])}</h2><div class=\"impact\">{''.join(rows)}</div>"
-            + (legend if data["findings"] else "") + note)
+    return f"<h2>{e(t['impact_title'])}</h2><div class=\"impact\">{''.join(rows)}</div>" + note
 
 
 def render_topics(data, lang, t):
@@ -862,9 +849,8 @@ def render_main_problems(data, lang, t):
 
 def render_executive(data, lang, t):
     counts, verdict = summarize(data)
-    tiles = [(counts["findings"], t["count_findings"]), (counts["critical"], t["count_critical"]),
-             (counts["warning"], t["count_warning"]), (counts["healthy"], t["count_healthy"]),
-             (counts["not_assessed"], t["count_not_assessed"])]
+    tiles = [(counts["critical"], t["count_critical"]), (counts["warning"], t["count_warning"]),
+             (counts["healthy"], t["count_healthy"]), (counts["not_assessed"], t["count_not_assessed"])]
     coverage = e(t["coverage"].format(**counts)) + (
         f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
         if counts["not_assessed"] else "")

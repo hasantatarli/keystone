@@ -289,6 +289,35 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("8.7 / 11.2 GB · %81", page[:page.index(TECH_PANEL)])
         self.assertNotIn("%78", page)
 
+    def test_tiles_count_checks_and_add_up(self):
+        # Two findings of one rule: one check needs attention, not two.
+        check_id = self.make_check()
+        self.conn.execute(
+            "INSERT INTO keystone.finding (assessment_run_id, rule_id, severity, title, finding_text, recommendation, "
+            "observed_value, observed_unit, subject_type, subject_identifier) "
+            "SELECT assessment_run_id, rule_id, 'WARNING', title, 'second', recommendation, 600, 'SECOND', 'SESSION', '4712' "
+            "FROM keystone.finding LIMIT 1")
+        self.conn.commit()
+        data = report.load_report_data(self.conn, check_id)
+        counts, verdict = report.summarize(data)
+        self.assertEqual(counts["findings"], 2)
+        self.assertEqual(counts["warning"], 1)
+        self.assertEqual(counts["critical"] + counts["warning"] + counts["healthy"]
+                         + counts["not_assessed"], counts["total"])
+        executive = report.render_html(data, "tr")
+        executive = executive[:executive.index(TECH_PANEL)]
+        self.assertNotIn('<div class="l">Bulgu</div>', executive)
+        self.assertIn("2 bulgu", executive)                         # on the problem card
+
+    def test_affected_areas_name_the_problem(self):
+        page = self.render(self.make_check(), "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        impact = executive[executive.index("Etkilenen alanlar"):executive.index("Alanlara göre durum")]
+        # PG-TRAN-001 affects Performance and Capacity: the same name in both rows.
+        self.assertEqual(impact.count("Uzun süre boşta bekleyen transaction"), 2)
+        self.assertNotIn("1 bulgu", impact)
+        self.assertIn("Aynı sorun birden fazla alanı etkileyebilir", impact)
+
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
         self.conn.execute(
