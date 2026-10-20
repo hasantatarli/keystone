@@ -318,6 +318,22 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertNotIn("1 bulgu", impact)
         self.assertIn("Aynı sorun birden fazla alanı etkileyebilir", impact)
 
+    def test_os_is_shown_and_postgres_build_string_only_on_hover(self):
+        check_id = self.make_check()
+        self.add_host(self.node1, 2, 4, [("/", 5, 10)])
+        self.conn.execute("UPDATE postgresql.host_snapshot SET os_name = 'Ubuntu 24.04.4 LTS', "
+                          "os_version = '24.04' WHERE target_id = %s", (self.node1,))
+        self.conn.execute("UPDATE postgresql.instance_inventory SET server_version = "
+                          "'17.10 (Ubuntu 17.10-1.pgdg24.04+1)'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("<th>İşletim sistemi</th>", executive)
+        self.assertIn("Ubuntu 24.04.4 LTS", executive)
+        technical = page[page.index(TECH_PANEL):]
+        self.assertIn('<span title="17.10 (Ubuntu 17.10-1.pgdg24.04+1)">17.10</span>', technical)
+        self.assertNotIn(">17.10 (Ubuntu", page)                     # never as visible text
+
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
         self.conn.execute(

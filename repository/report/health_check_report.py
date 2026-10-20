@@ -708,6 +708,21 @@ def fmt_used_of(used, total):
     return f"{used_text} / {size_text}"
 
 
+def os_text(node):
+    """'Ubuntu 24.04.4 LTS' from the host snapshot; the OS, not PostgreSQL's build string."""
+    text = node.get("os_name") or ""
+    if node.get("os_version") and node["os_version"] not in text:
+        text = f"{text} {node['os_version']}".strip()
+    return text
+
+
+def version_cell(version):
+    """'17.10' shown; the package build ('Ubuntu 17.10-1.pgdg24.04+1') only on hover."""
+    if not version:
+        return ""
+    return f'<span title="{e(version)}">{e(short_version(version))}</span>'
+
+
 def role_of(node, t):
     if node["in_recovery"] is None:
         return ""
@@ -774,12 +789,12 @@ def render_inventory(data, t):
     shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
              or n in hosts]
     if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
-        rows = [[e(n["name"]), e(role_of(n, t)),
+        rows = [[e(n["name"]), e(role_of(n, t)), e(os_text(n)),
                  e(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else ""),
                  e(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else ""),
                  disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
-        parts.append(table([t["inv_servers"], t["inv_role"], t["inv_cpu"], t["inv_memory"],
-                            t["inv_data_disk"]], rows, numeric=(2, 3)))
+        parts.append(table([t["inv_servers"], t["inv_role"], t["os"], t["inv_cpu"], t["inv_memory"],
+                            t["inv_data_disk"]], rows, numeric=(3, 4)))
     elif shown:
         parts.append(f'<p class="note">{e(t["inv_large_note"])}</p>')
 
@@ -882,14 +897,11 @@ def render_system(data, t):
                 continue
             role = "" if n["in_recovery"] is None else (
                 t["role_replica"] if n["in_recovery"] else t["role_primary"])
-            os_text = n["os_name"] or ""
-            if n["os_version"] and n["os_version"] not in os_text:   # "Ubuntu 24.04.4 LTS" already has it
-                os_text = f"{os_text} {n['os_version']}".strip()
             rows.append([e(n["name"]),
                          e(f"{n['server_address']}:{n['server_port']}" if n["server_address"] else ""),
-                         e(role), e(n["server_version"]),
+                         e(role), version_cell(n["server_version"]),
                          e(fmt_uptime(n["postmaster_start_time"], data["as_of"], t)),
-                         e(os_text), e(n["logical_cpu_count"]), e(fmt_bytes(n["memory_total_bytes"]))])
+                         e(os_text(n)), e(n["logical_cpu_count"]), e(fmt_bytes(n["memory_total_bytes"]))])
         parts.append(f"<h3>{e(t['nodes'])}</h3>" + table(
             [t["node"], t["address"], t["role"], t["version"], t["up_since"], t["os"], t["cpu"],
              t["memory"]], rows, numeric=(6, 7)))
