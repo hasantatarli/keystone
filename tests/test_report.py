@@ -150,7 +150,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 8 / 11 başarılı", executive)  # + node-3 has no connection
+        self.assertIn("Veri toplama: 9 / 14 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -229,13 +229,11 @@ class ReportTests(test_health_check.HealthCheckTests):
                 "setting_name, setting_value) VALUES (%s, %s, 'data_directory', %s)",
                 (node, now, data_directory))
 
-    def test_executive_inventory_per_server_with_notes(self):
+    def test_executive_inventory_per_server(self):
         check_id = self.make_check()
         self.add_host(self.node1, 4, 16, [("/", 30, 100), ("/var/lib/postgresql", 46, 50)],
                       "/var/lib/postgresql/16/main")
         self.add_host(self.node2, 2, 8, [("/", 41, 50)], "/var/lib/postgresql/16/main")
-        self.conn.execute("UPDATE postgresql.instance_inventory SET server_version = '16.3' "
-                          "WHERE target_id = %s", (self.node3,))
         self.conn.commit()
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
@@ -243,16 +241,55 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("<th>Veri diski</th>", executive)            # a row per server
         self.assertIn("46.0 / 50.0 GB · %92", executive)           # data mount, not /
         self.assertIn("41.0 / 50.0 GB · %82", executive)           # data dir on /
+        self.assertIn('class="m-crit"', executive)                 # colours from the rule limits
+        self.assertIn('class="m-warn"', executive)
         self.assertIn("87.0 / 100.0 GB", executive)                # tile: data disks only
         self.assertIn("Bilinmiyor", executive)                     # node-3: no host data
-        self.assertIn("Dikkat çeken noktalar", executive)
-        self.assertIn("farklı PostgreSQL sürümleri var: 16.3, 16.4", executive)
-        self.assertIn("CPU 2 / 4 çekirdek, bellek 8.0 GB / 16.0 GB", executive)
-        self.assertIn("veri diski %92 dolu", executive)
-        # Critical before warning.
-        self.assertLess(executive.index("veri diski %92"), executive.index("veri diski %82"))
+        self.assertNotIn("Dikkat çeken noktalar", executive)       # judgements are rules
         technical = page[page.index(TECH_PANEL):]
         self.assertIn('/var/lib/postgresql <span class="note">(veri)</span>', technical)
+
+    def test_data_disk_rule_end_to_end(self):
+        from repository.intelligence import assessment_engine as engine
+        self.add_host(self.node1, 4, 16, [("/", 30, 100), ("/var/lib/postgresql", 46, 50)],
+                      "/var/lib/postgresql/16/main")
+        self.add_host(self.node2, 4, 16, [("/", 20, 100)], "/var/lib/postgresql/16/main")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+        row = self.conn.execute(
+            "SELECT res.outcome, res.max_severity, res.thresholds_used, f.subject_identifier, "
+            "f.observed_value, f.finding_text FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "LEFT JOIN keystone.finding f ON f.assessment_run_id = res.assessment_run_id "
+            "WHERE rd.rule_key = 'PG-CAP-001' ORDER BY res.assessment_result_id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual((row["outcome"], row["max_severity"]), ("ATTENTION_REQUIRED", "CRITICAL"))
+        self.assertEqual(row["subject_identifier"], "node-1")
+        self.assertEqual(float(row["observed_value"]), 92.0)
+        self.assertIn("/var/lib/postgresql on node-1 is 92% full", row["finding_text"])
+        self.assertEqual({t["severity"] for t in row["thresholds_used"]}, {"WARNING", "CRITICAL"})
+
+    def test_data_disk_rule_without_host_evidence_is_not_assessed(self):
+        from repository.intelligence import assessment_engine as engine
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+        row = self.conn.execute(
+            "SELECT res.outcome, res.reason FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-CAP-001' "
+            "ORDER BY res.assessment_result_id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["outcome"], "INSUFFICIENT_EVIDENCE")
+
+    def test_no_problems_found_is_scoped_to_evaluated_rules(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'HEALTHY', reason = NULL "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id "
+            "AND rd.rule_key = 'PG-CONN-001'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("Sorun bulunmadı", executive)
+        self.assertNotIn("Sorun yok", executive)
+        self.assertIn("Yalnızca bu kontrolde değerlendirilen kurallara göre.", executive)
 
     def test_data_disk_is_the_longest_matching_mount(self):
         node = {"target_id": 1, "data_directory": "/var/lib/pgsql/data"}
@@ -265,7 +302,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         windows = {"target_id": 3, "data_directory": "C:/Program Files/PostgreSQL/17/data"}
         self.assertIsNone(report.data_disk(windows, storage))
 
-    def test_large_estate_shows_totals_and_exceptions_only(self):
+    def test_large_estate_shows_totals_only(self):
         t = report.TEXTS["tr"]
         nodes, storage = [], []
         for i in range(30):
@@ -273,17 +310,14 @@ class ReportTests(test_health_check.HealthCheckTests):
                           "in_recovery": i % 3 != 0, "logical_cpu_count": 8,
                           "memory_total_bytes": 32 * 1024 ** 3,
                           "data_directory": "/data/pg"})
-            used = 95 if i == 7 else 40
             storage.append({"target_id": i, "node_name": f"pg-{i:02d}", "mount_point": "/data",
-                            "used_bytes": used * 1024 ** 3, "total_bytes": 100 * 1024 ** 3})
+                            "used_bytes": 40 * 1024 ** 3, "total_bytes": 100 * 1024 ** 3})
         html = report.render_inventory({"nodes": nodes, "storage": storage, "databases": []}, t)
         self.assertNotIn("<table>", html)
-        self.assertIn("30", html)
         self.assertIn("10 primary, 20 replica", html)
         self.assertIn("240 çekirdek", html)
+        self.assertIn("%40 dolu", html)                           # data disks only
         self.assertIn("Teknik Detaylar bölümünde", html)
-        self.assertIn("pg-07 veri diski %95 dolu", html)
-        self.assertEqual(html.count("<li>"), 1)                    # only the exception
 
     def test_healthy_text_states_the_limit_used(self):
         check_id = self.make_check()

@@ -101,7 +101,7 @@ def plan_collections(conn, target, nodes, assessment_keys):
     context = REPORT_CONTEXT_COLLECTORS.get(target["provider"], {})
     wanted = ([(k, "EVIDENCE", False) for k in evidence]
               + [(k, "CONTEXT", False) for k in context.get("required", []) if k not in evidence]
-              + [(k, "CONTEXT", True) for k in context.get("optional", [])])
+              + [(k, "CONTEXT", True) for k in context.get("optional", []) if k not in evidence])
 
     definitions = load_collectors(conn, [k for k, _, _ in wanted])
     node_targets = nodes or ([target] if target["target_type"] == "NODE" else [])

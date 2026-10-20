@@ -445,6 +445,51 @@ def load_latest_connection_activity_snapshot(conn, target_id):
     return [row]
 
 
+def node_target_ids(conn, target_id):
+    """NODE-scoped evidence lives on nodes: the target itself if a NODE, else its active NODE children."""
+    rows = conn.execute(
+        "SELECT target_id FROM keystone.target WHERE (target_id = %s AND target_type = 'NODE') "
+        "OR (parent_target_id = %s AND target_type = 'NODE' AND is_active) ORDER BY target_id",
+        (target_id, target_id)).fetchall()
+    return [r["target_id"] for r in rows]
+
+
+def load_latest_storage_snapshot(conn, target_id):
+    """Latest filesystem capacity per node (PG_HOST_SNAPSHOT)."""
+    return conn.execute(
+        """
+        SELECT s.snapshot_id, s.target_id, t.name AS node_name, s.captured_at,
+               s.device, s.mount_point, s.total_bytes, s.used_bytes, s.available_bytes
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.storage_snapshot
+            WHERE target_id = t.target_id
+        ) last ON last.captured_at IS NOT NULL
+        JOIN postgresql.storage_snapshot s
+            ON s.target_id = t.target_id AND s.captured_at = last.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY s.target_id, s.mount_point
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
+def load_latest_configuration_snapshot(conn, target_id):
+    """Latest pg_settings snapshot per node (PG_CONFIGURATION_SNAPSHOT)."""
+    return conn.execute(
+        """
+        SELECT c.target_id, t.name AS node_name, c.captured_at,
+               c.setting_name, c.setting_value, c.unit, c.source, c.pending_restart
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.configuration_snapshot
+            WHERE target_id = t.target_id
+        ) last ON last.captured_at IS NOT NULL
+        JOIN postgresql.configuration_snapshot c
+            ON c.target_id = t.target_id AND c.captured_at = last.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY c.target_id, c.setting_name
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
@@ -746,6 +791,63 @@ def evaluate_aborted_idle_transaction_connections(rows, rule, thresholds):
     return findings
 
 
+def data_mount(data_directory, mounts):
+    """The mount holding data_directory: longest mount point that contains it, or None."""
+    if not data_directory:
+        return None
+    best = None
+    for m in mounts:
+        point = m["mount_point"]
+        if data_directory == point or data_directory.startswith(point.rstrip("/") + "/"):
+            if best is None or len(point) > len(best["mount_point"]):
+                best = m
+    return best
+
+
+def evaluate_data_disk_usage(evidence, rule, thresholds):
+    """PG-CAP-001: usage of the filesystem holding data_directory, per node."""
+    data_directories = {r["target_id"]: r["setting_value"]
+                        for r in evidence["PG_CONFIGURATION_SNAPSHOT"]
+                        if r["setting_name"] == "data_directory"}
+    findings = []
+    for target_id, directory in data_directories.items():
+        mounts = [m for m in evidence["PG_HOST_SNAPSHOT"]
+                  if m["target_id"] == target_id and m["total_bytes"]]
+        mount = data_mount(directory, mounts)
+        if mount is None:
+            continue
+        used_percent = round(100 * (mount["used_bytes"] or 0) / mount["total_bytes"], 1)
+        matched_threshold = match_threshold(used_percent, thresholds, "PERCENT")
+        if matched_threshold is None:
+            continue
+        findings.append(
+            {
+                "severity": matched_threshold["severity"],
+                "snapshot_id": mount["snapshot_id"],
+                "template_values": {
+                    "node_name": mount["node_name"],
+                    "mount_point": mount["mount_point"],
+                    "used_percent": f"{used_percent:g}",
+                    "data_directory": directory,
+                },
+                "observed_value": used_percent,
+                "observed_unit": "PERCENT",
+                "subject_type": "NODE",
+                "subject_identifier": mount["node_name"],
+                "details": {
+                    "node": mount["node_name"],
+                    "mount_point": mount["mount_point"],
+                    "data_directory": directory,
+                    "used_bytes": mount["used_bytes"],
+                    "total_bytes": mount["total_bytes"],
+                    "available_bytes": mount["available_bytes"],
+                    "captured_at": iso(mount["captured_at"]),
+                },
+            }
+        )
+    return findings
+
+
 # -----------------------------------------------------------------------------
 # Evaluation Registry
 # -----------------------------------------------------------------------------
@@ -757,11 +859,15 @@ EVIDENCE_LOADERS = {
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
     "PG_REPLICATION_SLOTS": load_latest_replication_slot_snapshot,
     "PG_CONNECTION_ACTIVITY": load_latest_connection_activity_snapshot,
+    "PG_HOST_SNAPSHOT": load_latest_storage_snapshot,
+    "PG_CONFIGURATION_SNAPSHOT": load_latest_configuration_snapshot,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
 # evaluators use the same (rows, rule, thresholds) contract so run_assessment()
 # can dispatch rules generically instead of growing a rule-specific if/elif tree.
+# Rules with one evidence source get its rows; rules with several get
+# {evidence_source: rows}.
 RULE_EVALUATORS = {
     "PG-TRAN-001": evaluate_long_idle_transaction,
     "PG-TRAN-002": evaluate_database_xid_wraparound,
@@ -769,6 +875,7 @@ RULE_EVALUATORS = {
     "PG-REP-001": evaluate_replication_slot_wal_retention_pressure,
     "PG-REP-002": evaluate_replication_slot_wal_unavailable,
     "PG-CONN-001": evaluate_aborted_idle_transaction_connections,
+    "PG-CAP-001": evaluate_data_disk_usage,
 }
 
 
@@ -861,11 +968,8 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
     for requirement in evidence_requirements:
         logger.debug("%s", requirement)
 
-    # MVP evaluators currently consume one evidence row-set. Keep evidence
-    # loading and freshness checks generic so new rules do not add branches
-    # to the orchestration loop. Expand the evaluator input contract only
-    # when a real multi-source rule requires it.
-    evidence_sets = []
+    # Loading and freshness checks stay generic: every declared source must be fresh.
+    evidence_sets = {}
 
     for requirement in evidence_requirements:
         evidence_source = requirement["evidence_source"]
@@ -895,16 +999,12 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
                 f"{evidence_source}: {reason}",
             )
 
-        evidence_sets.append(rows)
+        evidence_sets[evidence_source] = rows
 
-    if len(evidence_sets) != 1:
-        raise RuntimeError(
-            f"Rule {rule['rule_key']} has {len(evidence_sets)} evidence "
-            "sources; MVP evaluators currently support exactly one."
-        )
-
+    evidence = (next(iter(evidence_sets.values()))
+                if len(evidence_sets) == 1 else evidence_sets)
     findings = evaluator(
-        evidence_sets[0],
+        evidence,
         rule,
         thresholds,
     )

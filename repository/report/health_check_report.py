@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 
 from repository.common.logging_config import configure_logging, get_logger
+from repository.intelligence.assessment_engine import data_mount
 from repository.worker import worker
 
 
@@ -55,19 +56,13 @@ TEXTS = {
         "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
         "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
         "inv_data_disk": "Veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
-        "inv_notes_title": "Dikkat çeken noktalar",
-        "inv_note_versions": "Sunucularda farklı PostgreSQL sürümleri var: {versions}.",
-        "inv_note_smaller": ("{node} (replica), primary {primary} sunucusundan küçük: {what}. "
-                             "Failover sonrası aynı yükü taşıyamayabilir."),
-        "inv_note_cpu": "CPU {replica} / {primary} çekirdek", "inv_note_memory": "bellek {replica} / {primary}",
-        "inv_note_disk": "{node} veri diski {p} dolu ({used} / {total}).",
         "inv_large_note": "Sunucu bazlı ayrıntı Teknik Detaylar bölümünde.",
         "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
-        "impact_none": "Sorun yok", "impact_not_checked": "Bu kontrolde incelenmedi",
+        "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
-        "topic_ok": "Sorun yok", "topic_attention": "Dikkat", "topic_critical": "Kritik",
+        "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
         "topic_unknown": "Değerlendirilemedi",
         "topic_unknown_text": "Yeterli veri toplanamadığı için değerlendirilemedi.",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
@@ -90,6 +85,9 @@ TEXTS = {
         "detail_transaction_start": "Transaction başlangıcı", "detail_state_change": "Bu duruma geçiş",
         "detail_captured_at": "Kanıt zamanı", "threshold": "Eşik",
         "impact_note": "Bir bulgu birden fazla alanı etkileyebilir.",
+        "scope_note": "Yalnızca bu kontrolde değerlendirilen kurallara göre.",
+        "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
+        "detail_usage": "Kullanım",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
@@ -133,19 +131,13 @@ TEXTS = {
         "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
         "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
         "inv_data_disk": "Data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
-        "inv_notes_title": "Points to note",
-        "inv_note_versions": "Servers run different PostgreSQL versions: {versions}.",
-        "inv_note_smaller": ("{node} (replica) is smaller than the primary {primary}: {what}. "
-                             "It may not carry the same load after a failover."),
-        "inv_note_cpu": "CPU {replica} / {primary} cores", "inv_note_memory": "memory {replica} / {primary}",
-        "inv_note_disk": "{node} data disk is {p} full ({used} / {total}).",
         "inv_large_note": "Per-server details are in the Technical Details part.",
         "data_mount": "data",
         "impact_title": "Affected areas",
-        "impact_none": "No problems", "impact_not_checked": "Not covered by this check",
+        "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
-        "topic_ok": "No problems", "topic_attention": "Attention", "topic_critical": "Critical",
+        "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
         "topic_unknown": "Not assessed",
         "topic_unknown_text": "Could not be assessed; not enough data was collected.",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
@@ -167,6 +159,9 @@ TEXTS = {
         "detail_transaction_start": "Transaction start", "detail_state_change": "In this state since",
         "detail_captured_at": "Evidence time", "threshold": "Threshold",
         "impact_note": "One finding can affect more than one area.",
+        "scope_note": "Based only on the rules evaluated in this check.",
+        "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
+        "detail_usage": "Usage",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
@@ -380,6 +375,8 @@ def fmt_quantity(value, unit, t):
     value = float(value)
     if unit == "SECOND":
         return fmt_duration(value, t)
+    if unit == "PERCENT":
+        return t["percent"].format(n=f"{value:g}")
     if unit == "TRANSACTION" and value >= 1e9:
         return f"{value / 1e9:g} {t['billion']} {t['unit_TRANSACTION']}"
     number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
@@ -593,9 +590,6 @@ h3{font-size:15px;margin:20px 0 8px}
 .meter{display:inline-block;width:60px;height:8px;background:var(--line);border-radius:4px;margin-right:8px;vertical-align:middle;overflow:hidden}
 .meter i{display:block;height:100%}
 .m-ok{background:var(--ok-bar)}.m-warn{background:var(--warn-bar)}.m-crit{background:var(--crit-bar)}
-.inv-notes{list-style:none;padding:0;margin:6px 0}
-.inv-notes li{margin:6px 0}
-.inv-notes .badge{margin-right:8px}
 .impact{display:grid;grid-template-columns:minmax(120px,170px) 1fr minmax(110px,auto);gap:8px 14px;align-items:center}
 .impact .name{font-weight:600}
 .impact .track{height:14px;display:flex;gap:2px}
@@ -685,25 +679,26 @@ def short_version(version):
     return (version or "").split(" ")[0]
 
 
-# Executive inventory: a row per server up to this many, beyond that totals and exceptions.
+# Executive inventory: a row per server up to this many, beyond that totals only.
 INVENTORY_TABLE_LIMIT = 10
-DISK_WARNING_PERCENT, DISK_CRITICAL_PERCENT = 80, 90
+DATA_DISK_RULE = "PG-CAP-001"
+DEFAULT_DISK_LIMITS = {"warning": 80, "critical": 90}
 
 
 def data_disk(node, storage):
-    """The mount holding data_directory (longest matching mount point), or None."""
-    path = node.get("data_directory")
-    if not path:
-        return None
-    best = None
-    for s_ in storage:
-        mount = s_["mount_point"]
-        if s_["target_id"] != node["target_id"] or not s_["total_bytes"]:
-            continue
-        if path == mount or path.startswith(mount.rstrip("/") + "/"):
-            if best is None or len(mount) > len(best["mount_point"]):
-                best = s_
-    return best
+    """The node's data disk, chosen exactly like the data disk rule does."""
+    mounts = [s_ for s_ in storage if s_["target_id"] == node["target_id"] and s_["total_bytes"]]
+    return data_mount(node.get("data_directory"), mounts)
+
+
+def disk_limits(data):
+    """Meter colours follow the data disk rule's thresholds used in this check."""
+    limits = dict(DEFAULT_DISK_LIMITS)
+    for result in data.get("results", []):
+        if result["rule_key"] == DATA_DISK_RULE:
+            for th in result.get("thresholds") or []:
+                limits[th["severity"].lower()] = float(th["value"])
+    return limits
 
 
 def disk_percent(disk):
@@ -723,56 +718,19 @@ def role_of(node, t):
     return t["role_replica"] if node["in_recovery"] else t["role_primary"]
 
 
-def inventory_notes(nodes, disks, t):
-    """[(severity, text)]: facts an executive should not miss; observations, not rule findings."""
-    notes = []
-    versions = sorted({short_version(n["server_version"]) for n in nodes if n["server_version"]})
-    if len(versions) > 1:
-        notes.append(("WARNING", t["inv_note_versions"].format(versions=", ".join(versions))))
-
-    primary = next((n for n in nodes if n["in_recovery"] is False), None)
-    for n in nodes:
-        if primary is None or not n["in_recovery"]:
-            continue
-        what = []
-        if n["logical_cpu_count"] and primary["logical_cpu_count"] \
-                and n["logical_cpu_count"] < primary["logical_cpu_count"]:
-            what.append(t["inv_note_cpu"].format(replica=n["logical_cpu_count"],
-                                                 primary=primary["logical_cpu_count"]))
-        # Small differences in reported memory are normal (kernel reservations).
-        if n["memory_total_bytes"] and primary["memory_total_bytes"] \
-                and n["memory_total_bytes"] < 0.9 * primary["memory_total_bytes"]:
-            what.append(t["inv_note_memory"].format(replica=fmt_bytes(n["memory_total_bytes"]),
-                                                    primary=fmt_bytes(primary["memory_total_bytes"])))
-        if what:
-            notes.append(("WARNING", t["inv_note_smaller"].format(
-                node=n["name"], primary=primary["name"], what=", ".join(what))))
-
-    for n in nodes:
-        disk = disks.get(n["target_id"])
-        if disk is None:
-            continue
-        pct = disk_percent(disk)
-        if pct >= DISK_WARNING_PERCENT:
-            notes.append(("CRITICAL" if pct >= DISK_CRITICAL_PERCENT else "WARNING",
-                          t["inv_note_disk"].format(node=n["name"], p=t["percent"].format(n=pct),
-                                                    used=fmt_bytes(disk["used_bytes"]),
-                                                    total=fmt_bytes(disk["total_bytes"]))))
-    return sorted(notes, key=lambda note: SEVERITY_ORDER.get(note[0], 9))
-
-
-def disk_cell(disk, t):
+def disk_cell(disk, limits, t):
     if disk is None:
         return f'<span class="note">{e(t["inv_disk_unknown"])}</span>'
     pct = disk_percent(disk)
-    level = "crit" if pct >= DISK_CRITICAL_PERCENT else "warn" if pct >= DISK_WARNING_PERCENT else "ok"
+    level = ("crit" if pct >= limits.get("critical", 101)
+             else "warn" if pct >= limits.get("warning", 101) else "ok")
     return (f'<span class="meter"><i class="m-{level}" style="width:{min(pct, 100)}%"></i></span>'
             f'{e(fmt_used_of(disk["used_bytes"], disk["total_bytes"]))} · '
             f'{e(t["percent"].format(n=pct))}')
 
 
 def render_inventory(data, t):
-    """Executive view of the estate: totals, a row per server when few, and what stands out."""
+    """Executive view of the estate: totals and a row per server when few. Displays, never judges."""
     nodes = data["nodes"]
     known = [n for n in nodes if n["server_version"] is not None]
     hosts = [n for n in nodes if n["logical_cpu_count"] is not None or n["memory_total_bytes"] is not None]
@@ -820,17 +778,12 @@ def render_inventory(data, t):
         rows = [[e(n["name"]), e(role_of(n, t)),
                  e(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else ""),
                  e(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else ""),
-                 disk_cell(disks.get(n["target_id"]), t)] for n in nodes]
+                 disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
         parts.append(table([t["inv_servers"], t["inv_role"], t["inv_cpu"], t["inv_memory"],
                             t["inv_data_disk"]], rows, numeric=(2, 3)))
     elif shown:
         parts.append(f'<p class="note">{e(t["inv_large_note"])}</p>')
 
-    notes = inventory_notes(nodes, disks, t)
-    if notes:
-        parts.append(f"<h3>{e(t['inv_notes_title'])}</h3><ul class=\"inv-notes\">"
-                     + "".join(f"<li>{badge(sev, t['severity'][sev])}{e(text)}</li>"
-                               for sev, text in notes) + "</ul>")
     return "".join(parts)
 
 
@@ -860,7 +813,8 @@ def render_impact_chart(data, lang, t):
               f'<span><i style="background:var(--crit-bar)"></i>{e(t["severity"]["CRITICAL"])}</span>'
               f'<span><i style="background:var(--warn-bar)"></i>{e(t["severity"]["WARNING"])}</span>'
               "</div>")
-    note = f'<p class="note">{e(t["impact_note"])}</p>' if data["findings"] else ""
+    note = ('<p class="note">' + e(t["scope_note"])
+            + (f' {e(t["impact_note"])}' if data["findings"] else "") + "</p>")
     return (f"<h2>{e(t['impact_title'])}</h2><div class=\"impact\">{''.join(rows)}</div>"
             + (legend if data["findings"] else "") + note)
 
@@ -882,7 +836,8 @@ def render_topics(data, lang, t):
                              for r in topic["results"] if r["outcome"] == "ATTENTION_REQUIRED")
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
                     f'{badge(status, t["topic_" + status])}<span class="text">{e(text)}</span></div>')
-    return f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
+    return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
+            + f'<p class="note">{e(t["scope_note"])}</p>')
 
 
 def render_main_problems(data, lang, t):
@@ -970,7 +925,9 @@ def render_system(data, t):
     return "".join(parts)
 
 
-DETAIL_LABELS = (("application", "detail_application"), ("user", "detail_user"),
+DETAIL_LABELS = (("node", "detail_node"), ("mount_point", "detail_mount"),
+                 ("data_directory", "detail_data_directory"), ("usage", "detail_usage"),
+                 ("application", "detail_application"), ("user", "detail_user"),
                  ("database", "detail_database"), ("client_addr", "detail_client"),
                  ("state", "detail_state"))
 
@@ -996,6 +953,8 @@ def render_instance(f, t):
     if f["subject_identifier"]:
         facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
     details = dict(f["details"] or {})
+    if details.get("total_bytes"):
+        details["usage"] = fmt_used_of(details.get("used_bytes") or 0, details["total_bytes"])
     if details.get("client_hostname"):
         details["client_addr"] = " ".join(
             x for x in (details.get("client_addr"), f"({details['client_hostname']})") if x)

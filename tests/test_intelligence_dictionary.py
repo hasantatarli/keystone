@@ -91,6 +91,16 @@ EXPECTED_RULES = {
         "thresholds": {"WARNING": (Decimal("1"), "CONNECTION")},
         "evidence": {"PG_CONNECTION_ACTIVITY": (True, 600)},
     },
+    "PG-CAP-001": {
+        "assessment": "PG_CAPACITY_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("80"), "PERCENT"),
+            "CRITICAL": (Decimal("90"), "PERCENT"),
+        },
+        "evidence": {"PG_HOST_SNAPSHOT": (True, 3600),
+                     "PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
