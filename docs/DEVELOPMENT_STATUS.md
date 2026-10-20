@@ -133,9 +133,9 @@ The current `rule_threshold` model supports one threshold value per rule/severit
 
 Do not introduce a generic DSL. Revisit the smallest useful extension, such as named metrics or rule parameters, when implementing the next rule that genuinely needs it.
 
-### 4. Multi-source evaluators
+### 4. Multi-source evaluators — resolved by PG-CAP-001 (2026-10-20)
 
-The orchestration can resolve evidence requirements generically, but the current evaluator contract intentionally supports one evidence row-set per rule. Do not generalize this until a real rule requires multiple evidence sources.
+Rules with several evidence sources receive `{evidence_source: rows}`; single-source evaluators keep receiving their rows. Every declared source is checked for freshness.
 
 ### 5. Migration checksums are recorded but not verified
 
@@ -198,6 +198,17 @@ Report review decisions (2026-10-19, Hasan + external review):
 - Next rule: replication lag / replica connection state from `PG_REPLICATION_STATUS` (already collected, not evaluated).
 - Two-level reporting: per-target report plus an overview of all targets of a customer as the single entry point (one command writes the overview and the per-target reports to one folder; rows link to the reports). Overview summarizes existing assessment results (no second evaluation), shows freshness, keeps node-level problems visible. Needs a customer concept: ADR-0016. HTML first; a web application for DBAs doing live follow-up later, reusing the same overview query.
 - Executive inventory per server for small systems; for large estates only totals and exceptions (disk above limits, replicas smaller than the primary).
+
+Report, inventory and rule coverage (2026-10-19/20, PR #16, #17 lab-verified and merged):
+- HTML report with executive / technical tabs, TR/EN Dictionary texts (V029, V030), timestamped files, `--report` on the health check.
+- Per-server inventory; PG-CAP-001 Data Disk Usage (V031), usage like `df` (root-reserved blocks count as used). Judgements are rules; the inventory only displays.
+- Executive tiles count checks (they add up); affected areas name the problem.
+- **PostgreSQL V1 Assessment Catalogue** (Service Catalog → Health Assessment): 62 checks, priorities P1 → P3, pg_collector coverage, review decisions (configuration recommendations, backup method detection, conscious choices are WARNING).
+
+In progress — PR #18 (draft), replication and HA rules PG-REP-003…006 (V032, PG014):
+- Lab 2026-10-20: clean state and stopped replica (PG-REP-004 + PG-REP-005) as expected. PG-REP-006 not simulable with Patroni (it manages `synchronous_standby_names`); covered by tests.
+- **Open:** the lag test (replay paused on a replica, writes on the primary) produced no PG-REP-003 finding. Suspected: `replay_lag` stops growing when replay is stuck. Next: Hasan runs `pg_stat_replication` with WAL bytes behind while replay is paused; then add a WAL-bytes condition (proposal 256 MB / 1 GB), which needs a second unit per rule (Known Issue 3).
+- **Agreed direction:** problem cards in bullets — "What is happening" (one sentence), "Likely causes" (list, new rule text type CAUSES), "Why it matters", "What to do" (steps). Rewrite TR/EN texts of all rules. To be confirmed by Hasan before implementation (likely in PR #18).
 
 Next (MVP Plan Phase 1):
 
