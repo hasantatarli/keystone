@@ -228,6 +228,19 @@ class AssessmentScheduleTests(unittest.TestCase):
             " -> SUCCESS: 3 INSUFFICIENT_EVIDENCE"
         ])
 
+    def test_engine_stores_thresholds_used(self):
+        from repository.intelligence import assessment_engine
+        with self.assertLogs("keystone.assessment_engine", level="INFO"):
+            run_id = assessment_engine.run_assessment(
+                self.conn, "PG_TRANSACTION_HEALTH", self.target_id)
+        rows = {r["rule_key"]: r["thresholds_used"] for r in self.conn.execute(
+            "SELECT rd.rule_key, res.thresholds_used FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) WHERE res.assessment_run_id = %s",
+            (run_id,)).fetchall()}
+        self.assertEqual(
+            sorted((t["severity"], t["value"], t["unit"]) for t in rows["PG-TRAN-001"]),
+            [("CRITICAL", 900.0, "SECOND"), ("WARNING", 300.0, "SECOND")])
+
 
 if __name__ == "__main__":
     unittest.main()

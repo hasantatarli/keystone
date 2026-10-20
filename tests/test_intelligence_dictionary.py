@@ -207,6 +207,74 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
         }
         self.assertEqual(sources - set(engine.EVIDENCE_LOADERS), set())
 
+    # ---------------------------------------------- texts, topics, categories
+
+    def test_every_rule_has_a_topic_and_at_least_one_impact_category(self):
+        rows = self.query(
+            """
+            SELECT rd.rule_key, rd.topic_key, count(ric.category_key)
+            FROM keystone.rule_definition rd
+            LEFT JOIN keystone.rule_impact_category ric USING (rule_id)
+            WHERE rd.is_enabled
+            GROUP BY rd.rule_key, rd.topic_key
+            """
+        )
+        self.assertEqual([r for r in rows if r[1] is None or r[2] == 0], [])
+
+    def test_every_rule_has_all_texts_in_every_language(self):
+        missing = self.query(
+            """
+            SELECT rd.rule_key, l.language_code, tt.text_type
+            FROM keystone.rule_definition rd
+            CROSS JOIN keystone.dictionary_language l
+            CROSS JOIN (VALUES ('NAME'), ('HEALTHY'), ('MEANING'), ('IMPACT'),
+                               ('RECOMMENDATION')) AS tt (text_type)
+            LEFT JOIN keystone.rule_text t
+                ON t.rule_id = rd.rule_id AND t.language_code = l.language_code
+               AND t.text_type = tt.text_type
+            WHERE rd.is_enabled AND t.rule_id IS NULL
+            ORDER BY 1, 2, 3
+            """
+        )
+        self.assertEqual(missing, [])
+
+    def test_healthy_text_placeholders_have_thresholds(self):
+        # A {warning}/{critical} limit in a HEALTHY text must come from a real threshold.
+        rows = self.query(
+            """
+            SELECT rd.rule_key, t.text,
+                   array_agg(lower(th.severity)) FILTER (WHERE th.severity IS NOT NULL)
+            FROM keystone.rule_text t
+            JOIN keystone.rule_definition rd USING (rule_id)
+            LEFT JOIN keystone.rule_threshold th ON th.rule_id = rd.rule_id
+            WHERE t.text_type = 'HEALTHY'
+            GROUP BY rd.rule_key, t.text
+            """
+        )
+        import re
+        broken = [(key, text) for key, text, severities in rows
+                  for name in re.findall(r"\{(\w+)\}", text)
+                  if name not in (severities or [])]
+        self.assertEqual(broken, [])
+
+    def test_every_topic_and_category_has_texts_in_every_language(self):
+        missing = self.query(
+            """
+            SELECT 'topic', d.topic_key, l.language_code
+            FROM keystone.dictionary_topic d CROSS JOIN keystone.dictionary_language l
+            LEFT JOIN keystone.dictionary_topic_text t
+                ON t.topic_key = d.topic_key AND t.language_code = l.language_code
+            WHERE t.topic_key IS NULL
+            UNION ALL
+            SELECT 'category', d.category_key, l.language_code
+            FROM keystone.dictionary_impact_category d CROSS JOIN keystone.dictionary_language l
+            LEFT JOIN keystone.dictionary_impact_category_text t
+                ON t.category_key = d.category_key AND t.language_code = l.language_code
+            WHERE t.category_key IS NULL
+            """
+        )
+        self.assertEqual(missing, [])
+
 
 class DevelopmentRepositoryUpgradeTests(unittest.TestCase):
     """V021 must be a no-op on a repository seeded the way the lab was.

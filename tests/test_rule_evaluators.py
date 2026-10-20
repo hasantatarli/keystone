@@ -99,6 +99,26 @@ class LongIdleTransactionTests(unittest.TestCase):
     def test_above_critical_threshold_is_critical(self):
         self.assertEqual(severities(self.evaluate(self.session(950))), ["CRITICAL"])
 
+    def test_finding_carries_who_and_where(self):
+        finding = self.evaluate(self.session(
+            950, application_name="billing-api", user_name="app_user",
+            client_addr="10.0.5.21", database_name="orders",
+            query_text="UPDATE   invoices\n SET paid = true"))[0]
+        expected = {
+            "application": "billing-api", "user": "app_user", "client_addr": "10.0.5.21",
+            "database": "orders", "state": "idle in transaction",
+            "last_query": "UPDATE invoices SET paid = true",
+            "captured_at": NOW.isoformat(),
+            "state_change": (NOW - timedelta(seconds=950)).isoformat(),
+            "transaction_start": (NOW - timedelta(seconds=950)).isoformat(),
+        }
+        self.assertEqual(finding["details"], expected)
+
+    def test_last_query_is_trimmed(self):
+        finding = self.evaluate(self.session(950, query_text="SELECT " + "x" * 500))[0]
+        self.assertEqual(len(finding["details"]["last_query"]),
+                         engine.QUERY_PREVIEW_CHARS + 3)
+
     def test_threshold_order_does_not_change_severity(self):
         for thresholds in (IDLE_TRANSACTION_THRESHOLDS,
                            list(reversed(IDLE_TRANSACTION_THRESHOLDS))):
