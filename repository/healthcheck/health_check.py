@@ -25,7 +25,7 @@ logger = get_logger("health_check")
 # Optional ones run only where they are already assigned (e.g. SSH host access).
 REPORT_CONTEXT_COLLECTORS = {
     "PostgreSQL": {
-        "required": ["PG_DATABASE_INVENTORY", "PG_INSTANCE_INVENTORY"],
+        "required": ["PG_DATABASE_INVENTORY", "PG_INSTANCE_INVENTORY", "PG_CONFIGURATION_SNAPSHOT"],
         "optional": ["PG_HOST_SNAPSHOT"],
     },
 }
@@ -101,7 +101,7 @@ def plan_collections(conn, target, nodes, assessment_keys):
     context = REPORT_CONTEXT_COLLECTORS.get(target["provider"], {})
     wanted = ([(k, "EVIDENCE", False) for k in evidence]
               + [(k, "CONTEXT", False) for k in context.get("required", []) if k not in evidence]
-              + [(k, "CONTEXT", True) for k in context.get("optional", [])])
+              + [(k, "CONTEXT", True) for k in context.get("optional", []) if k not in evidence])
 
     definitions = load_collectors(conn, [k for k, _, _ in wanted])
     node_targets = nodes or ([target] if target["target_type"] == "NODE" else [])

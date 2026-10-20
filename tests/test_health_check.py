@@ -122,9 +122,11 @@ class HealthCheckTests(unittest.TestCase):
         self.assertNotIn("PG_INSTANCE_INVENTORY", system_keys)          # NODE scope
         for node in (self.node1, self.node2, self.node3):
             self.assertIn((node, "PG_INSTANCE_INVENTORY"), got)
-        # Optional host snapshot only where assigned.
-        self.assertIn((self.node1, "PG_HOST_SNAPSHOT"), got)
-        self.assertNotIn((self.node2, "PG_HOST_SNAPSHOT"), got)
+        # Host snapshot is rule evidence (PG-CAP-001): planned on every node,
+        # not collected where no SSH connection exists.
+        self.assertEqual(got[(self.node1, "PG_HOST_SNAPSHOT")]["purpose"], "EVIDENCE")
+        self.assertEqual(got[(self.node2, "PG_HOST_SNAPSHOT")]["status"], "NOT_COLLECTED")
+        self.assertIn("no HOST connection", got[(self.node2, "PG_HOST_SNAPSHOT")]["status_message"])
 
     def test_missing_assignments_are_created_on_demand_only_with_a_connection(self):
         check_id = self.run_check()
@@ -168,7 +170,8 @@ class HealthCheckTests(unittest.TestCase):
             "JOIN keystone.assessment_definition ad USING (assessment_id) "
             "WHERE ar.health_check_id = %s ORDER BY 1", (check_id,)).fetchall()
         self.assertEqual([r["assessment_key"] for r in runs],
-                         ["PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH", "PG_TRANSACTION_HEALTH"])
+                         ["PG_CAPACITY_HEALTH", "PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH",
+                          "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
     def test_single_assessment_collects_only_its_evidence(self):

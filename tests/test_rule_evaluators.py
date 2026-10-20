@@ -436,5 +436,101 @@ class EvidenceFreshnessTests(unittest.TestCase):
         )
 
 
+DATA_DISK_THRESHOLDS = [
+    threshold("WARNING", 80, "PERCENT"),
+    threshold("CRITICAL", 90, "PERCENT"),
+]
+GB = 1024 ** 3
+
+
+class DataDiskUsageTests(unittest.TestCase):
+    """PG-CAP-001: the filesystem holding data_directory, per node."""
+
+    def evidence(self, nodes):
+        storage, config = [], []
+        for target_id, (directory, mounts) in nodes.items():
+            config.append({"target_id": target_id, "setting_name": "data_directory",
+                           "setting_value": directory, "captured_at": NOW})
+            config.append({"target_id": target_id, "setting_name": "port",
+                           "setting_value": "5432", "captured_at": NOW})
+            for i, (mount, used, total) in enumerate(mounts):
+                storage.append({"snapshot_id": target_id * 10 + i, "target_id": target_id,
+                                "node_name": f"node-{target_id}", "captured_at": NOW,
+                                "mount_point": mount, "used_bytes": used * GB,
+                                "total_bytes": total * GB, "available_bytes": (total - used) * GB})
+        return {"PG_HOST_SNAPSHOT": storage, "PG_CONFIGURATION_SNAPSHOT": config}
+
+    def evaluate(self, nodes, thresholds=DATA_DISK_THRESHOLDS):
+        return engine.evaluate_data_disk_usage(self.evidence(nodes), rule(), thresholds)
+
+    def test_below_warning_produces_no_finding(self):
+        self.assertEqual(self.evaluate({1: ("/var/lib/pg", [("/", 79, 100)])}), [])
+
+    def test_exactly_warning_is_warning(self):
+        self.assertEqual(severities(self.evaluate({1: ("/var/lib/pg", [("/", 80, 100)])})),
+                         ["WARNING"])
+
+    def test_exactly_critical_is_critical(self):
+        self.assertEqual(severities(self.evaluate({1: ("/var/lib/pg", [("/", 90, 100)])})),
+                         ["CRITICAL"])
+
+    def test_threshold_order_does_not_change_severity(self):
+        findings = self.evaluate({1: ("/var/lib/pg", [("/", 95, 100)])},
+                                 list(reversed(DATA_DISK_THRESHOLDS)))
+        self.assertEqual(severities(findings), ["CRITICAL"])
+
+    def test_only_the_data_disk_counts(self):
+        # Full root disk, data on its own mount with room: no finding.
+        findings = self.evaluate({1: ("/data/pg/17", [("/", 99, 100), ("/data", 10, 100),
+                                                      ("/data/pg/archive", 99, 100)])})
+        self.assertEqual(findings, [])
+
+    def test_longest_matching_mount_wins_and_prefixes_are_whole_directories(self):
+        findings = self.evaluate({1: ("/var/lib/pgsql/data", [("/", 10, 100),
+                                                              ("/var/lib/pg", 99, 100),
+                                                              ("/var/lib/pgsql", 85, 100)])})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["details"]["mount_point"], "/var/lib/pgsql")
+        self.assertEqual(findings[0]["observed_value"], 85.0)
+
+    def test_each_node_is_evaluated_independently(self):
+        findings = self.evaluate({1: ("/pg", [("/", 50, 100)]),
+                                  2: ("/pg", [("/", 92, 100)]),
+                                  3: ("/pg", [("/", 81, 100)])})
+        self.assertEqual({f["subject_identifier"]: f["severity"] for f in findings},
+                         {"node-2": "CRITICAL", "node-3": "WARNING"})
+
+    def test_node_without_data_directory_or_mount_is_skipped(self):
+        evidence = self.evidence({1: ("/pg", [("/", 95, 100)])})
+        evidence["PG_CONFIGURATION_SNAPSHOT"] = []
+        self.assertEqual(engine.evaluate_data_disk_usage(evidence, rule(), DATA_DISK_THRESHOLDS), [])
+        self.assertEqual(self.evaluate({1: ("relative/path", [("/data", 95, 100)])}), [])
+
+    def test_root_reserved_blocks_count_as_used_like_df(self):
+        # Lab postgre-1: df shows 8.7G used, 2.0G available, Use% 82; used/size alone is 77.
+        evidence = self.evidence({1: ("/var/lib/postgresql/17/main", [("/", 8.7, 11.2)])})
+        evidence["PG_HOST_SNAPSHOT"][0]["available_bytes"] = 2.0 * GB
+        findings = engine.evaluate_data_disk_usage(evidence, rule(), DATA_DISK_THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])
+        self.assertEqual(findings[0]["observed_value"], 81.3)
+
+    def test_usage_without_available_falls_back_to_total(self):
+        self.assertEqual(engine.usage_percent(30, None, 100), 30)
+        self.assertEqual(engine.usage_percent(8, 2, 11), 80)
+        self.assertIsNone(engine.usage_percent(0, None, 0))
+
+    def test_finding_describes_node_disk_and_directory(self):
+        finding = self.evaluate({1: ("/var/lib/pg/17/main", [("/", 91.5, 100)])})[0]
+        self.assertEqual(finding["observed_unit"], "PERCENT")
+        self.assertEqual(finding["subject_type"], "NODE")
+        self.assertEqual(finding["template_values"]["used_percent"], "91.5")
+        self.assertEqual(finding["details"]["data_directory"], "/var/lib/pg/17/main")
+        self.assertEqual(finding["details"]["captured_at"], NOW.isoformat())
+        text = ("The data disk {mount_point} on {node_name} is {used_percent}% full "
+                "(data_directory {data_directory}).").format(**finding["template_values"])
+        self.assertEqual(text, "The data disk / on node-1 is 91.5% full "
+                               "(data_directory /var/lib/pg/17/main).")
+
+
 if __name__ == "__main__":
     unittest.main()

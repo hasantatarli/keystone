@@ -255,6 +255,44 @@ Lab 2026-10-05: no finding at 0, WARNING with one `BEGIN; SELECT 1/0;` session, 
 
 ---
 
+# PG_CAPACITY_HEALTH — Capacity Health
+
+## PG-CAP-001 — Data Disk Usage
+
+**Purpose**  
+Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling up. A full data disk stops writes and can stop the database.
+
+| | |
+| --- | --- |
+| Evidence | `PG_HOST_SNAPSHOT` (`postgresql.storage_snapshot`), required; `PG_CONFIGURATION_SNAPSHOT` (`data_directory`), required |
+| Freshness | 3600 seconds (host), 86400 seconds (configuration) |
+| Metric | used / (used + available) of the data disk, in percent (one decimal) — the same as `df` Use% |
+| Thresholds | WARNING ≥ 80 %, CRITICAL ≥ 90 % |
+| Subject | NODE (one finding per node) |
+| Finding | The data disk {mount_point} on {node_name} is {used_percent}% full (data_directory {data_directory}). |
+| Topic / categories | STORAGE; CAPACITY, AVAILABILITY |
+
+**Design notes**
+
+- First rule on NODE-scoped evidence and first rule with two evidence sources. Loaders read the target itself if it is a NODE, otherwise its active NODE children. Evaluators of multi-source rules receive `{evidence_source: rows}`; single-source evaluators are unchanged.
+- The data disk is the mount with the longest mount point that contains `data_directory` as a whole directory (`/var/lib/pg` does not contain `/var/lib/pgsql`). The report inventory uses the same function, so the table and the rule always agree.
+- Other mounts (`/`, `/boot`, backup disks) are not judged by this rule.
+- Root-reserved blocks (ext4: 5 %) are not available to the postgres user, so they count as used. Lab 2026-10-20: used / size gave 77 % while `df` showed 82 % and PostgreSQL would fail at 100 % of the available space; used / (used + available) matches `df`.
+- Introduced 2026-10-20 because the report showed disk usage as an inventory remark while the Capacity summary said "no problems found". Judgements are rules; the inventory only displays.
+
+**Known limitations**
+
+- Tablespaces outside `data_directory` and a separately mounted `pg_wal` are not evaluated.
+- Nodes without host evidence (no SSH connection) are skipped while other nodes are evaluated; the HEALTHY text then covers only the evaluated nodes. The report inventory shows such nodes as unknown. If no node has host evidence the rule ends INSUFFICIENT_EVIDENCE.
+- Freshness is checked on the newest row across nodes; a node whose host snapshot is older than the others is still evaluated on its latest data.
+- Usage percent only; growth rate and time-to-full need history (Capacity Forecasting, Phase 3).
+- Linux host evidence only.
+
+**Verification**  
+Unit tests: boundaries, threshold order, mount selection, independent nodes, missing data directory. Repository test: end-to-end run with two nodes (CRITICAL on node-1, thresholds stored) and INSUFFICIENT_EVIDENCE without host evidence. Lab: pending.
+
+---
+
 # Adding a Rule
 
 Texts (V029, V030): every rule has NAME, HEALTHY, MEANING, IMPACT and RECOMMENDATION in every Dictionary language, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
@@ -281,4 +319,7 @@ Not implemented; recorded so they are not lost.
 | Connection capacity vs `max_connections` | 2026-09-21 evidence matrix | Yes (connection activity + configuration) |
 | Dead tuple pressure, analyze freshness | 2026-09-21 evidence matrix | Yes (`PG_VACUUM_ANALYZE`); needs multi-parameter thresholds |
 | Pending restart configuration | 2026-09-21 evidence matrix | Yes (`PG_CONFIGURATION_SNAPSHOT`) |
-| Filesystem capacity | 2026-09-21 evidence matrix | Yes (`PG_HOST_SNAPSHOT` storage) |
+| Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
+| Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
+| Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |
+| Unplanned failover / primary changed | Lab 2026-10-20: host laptop slept, Patroni promoted postgre-2 unnoticed | Partly: role per node is collected; needs role history (instance inventory keeps only the current row) or the timeline ID (`pg_control_checkpoint()`), which increases on every promotion |
