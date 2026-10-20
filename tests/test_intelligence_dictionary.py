@@ -101,6 +101,34 @@ EXPECTED_RULES = {
         "evidence": {"PG_HOST_SNAPSHOT": (True, 3600),
                      "PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
     },
+    "PG-REP-003": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("60"), "SECOND"),
+            "CRITICAL": (Decimal("300"), "SECOND"),
+        },
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600)},
+    },
+    "PG-REP-004": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600),
+                     "PG_INSTANCE_INVENTORY": (True, 3600)},
+    },
+    "PG-REP-005": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_SLOTS": (True, 600)},
+    },
+    "PG-REP-006": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "CRITICAL",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

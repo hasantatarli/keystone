@@ -1504,14 +1504,16 @@ def save_replication_status_snapshot(conn, task, rows):
             target_id,
             captured_at,
             current_wal_lsn,
-            connected_replica_count
+            connected_replica_count,
+            synchronous_standby_names
         )
         VALUES
         (
             %(target_id)s,
             %(captured_at)s,
             %(current_wal_lsn)s,
-            %(connected_replica_count)s
+            %(connected_replica_count)s,
+            %(synchronous_standby_names)s
         );
     """
 
@@ -1520,6 +1522,7 @@ def save_replication_status_snapshot(conn, task, rows):
         "captured_at": system_row["captured_at"],
         "current_wal_lsn": system_row["current_wal_lsn"],
         "connected_replica_count": system_row["connected_replica_count"],
+        "synchronous_standby_names": system_row.get("synchronous_standby_names"),
     }
 
     replica_sql = """

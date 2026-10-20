@@ -215,6 +215,68 @@ Detect slots whose required WAL is no longer safe or already gone. The consumer 
 **Verification**  
 Lab 2026-10-05 with controlled evidence: test slot rows with `extended` and `lost` inserted into a real snapshot produced WARNING and CRITICAL; real `reserved` slots produced no findings. A test against real `extended` / `lost` slots is planned on lab VM snapshots to also verify the collector path. Unit tests cover all five status values.
 
+## PG-REP-003 — Replication Lag
+
+**Purpose**  
+Detect replicas that apply the primary's changes late.
+
+| | |
+| --- | --- |
+| Evidence | `PG_REPLICATION_STATUS` (replica rows of `pg_stat_replication` on the primary), required |
+| Freshness | 600 seconds |
+| Metric | `replay_lag` in seconds; NULL (caught up, primary idle) counts as 0 |
+| Thresholds | WARNING ≥ 60 s, CRITICAL ≥ 300 s |
+| Subject | REPLICA (application_name, else address) |
+| Details | WAL not yet replayed (bytes), state, sync state |
+
+**Known limitations**  
+Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004.
+
+## PG-REP-004 — Replica Not Streaming
+
+**Purpose**  
+Detect servers known as replicas that do not receive changes from the primary.
+
+| | |
+| --- | --- |
+| Evidence | `PG_REPLICATION_STATUS`, required (600 s); `PG_INSTANCE_INVENTORY` on every node, required (3600 s) |
+| Condition | A node in recovery whose address is not among the primary's replication connections, or a connection not in `streaming` state |
+| Severity | WARNING; CRITICAL when no known replica is streaming (no failover target left) |
+| Subject | REPLICA (node name or application_name) |
+
+**Design notes**  
+Known replicas come from the instance inventory, so no expected topology has to be declared (2026-09-21 decision). Addresses are matched without prefix length; when a node's address is unknown the rule compares counts.
+
+**Known limitations**  
+Cascading replicas connected to another replica are reported as not connected. After a failover, inventory older than the freshness limit can name the wrong node; the health check always collects it fresh.
+
+## PG-REP-005 — Inactive Replication Slot
+
+| | |
+| --- | --- |
+| Evidence | `PG_REPLICATION_SLOTS`, required, 600 s |
+| Condition | Permanent slot with `active = false` (temporary slots ignored) |
+| Severity | WARNING (default severity) |
+| Subject | REPLICATION_SLOT |
+
+**Known limitations**  
+No duration yet: a slot inactive for a few seconds during a replica restart is reported. PostgreSQL 17 `inactive_since` is a candidate improvement. Retained WAL beyond `max_wal_size` is PG-REP-001.
+
+## PG-REP-006 — Synchronous Replication Without a Synchronous Standby
+
+| | |
+| --- | --- |
+| Evidence | `PG_REPLICATION_STATUS` with `synchronous_standby_names` of the same server and moment (PG014), required, 600 s |
+| Condition | `synchronous_standby_names` not empty and no replica in `sync` or `quorum` state |
+| Severity | CRITICAL (commits wait) |
+| Subject | SYSTEM |
+
+**Design notes**  
+Patroni with `synchronous_mode` clears the setting when no standby is available unless `synchronous_mode_strict` is on; the rule judges the effective setting, so both cases are handled.
+
+**Verification (PG-REP-003…006)**  
+Unit tests for every condition; repository test runs the real collector SQL, the worker persistence and the assessment end to end. Lab: pending.
+
 ---
 
 # PG_CONNECTION_HEALTH — Connection Health
@@ -314,8 +376,6 @@ Not implemented; recorded so they are not lost.
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
 | MultiXact wraparound risk | PG-TRAN-002 limitation, roadmap PG-029 | Yes (`mxid_age`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
-| Inactive / stale replication slot | 2026-09-21 evidence matrix | Yes (`PG_REPLICATION_SLOTS`) |
-| Replication lag / replica disconnected | 2026-09-21 evidence matrix | Yes (`PG_REPLICATION_STATUS`) |
 | Connection capacity vs `max_connections` | 2026-09-21 evidence matrix | Yes (connection activity + configuration) |
 | Dead tuple pressure, analyze freshness | 2026-09-21 evidence matrix | Yes (`PG_VACUUM_ANALYZE`); needs multi-parameter thresholds |
 | Pending restart configuration | 2026-09-21 evidence matrix | Yes (`PG_CONFIGURATION_SNAPSHOT`) |

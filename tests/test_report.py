@@ -150,7 +150,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 9 / 14 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 10 / 15 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -333,6 +333,35 @@ class ReportTests(test_health_check.HealthCheckTests):
         technical = page[page.index(TECH_PANEL):]
         self.assertIn('<span title="17.10 (Ubuntu 17.10-1.pgdg24.04+1)">17.10</span>', technical)
         self.assertNotIn(">17.10 (Ubuntu", page)                     # never as visible text
+
+    def test_replication_status_collector_stores_sync_names_and_feeds_the_rules(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/replication_status_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(sql).fetchall()
+        worker.save_replication_status_snapshot(self.conn, {"target_id": self.system}, rows)
+        self.conn.execute("UPDATE postgresql.replication_status_snapshot "
+                          "SET synchronous_standby_names = 'ANY 1 (*)' WHERE target_id = %s",
+                          (self.system,))
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        for node, address, recovery in ((self.node1, "10.0.0.1", False), (self.node2, "10.0.0.2", True)):
+            self.conn.execute(
+                "INSERT INTO postgresql.instance_inventory (target_id, server_address, in_recovery, "
+                "last_collected_at) VALUES (%s, %s, %s, %s) ON CONFLICT (target_id) DO UPDATE "
+                "SET server_address = EXCLUDED.server_address, in_recovery = EXCLUDED.in_recovery, "
+                "last_collected_at = EXCLUDED.last_collected_at", (node, address, recovery, now))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcomes = {r["rule_key"]: (r["outcome"], r["max_severity"]) for r in self.conn.execute(
+            "SELECT rd.rule_key, res.outcome, res.max_severity FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE res.assessment_run_id = (SELECT max(assessment_run_id) FROM keystone.assessment_run)"
+        ).fetchall()}
+        self.assertEqual(outcomes["PG-REP-003"], ("HEALTHY", None))
+        self.assertEqual(outcomes["PG-REP-004"], ("ATTENTION_REQUIRED", "CRITICAL"))   # node-2 missing
+        self.assertEqual(outcomes["PG-REP-006"], ("ATTENTION_REQUIRED", "CRITICAL"))
 
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()

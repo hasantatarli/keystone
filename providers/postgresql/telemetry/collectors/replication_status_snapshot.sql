@@ -17,7 +17,8 @@ WITH collection_context AS
 (
     SELECT
         clock_timestamp()    AS captured_at,
-        pg_current_wal_lsn() AS current_wal_lsn
+        pg_current_wal_lsn() AS current_wal_lsn,
+        current_setting('synchronous_standby_names') AS synchronous_standby_names
 ),
 replication_info AS
 (
@@ -58,12 +59,14 @@ SELECT
     NULL::xid                        AS backend_xmin,
     c.current_wal_lsn,
     COUNT(r.application_name)::bigint AS connected_replica_count,
+    c.synchronous_standby_names,
     c.captured_at
 FROM collection_context AS c
 LEFT JOIN replication_info AS r
     ON TRUE
 GROUP BY
     c.current_wal_lsn,
+    c.synchronous_standby_names,
     c.captured_at
 
 UNION ALL
@@ -87,6 +90,7 @@ SELECT
     r.backend_xmin,
     c.current_wal_lsn,
     NULL::bigint                     AS connected_replica_count,
+    NULL::text                       AS synchronous_standby_names,
     c.captured_at
 FROM replication_info AS r
 CROSS JOIN collection_context AS c

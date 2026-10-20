@@ -87,7 +87,9 @@ TEXTS = {
         "impact_note": "Aynı sorun birden fazla alanı etkileyebilir; her alanda adıyla gösterilir.",
         "scope_note": "Yalnızca bu kontrolde değerlendirilen kurallara göre.",
         "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
-        "detail_usage": "Kullanım",
+        "detail_usage": "Kullanım", "detail_sync_state": "Senkronizasyon", "detail_wal_behind": "Geride kalan WAL",
+        "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
+        "detail_sync_names": "synchronous_standby_names",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
@@ -161,7 +163,9 @@ TEXTS = {
         "impact_note": "The same problem can affect more than one area; it is shown by name in each.",
         "scope_note": "Based only on the rules evaluated in this check.",
         "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
-        "detail_usage": "Usage",
+        "detail_usage": "Usage", "detail_sync_state": "Sync state", "detail_wal_behind": "WAL behind",
+        "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
+        "detail_sync_names": "synchronous_standby_names",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
@@ -929,9 +933,12 @@ def render_system(data, t):
 
 DETAIL_LABELS = (("node", "detail_node"), ("mount_point", "detail_mount"),
                  ("data_directory", "detail_data_directory"), ("usage", "detail_usage"),
+                 ("slot_name", "detail_slot"), ("slot_type", "detail_slot_type"),
+                 ("wal_status", "detail_wal_status"), ("synchronous_standby_names", "detail_sync_names"),
                  ("application", "detail_application"), ("user", "detail_user"),
                  ("database", "detail_database"), ("client_addr", "detail_client"),
-                 ("state", "detail_state"))
+                 ("state", "detail_state"), ("sync_state", "detail_sync_state"),
+                 ("wal_behind", "detail_wal_behind"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -955,6 +962,8 @@ def render_instance(f, t):
     if f["subject_identifier"]:
         facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
     details = dict(f["details"] or {})
+    if details.get("wal_behind_bytes") is not None:
+        details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
     if details.get("total_bytes"):
         details["usage"] = fmt_used_of(details.get("used_bytes") or 0, details["total_bytes"])
     if details.get("client_hostname"):

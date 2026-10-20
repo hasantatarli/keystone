@@ -532,5 +532,127 @@ class DataDiskUsageTests(unittest.TestCase):
                                "(data_directory /var/lib/pg/17/main).")
 
 
+REPLICATION_LAG_THRESHOLDS = [
+    threshold("WARNING", 60, "SECOND"),
+    threshold("CRITICAL", 300, "SECOND"),
+]
+
+
+def status_rows(replicas, sync_names=""):
+    rows = [{"record_type": "SYSTEM", "snapshot_id": 1, "target_id": 1, "captured_at": NOW,
+             "connected_replica_count": len(replicas), "synchronous_standby_names": sync_names}]
+    for i, r in enumerate(replicas):
+        row = {"record_type": "REPLICA", "snapshot_id": 10 + i, "target_id": 1, "captured_at": NOW,
+               "application_name": f"pg-{i}", "client_addr": f"10.0.0.{i}", "state": "streaming",
+               "sync_state": "async", "replay_lag_seconds": None, "replay_lag_bytes": 0}
+        row.update(r)
+        rows.append(row)
+    return rows
+
+
+def inventory(*nodes):
+    return [{"target_id": i, "node_name": name, "captured_at": NOW, "server_address": address,
+             "in_recovery": recovery} for i, (name, address, recovery) in enumerate(nodes)]
+
+
+class ReplicationLagTests(unittest.TestCase):
+    def evaluate(self, lag, thresholds=REPLICATION_LAG_THRESHOLDS):
+        return engine.evaluate_replication_lag(
+            status_rows([{"replay_lag_seconds": lag, "replay_lag_bytes": 4096}]), rule(), thresholds)
+
+    def test_caught_up_replica_has_null_lag(self):
+        self.assertEqual(self.evaluate(None), [])
+
+    def test_boundaries(self):
+        self.assertEqual(self.evaluate(59.9), [])
+        self.assertEqual(severities(self.evaluate(60)), ["WARNING"])
+        self.assertEqual(severities(self.evaluate(300)), ["CRITICAL"])
+
+    def test_threshold_order_does_not_change_severity(self):
+        self.assertEqual(severities(self.evaluate(400, list(reversed(REPLICATION_LAG_THRESHOLDS)))),
+                         ["CRITICAL"])
+
+    def test_finding_names_the_replica_and_wal_behind(self):
+        finding = self.evaluate(75.25)[0]
+        self.assertEqual(finding["subject_identifier"], "pg-0")
+        self.assertEqual(finding["template_values"]["lag_seconds"], "75.2")
+        self.assertEqual(finding["details"]["wal_behind_bytes"], 4096)
+
+    def test_system_row_is_not_a_replica(self):
+        self.assertEqual(engine.evaluate_replication_lag(status_rows([]), rule(),
+                                                         REPLICATION_LAG_THRESHOLDS), [])
+
+
+class ReplicaNotStreamingTests(unittest.TestCase):
+    def evaluate(self, replicas, nodes):
+        return engine.evaluate_replica_not_streaming(
+            {"PG_REPLICATION_STATUS": status_rows(replicas), "PG_INSTANCE_INVENTORY": nodes},
+            rule("WARNING"), [])
+
+    NODES = inventory(("node-p", "10.0.0.9", False), ("node-a", "10.0.0.0", True),
+                      ("node-b", "10.0.0.1", True))
+
+    def test_all_known_replicas_streaming(self):
+        self.assertEqual(self.evaluate([{}, {}], self.NODES), [])
+
+    def test_missing_replica_is_named(self):
+        findings = self.evaluate([{}], self.NODES)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("node-b", "WARNING")])
+        self.assertEqual(findings[0]["template_values"]["state"], "not connected")
+
+    def test_no_replica_left_is_critical(self):
+        findings = self.evaluate([], self.NODES)
+        self.assertEqual(severities(findings), ["CRITICAL", "CRITICAL"])
+
+    def test_replica_not_in_streaming_state(self):
+        findings = self.evaluate([{}, {"state": "catchup"}], self.NODES)
+        self.assertEqual([(f["subject_identifier"], f["template_values"]["state"]) for f in findings],
+                         [("pg-1", "catchup")])
+
+    def test_standalone_server_expects_no_replica(self):
+        self.assertEqual(self.evaluate([], inventory(("solo", "10.0.0.9", False))), [])
+
+    def test_addresses_with_prefix_length_match(self):
+        self.assertEqual(self.evaluate([{"client_addr": "10.0.0.0/32"}, {}], self.NODES), [])
+
+    def test_unknown_addresses_fall_back_to_counts(self):
+        nodes = inventory(("node-p", None, False), ("node-a", None, True), ("node-b", None, True))
+        findings = self.evaluate([{}], nodes)
+        self.assertEqual([f["subject_identifier"] for f in findings], ["1 of 2 replicas"])
+
+
+class InactiveReplicationSlotTests(unittest.TestCase):
+    def slot(self, name, active, temporary=False):
+        return {"snapshot_id": 1, "captured_at": NOW, "slot_name": name, "slot_type": "physical",
+                "database_name": None, "active": active, "temporary": temporary,
+                "wal_status": "reserved"}
+
+    def test_only_inactive_permanent_slots(self):
+        findings = engine.evaluate_inactive_replication_slot(
+            [self.slot("used", True), self.slot("idle", False), self.slot("tmp", False, True)],
+            rule("WARNING"), [])
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("idle", "WARNING")])
+
+
+class SyncStandbyMissingTests(unittest.TestCase):
+    def evaluate(self, replicas, names):
+        return engine.evaluate_sync_standby_missing(status_rows(replicas, names), rule("CRITICAL"), [])
+
+    def test_asynchronous_replication_is_fine(self):
+        self.assertEqual(self.evaluate([], ""), [])
+        self.assertEqual(self.evaluate([], None), [])
+
+    def test_configured_without_sync_standby_is_critical(self):
+        findings = self.evaluate([{"sync_state": "async"}], "ANY 1 (*)")
+        self.assertEqual(severities(findings), ["CRITICAL"])
+        self.assertEqual(findings[0]["template_values"]["synchronous_standby_names"], "ANY 1 (*)")
+
+    def test_sync_or_quorum_standby_satisfies(self):
+        self.assertEqual(self.evaluate([{"sync_state": "sync"}], "*"), [])
+        self.assertEqual(self.evaluate([{"sync_state": "quorum"}], "ANY 1 (*)"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
