@@ -136,17 +136,32 @@ The engine evaluates the evidence already in the repository; it does not collect
 
 ## 6. Health check (one-off)
 
-Collects the evidence the assessments need (plus report context: database inventory, instance inventory on every node, host snapshot where assigned), then runs the assessments and prints a summary. A SYSTEM target includes its NODE targets. Works with or without a running agent.
+Collects the evidence the assessments need (plus report context: database inventory, instance inventory and configuration on every node, host snapshot where assigned), then runs the assessments and prints a summary. A SYSTEM target includes its NODE targets. Works with or without a running agent. Since V031 the host snapshot is rule evidence (PG-CAP-001) on every node: nodes without an SSH (HOST) connection are listed as NOT_COLLECTED.
 
 ```powershell
 python -m repository.healthcheck.health_check --target 1
 python -m repository.healthcheck.health_check --target 1 --assessment PG_TRANSACTION_HEALTH
 python -m repository.healthcheck.health_check --target 1 --wait-minutes 5     # per-collector wait limit (default 10)
+python -m repository.healthcheck.health_check --target 1 --report tr          # also write the HTML report (tr | en)
 python -m repository.healthcheck.health_check --help
 ```
 
 - Missing collector assignments are created as ON_DEMAND only when the target has a suitable connection; otherwise the collection is listed as NOT_COLLECTED with the reason.
 - A collector past the wait limit is not waited for (WAIT_LIMIT); the command still waits for it to end before exiting.
+
+### Report of an existing health check
+
+Writes the HTML report from data already in the repository; it does **not** collect. Run a new health check for current data.
+
+```powershell
+python -m repository.report.health_check_report --target 1                      # latest completed check of target 1
+python -m repository.report.health_check_report --health-check 7 --lang en
+python -m repository.report.health_check_report --target 1 --output C:\temp\report.html
+```
+
+- Default file: `reports/<target>_<yyyymmdd-hhmm>_hc<id>_<lang>.html` (check start time); a new check never overwrites an older report. The command prints which check it reports.
+- Two tabs: Executive Summary and Technical Details; printing shows both.
+- Context data (servers, disks, databases) comes only from that check's time window; data a check could not collect is shown as not collected, never from an older check.
 
 ```sql
 -- health checks of a target

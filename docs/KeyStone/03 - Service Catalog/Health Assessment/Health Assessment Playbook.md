@@ -62,7 +62,7 @@ This makes assessment coverage visible and allows Snapshot Assessment to remain 
 
 ## Assessment Areas
 
-The detailed PostgreSQL V1 Assessment Catalogue will define the final checks. Candidate domains include:
+The checks are defined in [[PostgreSQL V1 Assessment Catalogue]] (draft, 2026-10-20). Candidate domains include:
 
 - instance and topology,
 - architecture and configuration,
