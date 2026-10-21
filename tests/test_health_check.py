@@ -170,8 +170,9 @@ class HealthCheckTests(unittest.TestCase):
             "JOIN keystone.assessment_definition ad USING (assessment_id) "
             "WHERE ar.health_check_id = %s ORDER BY 1", (check_id,)).fetchall()
         self.assertEqual([r["assessment_key"] for r in runs],
-                         ["PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH", "PG_CONNECTION_HEALTH",
-                          "PG_REPLICATION_HEALTH", "PG_TRANSACTION_HEALTH"])
+                         ["PG_BACKUP_HEALTH", "PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH",
+                          "PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH", "PG_SECURITY_HEALTH",
+                          "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
     def test_single_assessment_collects_only_its_evidence(self):

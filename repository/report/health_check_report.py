@@ -95,7 +95,7 @@ TEXTS = {
         "detail_active": "Aktif", "detail_idle": "Boşta", "detail_idle_in_transaction": "Transaction içinde boşta", "detail_beyond_delay": "Bilinçli gecikmenin üzerindeki kısım",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -176,7 +176,7 @@ TEXTS = {
         "detail_active": "Active", "detail_idle": "Idle", "detail_idle_in_transaction": "Idle in transaction", "detail_beyond_delay": "Beyond the intended delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -392,8 +392,8 @@ def fmt_quantity(value, unit, t):
         return fmt_duration(value, t)
     if unit == "PERCENT":
         return t["percent"].format(n=f"{value:g}")
-    if unit == "TRANSACTION" and value >= 1e9:
-        return f"{value / 1e9:g} {t['billion']} {t['unit_TRANSACTION']}"
+    if unit in ("TRANSACTION", "MULTIXACT") and value >= 1e9:
+        return f"{value / 1e9:g} {t['billion']} {t['unit_' + unit]}"
     number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
     return f"{number} {t.get('unit_' + (unit or ''), unit or '')}".strip()
 

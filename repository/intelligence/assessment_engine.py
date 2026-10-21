@@ -696,6 +696,29 @@ def evaluate_long_running_transaction(rows, rule, thresholds):
 
     return findings
 
+def evaluate_database_mxid_wraparound(rows, rule, thresholds):
+    """PG-TRAN-004: per-database MultiXact ID age against absolute thresholds."""
+    findings = []
+    for row in rows:
+        age = row["mxid_age"]
+        if age is None:
+            continue
+        matched_threshold = match_threshold(age, thresholds, "MULTIXACT")
+        if matched_threshold is None:
+            continue
+        findings.append({
+            "severity": matched_threshold["severity"],
+            "snapshot_id": row["snapshot_id"],
+            "template_values": {"database_name": row["database_name"], "mxid_age": age},
+            "observed_value": age,
+            "observed_unit": "MULTIXACT",
+            "subject_type": "DATABASE",
+            "subject_identifier": row["database_name"],
+            "details": {"database": row["database_name"], "captured_at": iso(row["captured_at"])},
+        })
+    return findings
+
+
 def evaluate_database_xid_wraparound(rows, rule, thresholds):
     """PG-TRAN-002: per-database XID age against absolute thresholds."""
     findings = []
@@ -1078,6 +1101,39 @@ def evaluate_autovacuum_disabled(rows, rule, thresholds):
     return findings
 
 
+def setting_is(setting_name, unsafe_values):
+    """Evaluator: one finding per node whose setting has one of the unsafe values."""
+    def evaluate(rows, rule, thresholds):
+        return [setting_finding(rule["default_severity"], row) for row in rows
+                if row["setting_name"] == setting_name and row["setting_value"] in unsafe_values]
+    evaluate.__doc__ = f"{setting_name} in {sorted(unsafe_values)}, per node."
+    return evaluate
+
+
+def evaluate_wal_archiving(evidence, rule, thresholds):
+    """PG-BKP-002: on the primary, archiving off (no point-in-time recovery) or on without a command.
+
+    archive_mode on with an empty archive_command and archive_library keeps every WAL file.
+    """
+    primary = next((n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"] is False), None)
+    if primary is None:
+        return []
+    settings = settings_by_node(evidence["PG_CONFIGURATION_SNAPSHOT"]).get(primary["target_id"], {})
+    mode = settings.get("archive_mode")
+    if mode is None:
+        return []
+    if mode["setting_value"] == "off":
+        return [setting_finding("WARNING", mode)]
+    command = (settings.get("archive_command") or {}).get("setting_value") or ""
+    library = (settings.get("archive_library") or {}).get("setting_value") or ""
+    if not command.strip() and not library.strip():
+        finding = setting_finding("CRITICAL", settings.get("archive_command") or mode)
+        finding["details"]["archive_mode"] = mode["setting_value"]
+        finding["template_values"]["value"] = "empty while archive_mode is " + mode["setting_value"]
+        return [finding]
+    return []
+
+
 def usable_connections(settings):
     """max_connections minus the slots reserved for superusers and pg_use_reserved_connections."""
     def number(name):
@@ -1221,6 +1277,10 @@ RULE_EVALUATORS = {
     "PG-CONF-002": evaluate_unsafe_durability,
     "PG-CONF-004": evaluate_autovacuum_disabled,
     "PG-CONN-002": evaluate_connection_capacity,
+    "PG-TRAN-004": evaluate_database_mxid_wraparound,
+    "PG-BKP-002": evaluate_wal_archiving,
+    "PG-SEC-002": setting_is("password_encryption", {"md5"}),
+    "PG-SEC-003": setting_is("ssl", {"off"}),
 }
 
 
