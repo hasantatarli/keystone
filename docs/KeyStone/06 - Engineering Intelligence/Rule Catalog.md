@@ -47,6 +47,7 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 ## Common semantics
 
 - **Latest snapshot only.** Loaders read the most recent captured snapshot for the target. Rules do not yet use history.
+- **The observed value is what was measured; thresholds only decide the severity** (Hasan, 2026-10-21). A finding never reports a derived or adjusted figure as if it had been measured. When a rule compares an adjusted value (for example lag beyond an intended delay, usage beyond a reserve), the finding shows the measured value, the adjustment and the compared part separately. Applies to every rule.
 - **Thresholds are inclusive.** A value equal to a threshold reaches it (`>=`).
 - **Highest reached threshold wins**, independent of the order thresholds are stored or loaded. Thresholds with a different unit are ignored.
 - **Rules without thresholds** use `rule_definition.default_severity`.
