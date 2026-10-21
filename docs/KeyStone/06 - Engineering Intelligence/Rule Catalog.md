@@ -360,7 +360,7 @@ Unit tests: boundaries, threshold order, mount selection, independent nodes, mis
 
 # Adding a Rule
 
-Texts (V029, V030): every rule has NAME, HEALTHY, MEANING, IMPACT and RECOMMENDATION in every Dictionary language, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
+Texts (V029, V030, V034): every rule has NAME, HEALTHY, MEANING, CAUSES, IMPACT and RECOMMENDATION in every Dictionary language. MEANING is one statement of what is happening; CAUSES and RECOMMENDATION are short lists (one item per line starting with "- "), rendered as bullets, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
 
 1. Write the catalog entry first: purpose, evidence, condition, metric, thresholds, subject, limitations.
 2. Confirm the evidence is collected; if not, the collector or migration comes first.

@@ -363,6 +363,25 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(outcomes["PG-REP-004"], ("ATTENTION_REQUIRED", "CRITICAL"))   # node-2 missing
         self.assertEqual(outcomes["PG-REP-006"], ("ATTENTION_REQUIRED", "CRITICAL"))
 
+    def test_problem_cards_list_causes_and_steps(self):
+        page = self.render(self.make_check(), "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        card = executive[executive.index("Öne çıkan sorunlar"):executive.index("Sistem envanteri")
+                         if "Sistem envanteri" in executive else None]
+        self.assertIn("<dt>Ne oluyor</dt>", card)
+        self.assertIn("<dt>Olası sebepler</dt><dd><ul class=\"items\"><li>", card)
+        self.assertIn("<li>Connection pool session&#x27;ı bırakmıyor</li>", card)
+        self.assertIn("<dt>Ne yapılmalı</dt><dd><ul class=\"items\">", card)
+        technical = page[page.index(TECH_PANEL):]
+        self.assertIn("<dt>Olası sebepler</dt>", technical)
+        self.assertIn("idle_in_transaction_session_timeout", technical)
+
+    def test_list_items(self):
+        self.assertEqual(report.list_items("- a\n- b"), ["a", "b"])
+        self.assertIsNone(report.list_items("Plain text. Two sentences."))
+        self.assertIn("<li>a</li>", report.render_text("- a\n- b"))
+        self.assertEqual(report.render_text("One. Two.", short=True), "One.")
+
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
         self.conn.execute(

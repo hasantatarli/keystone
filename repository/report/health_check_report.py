@@ -66,7 +66,7 @@ TEXTS = {
         "topic_unknown": "Değerlendirilemedi",
         "topic_unknown_text": "Yeterli veri toplanamadığı için değerlendirilemedi.",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
-        "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "cause": "Olası sebep",
+        "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "what_happens": "Ne oluyor", "causes": "Olası sebepler",
         "system": "Sistem Bilgisi",
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -144,7 +144,7 @@ TEXTS = {
         "topic_unknown": "Not assessed",
         "topic_unknown_text": "Could not be assessed; not enough data was collected.",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
-        "why_it_matters": "Why it matters", "what_to_do": "What to do", "cause": "Likely cause",
+        "why_it_matters": "Why it matters", "what_to_do": "What to do", "what_happens": "What is happening", "causes": "Likely causes",
         "system": "System Overview",
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -464,6 +464,22 @@ def first_sentence(text):
     return text[:match.start()] if match else text
 
 
+def list_items(text):
+    """Items of a list text ('- item' per line, V034); None for plain text."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if lines and all(line.startswith("- ") for line in lines):
+        return [line[2:].strip() for line in lines]
+    return None
+
+
+def render_text(text, short=False):
+    """A Dictionary text as HTML: lists as bullets, plain text escaped (first sentence if short)."""
+    items = list_items(text)
+    if items:
+        return '<ul class="items">' + "".join(f"<li>{e(item)}</li>" for item in items) + "</ul>"
+    return e(first_sentence(text) if short else text)
+
+
 def rule_text(data, rule_id, lang, text_type, default=""):
     """Dictionary text in the report language, falling back to English."""
     texts = data["rule_texts"].get(rule_id, {})
@@ -623,6 +639,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .card dl{margin:6px 0 0;display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:4px 12px}
 .card dt{color:var(--muted);font-size:13px;font-weight:600}
 .card dd{margin:0}
+.items{margin:0;padding-left:18px}.items li{margin:1px 0}
 .instance{background:var(--soft);border-radius:4px;padding:8px 10px;margin-top:8px;font-size:14px}
 .instance code{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .facts{color:var(--muted);font-size:13px;margin-top:4px}
@@ -852,6 +869,20 @@ def render_topics(data, lang, t):
             + f'<p class="note">{e(t["scope_note"])}</p>')
 
 
+def problem_rows(data, rule_id, lang, t, findings, short):
+    """What is happening, likely causes, why it matters, what to do: shared by both parts."""
+    causes = rule_text(data, rule_id, lang, "CAUSES")
+    rows = [(t["what_happens"] if short else t["meaning"],
+             render_text(rule_text(data, rule_id, lang, "MEANING"), short)),
+            (t["causes"], render_text(causes) if causes else ""),
+            (t["why_it_matters"] if short else t["impact"],
+             render_text(rule_text(data, rule_id, lang, "IMPACT"), short)),
+            (t["what_to_do"] if short else t["recommendation"],
+             render_text(rule_text(data, rule_id, lang, "RECOMMENDATION",
+                                   findings[0]["recommendation"]), short))]
+    return "".join(f"<dt>{e(label)}</dt><dd>{html_}</dd>" for label, html_ in rows if html_)
+
+
 def render_main_problems(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
@@ -860,10 +891,8 @@ def render_main_problems(data, lang, t):
         cards.append(
             f'<div class="card {e(worst)}"><h3>{badge(worst, t["severity"].get(worst, worst))}'
             f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3><dl>"
-            f"<dt>{e(t['cause'])}</dt><dd>{e(first_sentence(rule_text(data, result['rule_id'], lang, 'MEANING')))}</dd>"
-            f"<dt>{e(t['why_it_matters'])}</dt><dd>{e(first_sentence(rule_text(data, result['rule_id'], lang, 'IMPACT')))}</dd>"
-            f"<dt>{e(t['what_to_do'])}</dt><dd>{e(first_sentence(rule_text(data, result['rule_id'], lang, 'RECOMMENDATION', findings[0]['recommendation'])))}</dd>"
-            "</dl></div>")
+            + problem_rows(data, result["rule_id"], lang, t, findings, short=True)
+            + "</dl></div>")
     return f"<h2>{e(t['problems_title'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_problems"])}</p>')
 
@@ -995,10 +1024,8 @@ def render_findings_detail(data, lang, t):
             f'<span class="rule">{e(result["rule_key"])}</span></h3>'
             + (f'<div class="facts">{e(threshold_line(result, t))}</div>' if threshold_line(result, t) else "")
             + "<dl>"
-            f"<dt>{e(t['meaning'])}</dt><dd>{e(rule_text(data, rid, lang, 'MEANING'))}</dd>"
-            f"<dt>{e(t['impact'])}</dt><dd>{e(rule_text(data, rid, lang, 'IMPACT'))}</dd>"
-            f"<dt>{e(t['recommendation'])}</dt><dd>{e(rule_text(data, rid, lang, 'RECOMMENDATION', findings[0]['recommendation']))}</dd>"
-            "</dl>" + "".join(render_instance(f, t) for f in findings) + "</div>")
+            + problem_rows(data, rid, lang, t, findings, short=False)
+            + "</dl>" + "".join(render_instance(f, t) for f in findings) + "</div>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 
