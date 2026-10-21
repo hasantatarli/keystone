@@ -1353,6 +1353,10 @@ def highest_severity(findings):
     )
 
 
+# Capture times come from the targets' clocks, check times from the repository's.
+CLOCK_SKEW_TOLERANCE_SECONDS = 120
+
+
 def current_rows(rows, requirement, evaluation_time, evidence_since=None):
     """Rows young enough to judge, each on its own capture time.
 

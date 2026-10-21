@@ -15,13 +15,14 @@ can be e-mailed, opened offline and printed.
 """
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import html
 from pathlib import Path
 import re
 
 from repository.common.logging_config import configure_logging, get_logger
-from repository.intelligence.assessment_engine import data_mount, usage_percent
+from repository.intelligence.assessment_engine import (
+    CLOCK_SKEW_TOLERANCE_SECONDS, data_mount, usage_percent)
 from repository.worker import worker
 
 
@@ -255,7 +256,8 @@ def load_report_data(conn, health_check_id):
         raise ValueError(f"Health check {health_check_id} does not exist.")
     as_of = check["finished_at"] or datetime.now(timezone.utc)
     # Context data only from this check: a report is a snapshot of that moment.
-    since = check["started_at"]
+    # Same window as the assessments: target clocks may be slightly behind the repository's.
+    since = check["started_at"] - timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
 
     results = conn.execute(
         """

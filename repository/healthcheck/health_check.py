@@ -32,7 +32,6 @@ REPORT_CONTEXT_COLLECTORS = {
 }
 
 DEFAULT_WAIT_MINUTES = 10          # per collector, from its start
-CLOCK_SKEW_TOLERANCE_SECONDS = 120
 POLL_SECONDS = 1
 
 
@@ -262,8 +261,8 @@ def run_health_check(connect, target_id, assessment_key=None,
             (target_id, requested_by),
         ).fetchone()
         health_check_id = row["health_check_id"]
-        # Capture times come from the targets' clocks; allow for a small skew.
-        evidence_since = row["started_at"] - timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
+        evidence_since = row["started_at"] - timedelta(
+            seconds=assessment_engine.CLOCK_SKEW_TOLERANCE_SECONDS)
         conn.commit()
 
     logger.info("Health check %s: %s (%s node(s)), assessments: %s.",

@@ -139,6 +139,10 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_context_from_an_earlier_check_is_not_shown(self):
         old_check = self.make_check()
+        # The earlier check ran some minutes ago (beyond the clock-skew tolerance).
+        self.conn.execute("UPDATE postgresql.database_snapshot SET captured_at = captured_at - interval '10 minutes'")
+        self.conn.execute("UPDATE postgresql.instance_inventory SET last_collected_at = last_collected_at - interval '10 minutes'")
+        self.conn.commit()
         new_check = self.run_check()          # nothing collected into the context tables
         self.assertNotEqual(old_check, new_check)
         page = self.render(new_check, "tr")
@@ -407,6 +411,16 @@ class ReportTests(test_health_check.HealthCheckTests):
         text = self.conn.execute("SELECT finding_text FROM keystone.finding ORDER BY finding_id DESC "
                                  "LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
+
+    def test_context_tolerates_target_clocks_slightly_behind(self):
+        # Lab 2026-10-21: VM clocks behind the laptop; this check's inventory looked "not collected".
+        check_id = self.make_check()
+        self.conn.execute("UPDATE postgresql.instance_inventory SET last_collected_at = "
+                          "(SELECT started_at FROM keystone.health_check WHERE health_check_id = %s) "
+                          "- interval '30 seconds'", (check_id,))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("1 primary, 2 replica", page)
 
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
