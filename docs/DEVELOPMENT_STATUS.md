@@ -210,6 +210,11 @@ In progress — PR #18 (draft), replication and HA rules PG-REP-003…006 (V032,
 - **Open:** the lag test (replay paused on a replica, writes on the primary) produced no PG-REP-003 finding. Suspected: `replay_lag` stops growing when replay is stuck. Next: Hasan runs `pg_stat_replication` with WAL bytes behind while replay is paused; then add a WAL-bytes condition (proposal 256 MB / 1 GB), which needs a second unit per rule (Known Issue 3).
 - **Agreed direction:** problem cards in bullets — "What is happening" (one sentence), "Likely causes" (list, new rule text type CAUSES), "Why it matters", "What to do" (steps). Rewrite TR/EN texts of all rules. To be confirmed by Hasan before implementation (likely in PR #18).
 
+Rule batches from the Assessment Catalogue (2026-10-21):
+- PR #18 merged: PG-REP-003…006 (V032–V035), problem cards with causes and steps (CAUSES text type), lag beyond an intended apply delay; the observed value is always what was measured (Rule Catalog principle).
+- PR #19 lab-verified: PG-CONF-001/002/004, PG-CONN-002 (V036, V037). Patroni resumes paused replay; `pg_wal_replay_pause()` cannot simulate lag there.
+- Improvement noted: PG-CONF-001 should show the pending new value (`pg_file_settings`) and setting values in readable units (32768 × 8 kB → 256 MB). Finding sentences are still English only in the Dictionary (`finding_template`); make them TR/EN.
+
 Next (MVP Plan Phase 1):
 
 1. HTML report from a health check (Turkish/English frame): first draft in PR #16 (draft), lab report generated 2026-10-14. To discuss next session:
