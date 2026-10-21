@@ -88,7 +88,7 @@ TEXTS = {
         "scope_note": "Yalnızca bu kontrolde değerlendirilen kurallara göre.",
         "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
         "detail_usage": "Kullanım", "detail_sync_state": "Senkronizasyon", "detail_wal_behind": "Geride kalan WAL",
-        "detail_apply_delay": "Bilinçli uygulama gecikmesi",
+        "detail_apply_delay": "Bilinçli uygulama gecikmesi", "detail_beyond_delay": "Bilinçli gecikmenin üzerindeki kısım",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
@@ -165,7 +165,7 @@ TEXTS = {
         "scope_note": "Based only on the rules evaluated in this check.",
         "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
         "detail_usage": "Usage", "detail_sync_state": "Sync state", "detail_wal_behind": "WAL behind",
-        "detail_apply_delay": "Intended apply delay",
+        "detail_apply_delay": "Intended apply delay", "detail_beyond_delay": "Beyond the intended delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
@@ -969,7 +969,8 @@ DETAIL_LABELS = (("node", "detail_node"), ("mount_point", "detail_mount"),
                  ("application", "detail_application"), ("user", "detail_user"),
                  ("database", "detail_database"), ("client_addr", "detail_client"),
                  ("state", "detail_state"), ("sync_state", "detail_sync_state"),
-                 ("wal_behind", "detail_wal_behind"), ("apply_delay", "detail_apply_delay"))
+                 ("wal_behind", "detail_wal_behind"), ("apply_delay", "detail_apply_delay"),
+                 ("beyond_delay", "detail_beyond_delay"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -993,6 +994,9 @@ def render_instance(f, t):
     if f["subject_identifier"]:
         facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
     details = dict(f["details"] or {})
+    for key in ("apply_delay", "beyond_delay"):
+        if details.get(key + "_seconds") is not None:
+            details[key] = fmt_duration(float(details[key + "_seconds"]), t)
     if details.get("wal_behind_bytes") is not None:
         details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
     if details.get("total_bytes"):

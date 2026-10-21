@@ -897,19 +897,23 @@ def evaluate_replication_lag(evidence, rule, thresholds):
         matched_threshold = match_threshold(excess, thresholds, "SECOND")
         if matched_threshold is None:
             continue
+        # The measured lag stays the observed value; the threshold applies to the part beyond the delay.
         details = replica_details(row)
-        details["replay_lag_seconds"] = round(lag, 1)
+        delay_note = ""
         if delay:
-            details["apply_delay"] = f"{delay:g} s"
+            details["apply_delay_seconds"] = delay
+            details["beyond_delay_seconds"] = round(excess, 1)
+            delay_note = f" ({excess:.1f} seconds beyond its intended apply delay of {delay:g} seconds)"
         findings.append(
             {
                 "severity": matched_threshold["severity"],
                 "snapshot_id": row["snapshot_id"],
                 "template_values": {
                     "replica": replica_label(row),
-                    "lag_seconds": f"{excess:.1f}",
+                    "lag_seconds": f"{lag:.1f}",
+                    "delay_note": delay_note,
                 },
-                "observed_value": round(excess, 1),
+                "observed_value": round(lag, 1),
                 "observed_unit": "SECOND",
                 "subject_type": "REPLICA",
                 "subject_identifier": replica_label(row),

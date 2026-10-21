@@ -575,6 +575,7 @@ class ReplicationLagTests(unittest.TestCase):
     def test_finding_names_the_replica_and_wal_behind(self):
         finding = self.evaluate(75.25)[0]
         self.assertEqual(finding["subject_identifier"], "pg-0")
+        self.assertEqual(finding["template_values"]["delay_note"], "")
         self.assertEqual(finding["template_values"]["lag_seconds"], "75.2")
         self.assertEqual(finding["details"]["wal_behind_bytes"], 4096)
 
@@ -597,9 +598,20 @@ class ReplicationLagTests(unittest.TestCase):
         findings = engine.evaluate_replication_lag(self.lag_evidence(400, 300000), rule(),
                                                    REPLICATION_LAG_THRESHOLDS)
         self.assertEqual(severities(findings), ["WARNING"])                 # 100 s beyond
-        self.assertEqual(findings[0]["observed_value"], 100.0)
-        self.assertEqual(findings[0]["details"]["replay_lag_seconds"], 400)
-        self.assertEqual(findings[0]["details"]["apply_delay"], "300 s")
+        finding = findings[0]
+        self.assertEqual(finding["observed_value"], 400.0)                 # what was measured
+        self.assertEqual(finding["details"]["apply_delay_seconds"], 300)
+        self.assertEqual(finding["details"]["beyond_delay_seconds"], 100.0)
+        text = ("Replica {replica} is {lag_seconds} seconds behind the primary in replaying "
+                "changes{delay_note}.").format(**finding["template_values"])
+        self.assertEqual(text, "Replica pg-0 is 400.0 seconds behind the primary in replaying "
+                               "changes (100.0 seconds beyond its intended apply delay of 300 seconds).")
+
+    def test_without_intended_delay_no_delay_note(self):
+        finding = engine.evaluate_replication_lag(self.lag_evidence(75), rule(),
+                                                  REPLICATION_LAG_THRESHOLDS)[0]
+        self.assertEqual(finding["template_values"]["delay_note"], "")
+        self.assertNotIn("apply_delay_seconds", finding["details"])
 
     def test_without_configuration_the_full_lag_is_judged(self):
         findings = engine.evaluate_replication_lag(self.lag_evidence(143), rule(),
