@@ -454,6 +454,45 @@ def node_target_ids(conn, target_id):
     return [r["target_id"] for r in rows]
 
 
+def load_latest_replication_status(conn, target_id):
+    """Latest PG_REPLICATION_STATUS: the SYSTEM row and the REPLICA rows captured with it."""
+    system = conn.execute(
+        """
+        SELECT 'SYSTEM' AS record_type, snapshot_id, target_id, captured_at, current_wal_lsn,
+               connected_replica_count, synchronous_standby_names
+        FROM postgresql.replication_status_snapshot
+        WHERE target_id = %s ORDER BY captured_at DESC LIMIT 1
+        """, (target_id,)).fetchone()
+    if system is None:
+        return []
+    replicas = conn.execute(
+        """
+        SELECT 'REPLICA' AS record_type, snapshot_id, target_id, captured_at, application_name,
+               host(client_addr) AS client_addr, state, sync_state,
+               EXTRACT(EPOCH FROM replay_lag)::float AS replay_lag_seconds,
+               pg_wal_lsn_diff(current_wal_lsn, replay_lsn)::bigint AS replay_lag_bytes,
+               backend_start, reply_time
+        FROM postgresql.replica_status_snapshot
+        WHERE target_id = %s AND captured_at = %s
+        ORDER BY application_name, client_addr
+        """, (target_id, system["captured_at"])).fetchall()
+    return [system] + replicas
+
+
+def load_instance_inventory(conn, target_id):
+    """Current instance inventory per node (PG_INSTANCE_INVENTORY); one row per node."""
+    return conn.execute(
+        """
+        SELECT ii.target_id, t.name AS node_name, ii.last_collected_at AS captured_at,
+               ii.server_address, ii.server_port, ii.in_recovery, ii.server_version,
+               ii.postmaster_start_time
+        FROM postgresql.instance_inventory ii
+        JOIN keystone.target t ON t.target_id = ii.target_id
+        WHERE ii.target_id = ANY(%s)
+        ORDER BY ii.target_id
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
 def load_latest_storage_snapshot(conn, target_id):
     """Latest filesystem capacity per node (PG_HOST_SNAPSHOT)."""
     return conn.execute(
@@ -803,6 +842,184 @@ def usage_percent(used_bytes, available_bytes, total_bytes):
     return 100 * used / total_bytes if total_bytes else None
 
 
+def replica_details(row):
+    return {
+        "application": row.get("application_name"),
+        "client_addr": row.get("client_addr"),
+        "state": row.get("state"),
+        "sync_state": row.get("sync_state"),
+        "wal_behind_bytes": row.get("replay_lag_bytes"),
+        "captured_at": iso(row.get("captured_at")),
+    }
+
+
+def replica_label(row):
+    return row.get("application_name") or row.get("client_addr") or "?"
+
+
+SETTING_UNIT_SECONDS = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}
+
+
+def setting_seconds(row):
+    """A time setting from pg_settings (value in its unit) in seconds; None if not a time."""
+    try:
+        return float(row["setting_value"]) * SETTING_UNIT_SECONDS[row.get("unit") or "ms"]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def intended_apply_delays(evidence):
+    """{replica address: recovery_min_apply_delay seconds} from node configuration and inventory."""
+    addresses = {n["target_id"]: str(n["server_address"]).split("/")[0]
+                 for n in evidence.get("PG_INSTANCE_INVENTORY", []) if n["server_address"]}
+    delays = {}
+    for row in evidence.get("PG_CONFIGURATION_SNAPSHOT", []):
+        if row["setting_name"] == "recovery_min_apply_delay" and row["target_id"] in addresses:
+            delays[addresses[row["target_id"]]] = setting_seconds(row) or 0.0
+    return delays
+
+
+def evaluate_replication_lag(evidence, rule, thresholds):
+    """PG-REP-003: replay lag in time per connected replica, beyond any intended apply delay.
+
+    replay_lag is NULL when the replica has caught up and the primary is idle: no lag.
+    A replica delayed on purpose (recovery_min_apply_delay) is judged on the lag beyond it.
+    """
+    rows = evidence["PG_REPLICATION_STATUS"] if isinstance(evidence, dict) else evidence
+    delays = intended_apply_delays(evidence) if isinstance(evidence, dict) else {}
+    findings = []
+    for row in rows:
+        if row["record_type"] != "REPLICA":
+            continue
+        lag = row["replay_lag_seconds"] or 0.0
+        delay = delays.get(str(row["client_addr"] or "").split("/")[0], 0.0)
+        excess = max(lag - delay, 0.0)
+        matched_threshold = match_threshold(excess, thresholds, "SECOND")
+        if matched_threshold is None:
+            continue
+        # The measured lag stays the observed value; the threshold applies to the part beyond the delay.
+        details = replica_details(row)
+        delay_note = ""
+        if delay:
+            details["apply_delay_seconds"] = delay
+            details["beyond_delay_seconds"] = round(excess, 1)
+            delay_note = f" ({excess:.1f} seconds beyond its intended apply delay of {delay:g} seconds)"
+        findings.append(
+            {
+                "severity": matched_threshold["severity"],
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "replica": replica_label(row),
+                    "lag_seconds": f"{lag:.1f}",
+                    "delay_note": delay_note,
+                },
+                "observed_value": round(lag, 1),
+                "observed_unit": "SECOND",
+                "subject_type": "REPLICA",
+                "subject_identifier": replica_label(row),
+                "details": details,
+            }
+        )
+    return findings
+
+
+def evaluate_replica_not_streaming(evidence, rule, thresholds):
+    """PG-REP-004: every node known as a replica must stream from the primary.
+
+    Known replicas come from the instance inventory (in recovery); they are
+    matched to pg_stat_replication by address, by count when an address is missing.
+    """
+    status = evidence["PG_REPLICATION_STATUS"]
+    replicas = [r for r in status if r["record_type"] == "REPLICA"]
+    expected = [n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"]]
+    findings = []
+
+    def finding(severity, subject, values, details):
+        return {"severity": severity, "snapshot_id": None, "template_values": values,
+                "observed_value": None, "observed_unit": None, "subject_type": "REPLICA",
+                "subject_identifier": subject, "details": details}
+
+    def address(value):
+        return str(value).split("/")[0] if value else None
+
+    connected = {address(r["client_addr"]) for r in replicas if r["client_addr"]}
+    streaming = [r for r in replicas if r["state"] == "streaming"]
+    # Losing every replica means no failover target at all.
+    severity = "CRITICAL" if expected and not streaming else rule["default_severity"]
+    captured_at = iso(status[0]["captured_at"])
+    if all(n["server_address"] for n in expected):
+        for n in expected:
+            if address(n["server_address"]) not in connected:
+                findings.append(finding(
+                    severity, n["node_name"],
+                    {"replica": n["node_name"], "state": "not connected"},
+                    {"node": n["node_name"], "client_addr": address(n["server_address"]),
+                     "state": "not connected", "captured_at": captured_at}))
+    elif len(replicas) < len(expected):
+        count = f"{len(expected) - len(replicas)} of {len(expected)} replicas"
+        findings.append(finding(severity, count, {"replica": count, "state": "not connected"},
+                                {"state": "not connected", "captured_at": captured_at}))
+    for r in replicas:
+        if r["state"] != "streaming":
+            findings.append(finding(
+                severity, replica_label(r),
+                {"replica": replica_label(r), "state": r["state"]}, replica_details(r)))
+    return findings
+
+
+def evaluate_inactive_replication_slot(rows, rule, thresholds):
+    """PG-REP-005: permanent slots nobody is using; they retain WAL and may hold xmin."""
+    findings = []
+    for row in rows:
+        if row["active"] or row["temporary"]:
+            continue
+        findings.append(
+            {
+                "severity": rule["default_severity"],
+                "snapshot_id": row["snapshot_id"],
+                "template_values": {
+                    "slot_name": row["slot_name"],
+                    "slot_type": row["slot_type"],
+                },
+                "observed_value": None,
+                "observed_unit": None,
+                "subject_type": "REPLICATION_SLOT",
+                "subject_identifier": row["slot_name"],
+                "details": {
+                    "slot_name": row["slot_name"],
+                    "slot_type": row["slot_type"],
+                    "database": row["database_name"],
+                    "wal_status": row["wal_status"],
+                    "captured_at": iso(row["captured_at"]),
+                },
+            }
+        )
+    return findings
+
+
+def evaluate_sync_standby_missing(rows, rule, thresholds):
+    """PG-REP-006: synchronous replication configured but no standby is synchronous; commits wait."""
+    system = next((r for r in rows if r["record_type"] == "SYSTEM"), None)
+    names = (system or {}).get("synchronous_standby_names")
+    if not names or not names.strip():
+        return []
+    if any(r["record_type"] == "REPLICA" and r["sync_state"] in ("sync", "quorum") for r in rows):
+        return []
+    return [
+        {
+            "severity": rule["default_severity"],
+            "snapshot_id": system["snapshot_id"],
+            "template_values": {"synchronous_standby_names": names},
+            "observed_value": None,
+            "observed_unit": None,
+            "subject_type": "SYSTEM",
+            "subject_identifier": str(system["target_id"]),
+            "details": {"synchronous_standby_names": names,
+                        "captured_at": iso(system["captured_at"])},
+        }
+    ]
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
@@ -874,6 +1091,8 @@ EVIDENCE_LOADERS = {
     "PG_CONNECTION_ACTIVITY": load_latest_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": load_latest_storage_snapshot,
     "PG_CONFIGURATION_SNAPSHOT": load_latest_configuration_snapshot,
+    "PG_REPLICATION_STATUS": load_latest_replication_status,
+    "PG_INSTANCE_INVENTORY": load_instance_inventory,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -889,6 +1108,10 @@ RULE_EVALUATORS = {
     "PG-REP-002": evaluate_replication_slot_wal_unavailable,
     "PG-CONN-001": evaluate_aborted_idle_transaction_connections,
     "PG-CAP-001": evaluate_data_disk_usage,
+    "PG-REP-003": evaluate_replication_lag,
+    "PG-REP-004": evaluate_replica_not_streaming,
+    "PG-REP-005": evaluate_inactive_replication_slot,
+    "PG-REP-006": evaluate_sync_standby_missing,
 }
 
 
@@ -1006,6 +1229,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
         )
 
         if not valid:
+            if not requirement["is_required"]:
+                # Optional evidence that is stale is treated as absent, never as current.
+                evidence_sets[evidence_source] = []
+                continue
             return (
                 OUTCOME_INSUFFICIENT_EVIDENCE,
                 [],

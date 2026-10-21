@@ -110,10 +110,10 @@ Sources combined:
 | --- | --- | --- | --- | --- | --- |
 | **PG-REP-001** | Slot WAL retention pressure | `wal_status = extended` | Ready: PG-007 | Replication slot | Done |
 | **PG-REP-002** | Slot WAL unavailable | `wal_status` unreserved / lost | Ready: PG-007 | Replication slot | Done |
-| PG-REP-003 | Replication lag | Replay lag ≥ X seconds or ≥ N MB behind | Ready: PG_REPLICATION_STATUS | — | P1 |
-| PG-REP-004 | Replica missing or disconnected | Fewer streaming replicas than the NODE replicas Keystone knows | Ready: PG_REPLICATION_STATUS + target tree | — | P1 |
-| PG-REP-005 | Inactive replication slot | `active = false` (retains WAL, holds xmin) | Ready: PG-007 | Replication slot | P1 |
-| PG-REP-006 | Synchronous replication without a synchronous standby | `synchronous_standby_names` set but no standby in `sync` state — CRITICAL, writes can hang | Ready: PG-002 + PG_REPLICATION_STATUS | — | P1 |
+| **PG-REP-003** | Replication lag | Replay lag ≥ X seconds or ≥ N MB behind | Ready: PG_REPLICATION_STATUS | — | Done |
+| **PG-REP-004** | Replica missing or disconnected | Fewer streaming replicas than the NODE replicas Keystone knows | Ready: PG_REPLICATION_STATUS + target tree | — | Done |
+| **PG-REP-005** | Inactive replication slot | `active = false` (retains WAL, holds xmin) | Ready: PG-007 | Replication slot | Done |
+| **PG-REP-006** | Synchronous replication without a synchronous standby | `synchronous_standby_names` set but no standby in `sync` state — CRITICAL, writes can hang | Ready: PG-002 + PG_REPLICATION_STATUS | — | Done |
 | PG-HA-001 | Unplanned failover | Timeline ID increased since the last check, or the primary moved to another node | Gap: timeline ID in PG-001, role history | — | P1 |
 | PG-HA-002 | Recently restarted node | `postmaster_start_time` within the last 24 h — INFO, context for other findings | Ready: PG-001 | DB_START_DATE, UP_TIME | P2 |
 | PG-HA-003 | Replica smaller than primary | Replica with fewer CPUs or < 90 % of the primary's memory | Ready: host | — | P2 |

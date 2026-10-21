@@ -101,6 +101,36 @@ EXPECTED_RULES = {
         "evidence": {"PG_HOST_SNAPSHOT": (True, 3600),
                      "PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
     },
+    "PG-REP-003": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("60"), "SECOND"),
+            "CRITICAL": (Decimal("300"), "SECOND"),
+        },
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600),
+                     "PG_CONFIGURATION_SNAPSHOT": (False, 86400),
+                     "PG_INSTANCE_INVENTORY": (False, 3600)},
+    },
+    "PG-REP-004": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600),
+                     "PG_INSTANCE_INVENTORY": (True, 3600)},
+    },
+    "PG-REP-005": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_SLOTS": (True, 600)},
+    },
+    "PG-REP-006": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "CRITICAL",
+        "thresholds": {},
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
@@ -237,7 +267,7 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
             SELECT rd.rule_key, l.language_code, tt.text_type
             FROM keystone.rule_definition rd
             CROSS JOIN keystone.dictionary_language l
-            CROSS JOIN (VALUES ('NAME'), ('HEALTHY'), ('MEANING'), ('IMPACT'),
+            CROSS JOIN (VALUES ('NAME'), ('HEALTHY'), ('MEANING'), ('CAUSES'), ('IMPACT'),
                                ('RECOMMENDATION')) AS tt (text_type)
             LEFT JOIN keystone.rule_text t
                 ON t.rule_id = rd.rule_id AND t.language_code = l.language_code
@@ -247,6 +277,22 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
             """
         )
         self.assertEqual(missing, [])
+
+    def test_causes_and_steps_are_lists_meaning_is_one_statement(self):
+        # V034: list texts render as bullets; MEANING says what is happening, not why.
+        rows = self.query(
+            "SELECT rd.rule_key, t.language_code, t.text_type, t.text FROM keystone.rule_text t "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE t.text_type IN ('CAUSES', 'RECOMMENDATION', 'MEANING')")
+        for rule_key, language, text_type, text in rows:
+            lines = [line for line in text.splitlines() if line.strip()]
+            with self.subTest(rule=rule_key, language=language, text_type=text_type):
+                if text_type == "MEANING":
+                    self.assertEqual(len(lines), 1)
+                    self.assertFalse(text.startswith("- "))
+                else:
+                    self.assertGreaterEqual(len(lines), 2)
+                    self.assertTrue(all(line.startswith("- ") for line in lines))
 
     def test_healthy_text_placeholders_have_thresholds(self):
         # A {warning}/{critical} limit in a HEALTHY text must come from a real threshold.
