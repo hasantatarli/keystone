@@ -222,15 +222,18 @@ Detect replicas that apply the primary's changes late.
 
 | | |
 | --- | --- |
-| Evidence | `PG_REPLICATION_STATUS` (replica rows of `pg_stat_replication` on the primary), required |
-| Freshness | 600 seconds |
-| Metric | `replay_lag` in seconds; NULL (caught up, primary idle) counts as 0 |
+| Evidence | `PG_REPLICATION_STATUS` (replica rows of `pg_stat_replication` on the primary), required; `PG_CONFIGURATION_SNAPSHOT` and `PG_INSTANCE_INVENTORY` of the nodes, optional (V033) |
+| Freshness | 600 seconds (status); optional evidence that is stale is treated as absent |
+| Metric | `replay_lag` in seconds beyond the replica's `recovery_min_apply_delay`; NULL (caught up, primary idle) counts as 0 |
 | Thresholds | WARNING ≥ 60 s, CRITICAL ≥ 300 s |
 | Subject | REPLICA (application_name, else address) |
 | Details | WAL not yet replayed (bytes), state, sync state |
 
+**Design notes**  
+Lab 2026-10-21: with `recovery_min_apply_delay = 5min` on a replica, `replay_lag` grew 37 s → 84 s → 143 s and WAL behind 174 → 321 MB, so the time metric follows a stuck replay. Such a deliberately delayed replica (protection against accidental deletes) is judged only on the lag beyond its delay. `pg_wal_replay_pause()` cannot create lag under Patroni: Patroni resumes replay within seconds.
+
 **Known limitations**  
-Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004.
+Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. Replicas are matched to their node configuration by address. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004.
 
 ## PG-REP-004 — Replica Not Streaming
 

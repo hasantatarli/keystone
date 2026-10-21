@@ -88,6 +88,7 @@ TEXTS = {
         "scope_note": "Yalnızca bu kontrolde değerlendirilen kurallara göre.",
         "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
         "detail_usage": "Kullanım", "detail_sync_state": "Senkronizasyon", "detail_wal_behind": "Geride kalan WAL",
+        "detail_apply_delay": "Bilinçli uygulama gecikmesi",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
@@ -164,6 +165,7 @@ TEXTS = {
         "scope_note": "Based only on the rules evaluated in this check.",
         "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
         "detail_usage": "Usage", "detail_sync_state": "Sync state", "detail_wal_behind": "WAL behind",
+        "detail_apply_delay": "Intended apply delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
@@ -938,7 +940,7 @@ DETAIL_LABELS = (("node", "detail_node"), ("mount_point", "detail_mount"),
                  ("application", "detail_application"), ("user", "detail_user"),
                  ("database", "detail_database"), ("client_addr", "detail_client"),
                  ("state", "detail_state"), ("sync_state", "detail_sync_state"),
-                 ("wal_behind", "detail_wal_behind"))
+                 ("wal_behind", "detail_wal_behind"), ("apply_delay", "detail_apply_delay"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),

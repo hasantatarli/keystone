@@ -857,32 +857,63 @@ def replica_label(row):
     return row.get("application_name") or row.get("client_addr") or "?"
 
 
-def evaluate_replication_lag(rows, rule, thresholds):
-    """PG-REP-003: replay lag in time per connected replica.
+SETTING_UNIT_SECONDS = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}
+
+
+def setting_seconds(row):
+    """A time setting from pg_settings (value in its unit) in seconds; None if not a time."""
+    try:
+        return float(row["setting_value"]) * SETTING_UNIT_SECONDS[row.get("unit") or "ms"]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def intended_apply_delays(evidence):
+    """{replica address: recovery_min_apply_delay seconds} from node configuration and inventory."""
+    addresses = {n["target_id"]: str(n["server_address"]).split("/")[0]
+                 for n in evidence.get("PG_INSTANCE_INVENTORY", []) if n["server_address"]}
+    delays = {}
+    for row in evidence.get("PG_CONFIGURATION_SNAPSHOT", []):
+        if row["setting_name"] == "recovery_min_apply_delay" and row["target_id"] in addresses:
+            delays[addresses[row["target_id"]]] = setting_seconds(row) or 0.0
+    return delays
+
+
+def evaluate_replication_lag(evidence, rule, thresholds):
+    """PG-REP-003: replay lag in time per connected replica, beyond any intended apply delay.
 
     replay_lag is NULL when the replica has caught up and the primary is idle: no lag.
+    A replica delayed on purpose (recovery_min_apply_delay) is judged on the lag beyond it.
     """
+    rows = evidence["PG_REPLICATION_STATUS"] if isinstance(evidence, dict) else evidence
+    delays = intended_apply_delays(evidence) if isinstance(evidence, dict) else {}
     findings = []
     for row in rows:
         if row["record_type"] != "REPLICA":
             continue
         lag = row["replay_lag_seconds"] or 0.0
-        matched_threshold = match_threshold(lag, thresholds, "SECOND")
+        delay = delays.get(str(row["client_addr"] or "").split("/")[0], 0.0)
+        excess = max(lag - delay, 0.0)
+        matched_threshold = match_threshold(excess, thresholds, "SECOND")
         if matched_threshold is None:
             continue
+        details = replica_details(row)
+        details["replay_lag_seconds"] = round(lag, 1)
+        if delay:
+            details["apply_delay"] = f"{delay:g} s"
         findings.append(
             {
                 "severity": matched_threshold["severity"],
                 "snapshot_id": row["snapshot_id"],
                 "template_values": {
                     "replica": replica_label(row),
-                    "lag_seconds": f"{lag:.1f}",
+                    "lag_seconds": f"{excess:.1f}",
                 },
-                "observed_value": round(lag, 1),
+                "observed_value": round(excess, 1),
                 "observed_unit": "SECOND",
                 "subject_type": "REPLICA",
                 "subject_identifier": replica_label(row),
-                "details": replica_details(row),
+                "details": details,
             }
         )
     return findings
@@ -1194,6 +1225,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
         )
 
         if not valid:
+            if not requirement["is_required"]:
+                # Optional evidence that is stale is treated as absent, never as current.
+                evidence_sets[evidence_source] = []
+                continue
             return (
                 OUTCOME_INSUFFICIENT_EVIDENCE,
                 [],

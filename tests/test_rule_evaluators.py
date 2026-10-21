@@ -578,6 +578,39 @@ class ReplicationLagTests(unittest.TestCase):
         self.assertEqual(finding["template_values"]["lag_seconds"], "75.2")
         self.assertEqual(finding["details"]["wal_behind_bytes"], 4096)
 
+    def lag_evidence(self, lag, delay_value=None, unit="ms"):
+        evidence = {"PG_REPLICATION_STATUS": status_rows([{"replay_lag_seconds": lag}]),
+                    "PG_INSTANCE_INVENTORY": inventory(("node-a", "10.0.0.0", True)),
+                    "PG_CONFIGURATION_SNAPSHOT": []}
+        if delay_value is not None:
+            evidence["PG_CONFIGURATION_SNAPSHOT"] = [
+                {"target_id": 0, "setting_name": "recovery_min_apply_delay",
+                 "setting_value": str(delay_value), "unit": unit, "captured_at": NOW}]
+        return evidence
+
+    def test_intended_apply_delay_is_not_lag(self):
+        # Lab 2026-10-21: recovery_min_apply_delay = 5min, replay_lag 143 s -> no finding.
+        evidence = self.lag_evidence(143, 300000)
+        self.assertEqual(engine.evaluate_replication_lag(evidence, rule(), REPLICATION_LAG_THRESHOLDS), [])
+
+    def test_lag_beyond_intended_delay_is_judged(self):
+        findings = engine.evaluate_replication_lag(self.lag_evidence(400, 300000), rule(),
+                                                   REPLICATION_LAG_THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])                 # 100 s beyond
+        self.assertEqual(findings[0]["observed_value"], 100.0)
+        self.assertEqual(findings[0]["details"]["replay_lag_seconds"], 400)
+        self.assertEqual(findings[0]["details"]["apply_delay"], "300 s")
+
+    def test_without_configuration_the_full_lag_is_judged(self):
+        findings = engine.evaluate_replication_lag(self.lag_evidence(143), rule(),
+                                                   REPLICATION_LAG_THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])
+
+    def test_setting_units(self):
+        self.assertEqual(engine.setting_seconds({"setting_value": "300000", "unit": "ms"}), 300)
+        self.assertEqual(engine.setting_seconds({"setting_value": "5", "unit": "min"}), 300)
+        self.assertIsNone(engine.setting_seconds({"setting_value": "on", "unit": None}))
+
     def test_system_row_is_not_a_replica(self):
         self.assertEqual(engine.evaluate_replication_lag(status_rows([]), rule(),
                                                          REPLICATION_LAG_THRESHOLDS), [])

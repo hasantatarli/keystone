@@ -108,7 +108,9 @@ EXPECTED_RULES = {
             "WARNING": (Decimal("60"), "SECOND"),
             "CRITICAL": (Decimal("300"), "SECOND"),
         },
-        "evidence": {"PG_REPLICATION_STATUS": (True, 600)},
+        "evidence": {"PG_REPLICATION_STATUS": (True, 600),
+                     "PG_CONFIGURATION_SNAPSHOT": (False, 86400),
+                     "PG_INSTANCE_INVENTORY": (False, 3600)},
     },
     "PG-REP-004": {
         "assessment": "PG_REPLICATION_HEALTH",
