@@ -1058,7 +1058,8 @@ def render_results(data, lang, t):
             if r["outcome"] == "HEALTHY":
                 note = healthy_text(data, r, lang, t)
             elif r["outcome"] == "ATTENTION_REQUIRED":
-                note = threshold_line(r, t)
+                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
+                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',

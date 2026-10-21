@@ -1043,6 +1043,12 @@ def evaluate_sync_standby_missing(rows, rule, thresholds):
     ]
 
 
+def current_primary(inventory):
+    """The node not in recovery with the newest inventory; after a failover the old row may linger."""
+    primaries = [n for n in inventory if n["in_recovery"] is False]
+    return max(primaries, key=lambda n: n["captured_at"]) if primaries else None
+
+
 def settings_by_node(rows):
     """{target_id: {setting_name: row}} from configuration snapshot rows."""
     nodes = {}
@@ -1115,7 +1121,7 @@ def evaluate_wal_archiving(evidence, rule, thresholds):
 
     archive_mode on with an empty archive_command and archive_library keeps every WAL file.
     """
-    primary = next((n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"] is False), None)
+    primary = current_primary(evidence["PG_INSTANCE_INVENTORY"])
     if primary is None:
         return []
     settings = settings_by_node(evidence["PG_CONFIGURATION_SNAPSHOT"]).get(primary["target_id"], {})
@@ -1151,7 +1157,7 @@ def evaluate_connection_capacity(evidence, rule, thresholds):
     """PG-CONN-002: client connections on the primary against its usable connection slots."""
     activity = evidence["PG_CONNECTION_ACTIVITY"]
     nodes = settings_by_node(evidence["PG_CONFIGURATION_SNAPSHOT"])
-    primary = next((n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"] is False), None)
+    primary = current_primary(evidence["PG_INSTANCE_INVENTORY"])
     settings = nodes.get(primary["target_id"]) if primary else None
     if not activity or not settings:
         return []
@@ -1347,10 +1353,23 @@ def highest_severity(findings):
     )
 
 
-def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
+def current_rows(rows, requirement, evaluation_time, evidence_since=None):
+    """Rows young enough to judge, each on its own capture time.
+
+    A node whose collection failed keeps its last snapshot in the repository;
+    that snapshot must not be judged as the node's current state.
+    """
+    max_age = requirement["max_age_seconds"]
+    return [r for r in rows
+            if (max_age is None or (evaluation_time - r["captured_at"]).total_seconds() <= max_age)
+            and (evidence_since is None or r["captured_at"] >= evidence_since)]
+
+
+def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, evidence_since=None):
     """Evaluate one rule -> (outcome, findings, reason).
 
     Missing/stale evidence returns INSUFFICIENT_EVIDENCE; real problems raise.
+    evidence_since (a health check's start) excludes evidence collected before it.
     """
     evaluator = RULE_EVALUATORS.get(rule["rule_key"])
     if evaluator is None:
@@ -1390,12 +1409,16 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache):
         if evidence_source not in evidence_cache:
             evidence_cache[evidence_source] = loader(conn, target_id)
 
-        rows = evidence_cache[evidence_source]
+        loaded = evidence_cache[evidence_source]
+        rows = current_rows(loaded, requirement, evaluation_time, evidence_since)
         valid, reason = validate_evidence_freshness(
-            rows,
+            rows or loaded,
             requirement,
             evaluation_time,
         )
+        if valid and not rows and loaded:
+            # Only rows from before this health check: they were not collected now.
+            valid, reason = validate_evidence_freshness([], requirement, evaluation_time)
 
         if not valid:
             if not requirement["is_required"]:
@@ -1460,6 +1483,7 @@ def run_assessment(
     evaluation_time=None,
     scheduled_at=None,
     health_check_id=None,
+    evidence_since=None,
 ):
     """Run all enabled rules of one assessment for one target; returns run id.
 
@@ -1506,6 +1530,7 @@ def run_assessment(
                         target_id,
                         evaluation_time,
                         evidence_cache,
+                        evidence_since,
                     )
 
                     for finding in findings:

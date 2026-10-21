@@ -148,8 +148,8 @@ Needs a **release reference table** in the Dictionary (versions, release dates, 
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P1 |
-| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P1 |
+| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P3 |
+| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P3 |
 | PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Ready: host + reference table | — | P2 |
 | PG-LIFE-004 | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | P2 |
 
@@ -241,6 +241,8 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 3. **Security:** the essential checks first (PG-SEC-001…004), details later.
 4. **Backup:** PostgreSQL has no backup catalogue like SQL Server's `msdb`. Keystone detects the method in use and reports backups through that method. First signal without SSH: `archive_command` (pgBackRest `archive-push`, Barman `barman-wal-archive`, WAL-G `wal-push`, pg_probackup); then the tool's own status over SSH (`pgbackrest info --output=json` and equivalents) and `pg_dump` jobs in cron. Barman usually runs on a separate backup server; Keystone does not connect to it. The backup check then ends INSUFFICIENT_EVIDENCE — never healthy — with the reason "Backups are managed by Barman on a separate server; verify them there."
 5. **Conscious choices** (`synchronous_commit = off`, `archive_mode = off` and similar) are WARNING by default. A customer's explicit acceptance ("accepted risk" with a reason) belongs to the finding lifecycle (MVP Plan Phase 2).
+
+6. **Version checks deferred** (2026-10-21, Hasan): PG-LIFE-001/002 need current release data. Many customer servers have no internet access, and a manually maintained list creates recurring work. Moved to P3; revisit with a release table shipped with Keystone updates.
 
 ## Open questions for review
 

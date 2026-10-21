@@ -820,5 +820,27 @@ class SimpleP1RuleTests(unittest.TestCase):
         self.assertEqual([f["subject_identifier"] for f in md5], ["pg-1: password_encryption"])
 
 
+class CurrentEvidenceTests(unittest.TestCase):
+    REQUIREMENT = {"max_age_seconds": 600, "is_required": True}
+
+    def test_each_row_is_judged_on_its_own_age(self):
+        rows = [{"captured_at": NOW - timedelta(seconds=60)},
+                {"captured_at": NOW - timedelta(seconds=601)}]
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW), rows[:1])
+
+    def test_rows_before_the_health_check_are_dropped(self):
+        rows = [{"captured_at": NOW - timedelta(seconds=60)},
+                {"captured_at": NOW - timedelta(seconds=10)}]
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW,
+                                             evidence_since=NOW - timedelta(seconds=30)), rows[1:])
+
+    def test_freshest_primary_wins_after_a_failover(self):
+        nodes = [{"node_name": "old", "in_recovery": False, "captured_at": NOW - timedelta(hours=1)},
+                 {"node_name": "new", "in_recovery": False, "captured_at": NOW},
+                 {"node_name": "replica", "in_recovery": True, "captured_at": NOW}]
+        self.assertEqual(engine.current_primary(nodes)["node_name"], "new")
+        self.assertIsNone(engine.current_primary(nodes[2:]))
+
+
 if __name__ == "__main__":
     unittest.main()

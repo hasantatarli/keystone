@@ -175,6 +175,20 @@ class HealthCheckTests(unittest.TestCase):
                           "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
+    def test_evidence_from_before_the_check_is_not_judged(self):
+        # Lab 2026-10-21: postgre-1 was unreachable; its 1.5 h old settings produced findings.
+        self.conn.execute(
+            "INSERT INTO postgresql.configuration_snapshot (target_id, captured_at, setting_name, "
+            "setting_value) VALUES (%s, now() - interval '90 minutes', 'ssl', 'off')", (self.node1,))
+        self.conn.commit()
+        check_id = self.run_check(assessment_key="PG_SECURITY_HEALTH")
+        row = self.conn.execute(
+            "SELECT res.outcome, res.finding_count FROM keystone.assessment_result res "
+            "JOIN keystone.assessment_run ar USING (assessment_run_id) "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE ar.health_check_id = %s AND rd.rule_key = 'PG-SEC-003'", (check_id,)).fetchone()
+        self.assertEqual((row["outcome"], row["finding_count"]), ("INSUFFICIENT_EVIDENCE", 0))
+
     def test_single_assessment_collects_only_its_evidence(self):
         check_id = self.run_check(assessment_key="PG_CONNECTION_HEALTH")
         evidence = {k for (t, k), r in self.collections(check_id).items()

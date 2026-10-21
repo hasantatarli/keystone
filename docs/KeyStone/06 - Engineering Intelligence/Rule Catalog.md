@@ -46,7 +46,9 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 
 ## Common semantics
 
-- **Latest snapshot only.** Loaders read the most recent captured snapshot for the target. Rules do not yet use history.
+- **Latest snapshot only.** Loaders read the most recent captured snapshot for the target (for NODE-scoped evidence, per node). Rules do not yet use history.
+- **Every row is judged on its own age** (2026-10-21). Rows older than the rule's freshness limit are dropped before evaluation, so a node whose collection failed is not judged on its last snapshot. A health check additionally drops evidence captured before the check started (120 s clock-skew tolerance): it judges only what it collected itself. Lab case: postgre-1 was unreachable and its 1.5-hour-old settings produced findings.
+- **The current primary** is the node not in recovery with the newest instance inventory; after a failover the old primary's row can linger.
 - **The observed value is what was measured; thresholds only decide the severity** (Hasan, 2026-10-21). A finding never reports a derived or adjusted figure as if it had been measured. When a rule compares an adjusted value (for example lag beyond an intended delay, usage beyond a reserve), the finding shows the measured value, the adjustment and the compared part separately. Applies to every rule.
 - **Thresholds are inclusive.** A value equal to a threshold reaches it (`>=`).
 - **Highest reached threshold wins**, independent of the order thresholds are stored or loaded. Thresholds with a different unit are ignored.

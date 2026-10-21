@@ -8,6 +8,7 @@ health check; its rules end INSUFFICIENT_EVIDENCE and the reason is kept.
     python -m repository.healthcheck.health_check --target 1
 """
 
+from datetime import timedelta
 import argparse
 import getpass
 import time
@@ -31,6 +32,7 @@ REPORT_CONTEXT_COLLECTORS = {
 }
 
 DEFAULT_WAIT_MINUTES = 10          # per collector, from its start
+CLOCK_SKEW_TOLERANCE_SECONDS = 120
 POLL_SECONDS = 1
 
 
@@ -254,11 +256,14 @@ def run_health_check(connect, target_id, assessment_key=None,
     with connect() as conn:
         target, nodes = load_target_tree(conn, target_id)
         assessment_keys = load_assessments(conn, target["provider"], assessment_key)
-        health_check_id = conn.execute(
+        row = conn.execute(
             "INSERT INTO keystone.health_check (target_id, status, requested_by) "
-            "VALUES (%s, 'RUNNING', %s) RETURNING health_check_id",
+            "VALUES (%s, 'RUNNING', %s) RETURNING health_check_id, started_at",
             (target_id, requested_by),
-        ).fetchone()["health_check_id"]
+        ).fetchone()
+        health_check_id = row["health_check_id"]
+        # Capture times come from the targets' clocks; allow for a small skew.
+        evidence_since = row["started_at"] - timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
         conn.commit()
 
     logger.info("Health check %s: %s (%s node(s)), assessments: %s.",
@@ -320,8 +325,10 @@ def run_health_check(connect, target_id, assessment_key=None,
         for key in assessment_keys:
             with connect() as conn:
                 try:
+                    # A health check judges only what it collected itself.
                     assessment_engine.run_assessment(conn, key, target_id,
-                                                     health_check_id=health_check_id)
+                                                     health_check_id=health_check_id,
+                                                     evidence_since=evidence_since)
                 except Exception:
                     logger.error("Health check %s: assessment %s failed.", health_check_id, key,
                                  exc_info=True)
