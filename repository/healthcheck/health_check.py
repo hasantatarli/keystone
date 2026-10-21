@@ -188,6 +188,18 @@ def record_collection(conn, health_check_id, target_id, key, purpose,
     ).fetchone()["health_check_collection_id"]
 
 
+COLLECTED_STATUSES = ("SUCCESS", "PARTIAL_SUCCESS")
+
+
+def uncollected_evidence(conn, health_check_id):
+    """{(target_id, collector_key)} this health check did not collect."""
+    rows = conn.execute(
+        "SELECT target_id, collector_key FROM keystone.health_check_collection "
+        "WHERE health_check_id = %s AND status <> ALL(%s)",
+        (health_check_id, list(COLLECTED_STATUSES))).fetchall()
+    return {(r["target_id"], r["collector_key"]) for r in rows}
+
+
 # -----------------------------------------------------------------------------
 # Waiting
 # -----------------------------------------------------------------------------
@@ -254,11 +266,12 @@ def run_health_check(connect, target_id, assessment_key=None,
     with connect() as conn:
         target, nodes = load_target_tree(conn, target_id)
         assessment_keys = load_assessments(conn, target["provider"], assessment_key)
-        health_check_id = conn.execute(
+        row = conn.execute(
             "INSERT INTO keystone.health_check (target_id, status, requested_by) "
-            "VALUES (%s, 'RUNNING', %s) RETURNING health_check_id",
+            "VALUES (%s, 'RUNNING', %s) RETURNING health_check_id, started_at",
             (target_id, requested_by),
-        ).fetchone()["health_check_id"]
+        ).fetchone()
+        health_check_id = row["health_check_id"]
         conn.commit()
 
     logger.info("Health check %s: %s (%s node(s)), assessments: %s.",
@@ -317,11 +330,16 @@ def run_health_check(connect, target_id, assessment_key=None,
             conn.commit()
 
         # 3. Assess the SYSTEM target with the evidence now in the repository.
+        # A health check judges only what it collected: older rows of failed targets are ignored.
+        with connect() as conn:
+            uncollected = uncollected_evidence(conn, health_check_id)
         for key in assessment_keys:
             with connect() as conn:
                 try:
+                    # A health check judges only what it collected itself.
                     assessment_engine.run_assessment(conn, key, target_id,
-                                                     health_check_id=health_check_id)
+                                                     health_check_id=health_check_id,
+                                                     uncollected=uncollected)
                 except Exception:
                     logger.error("Health check %s: assessment %s failed.", health_check_id, key,
                                  exc_info=True)

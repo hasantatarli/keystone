@@ -53,6 +53,10 @@ class ReportTests(test_health_check.HealthCheckTests):
             (run["assessment_run_id"], run["rule_id"], severity,
              '{"application": "billing-api", "user": "app_user", "client_addr": "10.0.5.21", '
              '"database": "orders", "last_query": "UPDATE invoices SET paid = true"}'))
+        # Every collection of this check succeeded except the replication slots.
+        self.conn.execute(
+            "UPDATE keystone.health_check_collection SET status = 'SUCCESS', status_message = NULL "
+            "WHERE health_check_id = %s AND collector_key <> 'PG_REPLICATION_SLOTS'", (check_id,))
         # The context above belongs to this check's time window.
         self.conn.execute(
             "UPDATE keystone.health_check SET started_at = now() - interval '5 minutes', "
@@ -139,7 +143,9 @@ class ReportTests(test_health_check.HealthCheckTests):
 
     def test_context_from_an_earlier_check_is_not_shown(self):
         old_check = self.make_check()
-        new_check = self.run_check()          # nothing collected into the context tables
+        # The new check cannot collect the context: older rows must not appear as current.
+        self.failing = {"PG_DATABASE_INVENTORY", "PG_INSTANCE_INVENTORY"}
+        new_check = self.run_check()
         self.assertNotEqual(old_check, new_check)
         page = self.render(new_check, "tr")
         self.assertNotIn("orders", page)
@@ -407,6 +413,43 @@ class ReportTests(test_health_check.HealthCheckTests):
         text = self.conn.execute("SELECT finding_text FROM keystone.finding ORDER BY finding_id DESC "
                                  "LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
+
+    def test_context_tolerates_target_clocks_slightly_behind(self):
+        # Lab 2026-10-21: VM clocks behind the laptop; this check's inventory looked "not collected".
+        check_id = self.make_check()
+        self.conn.execute("UPDATE postgresql.instance_inventory SET last_collected_at = "
+                          "(SELECT started_at FROM keystone.health_check WHERE health_check_id = %s) "
+                          "- interval '30 seconds'", (check_id,))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("1 primary, 2 replica", page)
+
+    def test_context_of_a_node_this_check_could_not_reach_is_hidden(self):
+        # Lab 2026-10-21: postgre-1 unreachable; its last inventory must not look current.
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.health_check_collection SET status = 'CONNECTION_FAILED' "
+            "WHERE health_check_id = %s AND target_id = %s AND collector_key = 'PG_INSTANCE_INVENTORY'",
+            (check_id, self.node2))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        self.assertIn("1 primary, 1 replica", page)
+        self.assertNotIn("10.0.0.%s" % self.node2, page)
+
+    def test_attention_topic_explains_the_problem_and_what_was_fine(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'HEALTHY', reason = NULL "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id "
+            "AND rd.rule_key = 'PG-TRAN-003'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        topics = executive[executive.index("Alanlara göre durum"):]
+        self.assertIn("Uzun süre boşta bekleyen transaction (1 bulgu): Bazı session", topics)
+        self.assertIn("Açık kalma süresi", topics)        # the healthy rule of the same topic
+        results = page[page.index("Kontrol sonuçları"):]
+        self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
 
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()

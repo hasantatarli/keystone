@@ -68,7 +68,7 @@ Sources combined:
 | **PG-TRAN-001** | Long idle transaction | Idle in transaction ≥ 5 / 15 min | Ready: PG-009 (activity) | active sessions monitor | Done |
 | **PG-TRAN-003** | Long-running transaction | Transaction age ≥ 30 / 60 min | Ready: PG-009 (activity) | — | Done |
 | **PG-TRAN-002** | XID wraparound risk | `age(datfrozenxid)` ≥ 1.5 / 1.8 billion | Ready: PG-006 | Transaction ID TXID | Done |
-| PG-TRAN-004 | MultiXact wraparound risk | `mxid_age` relative to limits | Ready: PG-006 | datminmxid | P1 |
+| **PG-TRAN-004** | MultiXact wraparound risk | `mxid_age` relative to limits | Ready: PG-006 | datminmxid | Done |
 | PG-TRAN-005 | Orphaned prepared transactions | A prepared transaction older than 5 min — WARNING, 1 h — CRITICAL (holds locks and xmin, survives restarts) | Gap: PG-020 | Orphaned prepare transactions | P1 |
 | PG-TRAN-006 | XID age relative to `autovacuum_freeze_max_age` | Anti-wraparound vacuum overdue or repeatedly not finishing | Ready: PG-006 + PG-002 | Transaction ID TXID | P2 |
 | PG-LOCK-001 | Blocking and lock waits | Sessions waiting on locks longer than N seconds; the blocking session named | Gap: PG-009 locking | — | P2 |
@@ -126,7 +126,7 @@ No evidence is collected today. This is the area with the highest real-world ris
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | PG-BKP-001 | WAL archiving failing | `pg_stat_archiver`: last failure after last success, or failures increasing — CRITICAL | Gap: new archiver collector | — | P1 |
-| PG-BKP-002 | No point-in-time recovery possible | `archive_mode = off` on a primary — WARNING with explanation | Ready: PG-002 | — | P1 |
+| **PG-BKP-002** | No point-in-time recovery possible | `archive_mode = off` on a primary — WARNING with explanation | Ready: PG-002 | — | Done |
 | PG-BKP-003 | Unlogged tables | Unlogged tables exist: lost after a crash, not replicated — WARNING with the table list | Gap: PG-030 | Unlogged Tables | P2 |
 | PG-BKP-004 | Last successful backup age | No successful backup within N hours (pgBackRest, Barman, pg_dump logs) | Gap: backup tool integration over SSH | — | P3 |
 
@@ -135,8 +135,8 @@ No evidence is collected today. This is the area with the highest real-world ris
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | PG-SEC-001 | Too many superusers | Login roles with superuser beyond the expected administrators | Gap: PG-016 | Users & Roles Info | P1 |
-| PG-SEC-002 | Weak password hashing | `password_encryption = md5` — WARNING (md5 is deprecated); roles still with md5 hashes need superuser | Ready (setting): PG-002 | Users & Roles Info | P1 |
-| PG-SEC-003 | Connections without encryption | `ssl = off` — WARNING | Ready: PG-002 | — | P1 |
+| **PG-SEC-002** | Weak password hashing | `password_encryption = md5` — WARNING (md5 is deprecated); roles still with md5 hashes need superuser | Ready (setting): PG-002 | Users & Roles Info | Done |
+| **PG-SEC-003** | Connections without encryption | `ssl = off` — WARNING | Ready: PG-002 | — | Done |
 | PG-SEC-004 | Anyone can create in `public` | `CREATE` on schema `public` granted to PUBLIC (default before PostgreSQL 15) | Gap: PG-018 / PG-016 | public Schema | P1 |
 | PG-SEC-005 | Trust or password authentication | `trust` or plain `password` rules in `pg_hba` | Gap: PG-017 (`pg_hba_file_rules` needs superuser by default) | — | P2 |
 | PG-SEC-006 | Broad default privileges | Default privileges granting write to PUBLIC or wide roles | Gap: PG-016 | Default access privileges, Access privileges | P3 |
@@ -148,8 +148,8 @@ Needs a **release reference table** in the Dictionary (versions, release dates, 
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P1 |
-| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P1 |
+| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P3 |
+| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P3 |
 | PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Ready: host + reference table | — | P2 |
 | PG-LIFE-004 | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | P2 |
 
@@ -241,6 +241,8 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 3. **Security:** the essential checks first (PG-SEC-001…004), details later.
 4. **Backup:** PostgreSQL has no backup catalogue like SQL Server's `msdb`. Keystone detects the method in use and reports backups through that method. First signal without SSH: `archive_command` (pgBackRest `archive-push`, Barman `barman-wal-archive`, WAL-G `wal-push`, pg_probackup); then the tool's own status over SSH (`pgbackrest info --output=json` and equivalents) and `pg_dump` jobs in cron. Barman usually runs on a separate backup server; Keystone does not connect to it. The backup check then ends INSUFFICIENT_EVIDENCE — never healthy — with the reason "Backups are managed by Barman on a separate server; verify them there."
 5. **Conscious choices** (`synchronous_commit = off`, `archive_mode = off` and similar) are WARNING by default. A customer's explicit acceptance ("accepted risk" with a reason) belongs to the finding lifecycle (MVP Plan Phase 2).
+
+6. **Version checks deferred** (2026-10-21, Hasan): PG-LIFE-001/002 need current release data. Many customer servers have no internet access, and a manually maintained list creates recurring work. Moved to P3; revisit with a release table shipped with Keystone updates.
 
 ## Open questions for review
 

@@ -772,5 +772,76 @@ class ConnectionCapacityTests(unittest.TestCase):
         self.assertEqual(finding["subject_identifier"], "pg-1")
 
 
+class SimpleP1RuleTests(unittest.TestCase):
+    def test_mxid_boundaries(self):
+        thresholds = [threshold("WARNING", 1_500_000_000, "MULTIXACT"),
+                      threshold("CRITICAL", 1_800_000_000, "MULTIXACT")]
+        rows = [{"snapshot_id": i, "captured_at": NOW, "database_name": f"db{i}", "mxid_age": age}
+                for i, age in enumerate((1_499_999_999, 1_500_000_000, 1_800_000_000, None))]
+        findings = engine.evaluate_database_mxid_wraparound(rows, rule(), thresholds)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("db1", "WARNING"), ("db2", "CRITICAL")])
+        self.assertEqual(findings[0]["observed_unit"], "MULTIXACT")
+
+    def archiving(self, **values):
+        evidence = {"PG_CONFIGURATION_SNAPSHOT": settings(1, "pg-1", **values)
+                    + settings(2, "pg-2", archive_mode="off"),
+                    "PG_INSTANCE_INVENTORY": inventory(("pg-1", "10.0.0.1", False),
+                                                       ("pg-2", "10.0.0.2", True))}
+        evidence["PG_INSTANCE_INVENTORY"][0]["target_id"] = 1
+        evidence["PG_INSTANCE_INVENTORY"][1]["target_id"] = 2
+        return engine.evaluate_wal_archiving(evidence, rule(), [])
+
+    def test_archiving_judged_on_the_primary_only(self):
+        self.assertEqual(self.archiving(archive_mode="on", archive_command="pgbackrest archive-push %p",
+                                        archive_library=""), [])
+
+    def test_archiving_off_is_a_warning(self):
+        findings = self.archiving(archive_mode="off", archive_command="(disabled)", archive_library="")
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("pg-1: archive_mode", "WARNING")])
+
+    def test_archiving_on_without_command_is_critical(self):
+        findings = self.archiving(archive_mode="on", archive_command="", archive_library="")
+        self.assertEqual(severities(findings), ["CRITICAL"])
+        self.assertEqual(findings[0]["template_values"]["value"], "empty while archive_mode is on")
+        self.assertEqual(findings[0]["details"]["archive_mode"], "on")
+
+    def test_archive_library_counts_as_configured(self):
+        self.assertEqual(self.archiving(archive_mode="always", archive_command="",
+                                        archive_library="basic_archive"), [])
+
+    def test_security_settings_per_node(self):
+        rows = settings(1, "pg-1", ssl="off", password_encryption="md5") + \
+            settings(2, "pg-2", ssl="on", password_encryption="scram-sha-256")
+        ssl = engine.RULE_EVALUATORS["PG-SEC-003"](rows, rule("WARNING"), [])
+        md5 = engine.RULE_EVALUATORS["PG-SEC-002"](rows, rule("WARNING"), [])
+        self.assertEqual([f["subject_identifier"] for f in ssl], ["pg-1: ssl"])
+        self.assertEqual([f["subject_identifier"] for f in md5], ["pg-1: password_encryption"])
+
+
+class CurrentEvidenceTests(unittest.TestCase):
+    REQUIREMENT = {"max_age_seconds": 600, "is_required": True}
+
+    def test_each_row_is_judged_on_its_own_age(self):
+        rows = [{"captured_at": NOW - timedelta(seconds=60)},
+                {"captured_at": NOW - timedelta(seconds=601)}]
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW), rows[:1])
+
+    def test_rows_of_targets_the_health_check_did_not_collect_are_dropped(self):
+        rows = [{"target_id": 1, "captured_at": NOW}, {"target_id": 2, "captured_at": NOW}]
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW, "PG_HOST_SNAPSHOT",
+                                             {(1, "PG_HOST_SNAPSHOT")}), rows[1:])
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW, "PG_HOST_SNAPSHOT",
+                                             {(1, "PG_CONFIGURATION_SNAPSHOT")}), rows)
+
+    def test_freshest_primary_wins_after_a_failover(self):
+        nodes = [{"node_name": "old", "in_recovery": False, "captured_at": NOW - timedelta(hours=1)},
+                 {"node_name": "new", "in_recovery": False, "captured_at": NOW},
+                 {"node_name": "replica", "in_recovery": True, "captured_at": NOW}]
+        self.assertEqual(engine.current_primary(nodes)["node_name"], "new")
+        self.assertIsNone(engine.current_primary(nodes[2:]))
+
+
 if __name__ == "__main__":
     unittest.main()

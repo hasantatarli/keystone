@@ -170,9 +170,25 @@ class HealthCheckTests(unittest.TestCase):
             "JOIN keystone.assessment_definition ad USING (assessment_id) "
             "WHERE ar.health_check_id = %s ORDER BY 1", (check_id,)).fetchall()
         self.assertEqual([r["assessment_key"] for r in runs],
-                         ["PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH", "PG_CONNECTION_HEALTH",
-                          "PG_REPLICATION_HEALTH", "PG_TRANSACTION_HEALTH"])
+                         ["PG_BACKUP_HEALTH", "PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH",
+                          "PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH", "PG_SECURITY_HEALTH",
+                          "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
+
+    def test_evidence_from_before_the_check_is_not_judged(self):
+        # Lab 2026-10-21: postgre-1 was unreachable; its 1.5 h old settings produced findings.
+        self.conn.execute(
+            "INSERT INTO postgresql.configuration_snapshot (target_id, captured_at, setting_name, "
+            "setting_value) VALUES (%s, now() - interval '90 minutes', 'ssl', 'off')", (self.node1,))
+        self.conn.commit()
+        self.failing = {"PG_CONFIGURATION_SNAPSHOT"}     # unreachable in this check
+        check_id = self.run_check(assessment_key="PG_SECURITY_HEALTH")
+        row = self.conn.execute(
+            "SELECT res.outcome, res.finding_count FROM keystone.assessment_result res "
+            "JOIN keystone.assessment_run ar USING (assessment_run_id) "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE ar.health_check_id = %s AND rd.rule_key = 'PG-SEC-003'", (check_id,)).fetchone()
+        self.assertEqual((row["outcome"], row["finding_count"]), ("INSUFFICIENT_EVIDENCE", 0))
 
     def test_single_assessment_collects_only_its_evidence(self):
         check_id = self.run_check(assessment_key="PG_CONNECTION_HEALTH")

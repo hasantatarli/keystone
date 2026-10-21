@@ -160,6 +160,34 @@ EXPECTED_RULES = {
                      "PG_CONFIGURATION_SNAPSHOT": (True, 86400),
                      "PG_INSTANCE_INVENTORY": (True, 3600)},
     },
+    "PG-TRAN-004": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("1500000000"), "MULTIXACT"),
+            "CRITICAL": (Decimal("1800000000"), "MULTIXACT"),
+        },
+        "evidence": {"PG_TRANSACTION_WRAPAROUND": (True, 86400)},
+    },
+    "PG-BKP-002": {
+        "assessment": "PG_BACKUP_HEALTH",
+        "default_severity": None,
+        "thresholds": {},
+        "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400),
+                     "PG_INSTANCE_INVENTORY": (True, 3600)},
+    },
+    "PG-SEC-002": {
+        "assessment": "PG_SECURITY_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
+    },
+    "PG-SEC-003": {
+        "assessment": "PG_SECURITY_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

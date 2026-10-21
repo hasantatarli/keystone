@@ -154,7 +154,8 @@ class AssessmentRunTests(unittest.TestCase):
         run_id = self.run_engine()
         results = self.results(run_id)
 
-        self.assertEqual(set(results), {"PG-TRAN-001", "PG-TRAN-002", "PG-TRAN-003"})
+        self.assertEqual(set(results), {"PG-TRAN-001", "PG-TRAN-002", "PG-TRAN-003", "PG-TRAN-004"})
+        self.assertEqual(results["PG-TRAN-004"]["outcome"], "INSUFFICIENT_EVIDENCE")
         self.assertEqual(results["PG-TRAN-001"]["outcome"], "HEALTHY")
         self.assertEqual(results["PG-TRAN-003"]["outcome"], "HEALTHY")
         # No wraparound evidence was collected: not healthy, not assessed.

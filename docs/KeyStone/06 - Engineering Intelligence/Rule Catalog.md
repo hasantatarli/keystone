@@ -46,7 +46,9 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 
 ## Common semantics
 
-- **Latest snapshot only.** Loaders read the most recent captured snapshot for the target. Rules do not yet use history.
+- **Latest snapshot only.** Loaders read the most recent captured snapshot for the target (for NODE-scoped evidence, per node). Rules do not yet use history.
+- **Every row is judged on its own age** (2026-10-21). Rows older than the rule's freshness limit are dropped before evaluation, so a node whose collection failed is not judged on its last snapshot. A health check additionally ignores the rows of every target and collector it failed to collect (`health_check_collection` status other than SUCCESS / PARTIAL_SUCCESS): it judges only what it collected itself. The report shows context on the same basis. Collection status, not capture time, decides, because capture times come from the target clocks (lab: VM clocks 3 minutes behind the laptop). Lab case: postgre-1 was unreachable and its 1.5-hour-old settings produced findings.
+- **The current primary** is the node not in recovery with the newest instance inventory; after a failover the old primary's row can linger.
 - **The observed value is what was measured; thresholds only decide the severity** (Hasan, 2026-10-21). A finding never reports a derived or adjusted figure as if it had been measured. When a rule compares an adjusted value (for example lag beyond an intended delay, usage beyond a reserve), the finding shows the measured value, the adjustment and the compared part separately. Applies to every rule.
 - **Thresholds are inclusive.** A value equal to a threshold reaches it (`>=`).
 - **Highest reached threshold wins**, independent of the order thresholds are stored or loaded. Thresholds with a different unit are ignored.
@@ -413,6 +415,43 @@ Unit tests; repository test runs the real configuration collector on a disposabl
 **Known limitations**  
 Replicas are not evaluated (connections are collected through the SYSTEM connection, which reaches the primary). Background workers and replication connections are not counted against the limit here.
 
+# Batch of 2026-10-21 — MultiXact, WAL archiving, security (V038)
+
+## PG-TRAN-004 — Database MultiXact Wraparound Risk (PG_TRANSACTION_HEALTH, topic MAINTENANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TRANSACTION_WRAPAROUND` (`mxid_age` per database), required, 86400 s |
+| Thresholds | WARNING ≥ 1.5 billion, CRITICAL ≥ 1.8 billion (unit MULTIXACT) |
+| Subject | DATABASE |
+
+Known limitations: relative to `autovacuum_multixact_freeze_max_age` not evaluated; MultiXact member space exhaustion is not visible in this evidence.
+
+## PG-BKP-002 — WAL Archiving (PG_BACKUP_HEALTH, topic BACKUP)
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT` (86400 s) and `PG_INSTANCE_INVENTORY` (3600 s), required |
+| Condition | On the primary: `archive_mode = off` — WARNING (no point-in-time recovery; may be a conscious choice); `archive_mode` on / always with empty `archive_command` and `archive_library` — CRITICAL (WAL accumulates until the disk is full) |
+| Subject | SETTING on the primary |
+
+Known limitations: whether archiving succeeds (`pg_stat_archiver`) is PG-BKP-001 and needs a new collector. Backups themselves are detected later by method (catalogue decision 4).
+
+## PG-SEC-002 — MD5 Password Encryption / PG-SEC-003 — SSL Disabled (PG_SECURITY_HEALTH, topic SECURITY)
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT`, required, 86400 s |
+| Condition | `password_encryption = md5`; `ssl = off`; per node |
+| Severity | WARNING |
+
+Known limitations: roles that still have md5 hashes need `pg_authid` (superuser) and are not seen; `pg_hba.conf` rules (hostssl, md5, trust) are PG-SEC-005.
+
+**Verification (V038)**  
+Unit tests for every condition and boundary. Lab: pending.
+
+---
+
 # Adding a Rule
 
 Texts (V029, V030, V034): every rule has NAME, HEALTHY, MEANING, CAUSES, IMPACT and RECOMMENDATION in every Dictionary language. MEANING is one statement of what is happening; CAUSES and RECOMMENDATION are short lists (one item per line starting with "- "), rendered as bullets, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
@@ -432,7 +471,6 @@ Not implemented; recorded so they are not lost.
 | Candidate | Source | Evidence available |
 | --- | --- | --- |
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
-| MultiXact wraparound risk | PG-TRAN-002 limitation, roadmap PG-029 | Yes (`mxid_age`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
 | Dead tuple pressure, analyze freshness | 2026-09-21 evidence matrix | Yes (`PG_VACUUM_ANALYZE`); needs multi-parameter thresholds |
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |

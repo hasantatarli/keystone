@@ -15,13 +15,14 @@ can be e-mailed, opened offline and printed.
 """
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import html
 from pathlib import Path
 import re
 
 from repository.common.logging_config import configure_logging, get_logger
-from repository.intelligence.assessment_engine import data_mount, usage_percent
+from repository.intelligence.assessment_engine import (
+    CLOCK_SKEW_TOLERANCE_SECONDS, data_mount, usage_percent)
 from repository.worker import worker
 
 
@@ -95,7 +96,7 @@ TEXTS = {
         "detail_active": "Aktif", "detail_idle": "Boşta", "detail_idle_in_transaction": "Transaction içinde boşta", "detail_beyond_delay": "Bilinçli gecikmenin üzerindeki kısım",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_CONNECTION": "bağlantı",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -176,7 +177,7 @@ TEXTS = {
         "detail_active": "Active", "detail_idle": "Idle", "detail_idle_in_transaction": "Idle in transaction", "detail_beyond_delay": "Beyond the intended delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_CONNECTION": "connections",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -253,9 +254,12 @@ def load_report_data(conn, health_check_id):
         "WHERE hc.health_check_id = %s", (health_check_id,)).fetchone()
     if check is None:
         raise ValueError(f"Health check {health_check_id} does not exist.")
-    as_of = check["finished_at"] or datetime.now(timezone.utc)
-    # Context data only from this check: a report is a snapshot of that moment.
-    since = check["started_at"]
+    finished = check["finished_at"] or datetime.now(timezone.utc)
+    # Context only from what this check collected (filtered below by its collections);
+    # target clocks may differ from the repository's, so the window is generous and
+    # the collection status, not the time, decides.
+    since = check["started_at"] - timedelta(days=1)
+    as_of = finished + timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
 
     results = conn.execute(
         """
@@ -286,7 +290,8 @@ def load_report_data(conn, health_check_id):
         """, (health_check_id,)).fetchall()
 
     collections = conn.execute(
-        "SELECT c.collector_key, c.purpose, c.status, c.status_message, t.name AS target_name "
+        "SELECT c.target_id, c.collector_key, c.purpose, c.status, c.status_message, "
+        "t.name AS target_name "
         "FROM keystone.health_check_collection c JOIN keystone.target t USING (target_id) "
         "WHERE c.health_check_id = %s ORDER BY c.purpose DESC, c.collector_key, t.name",
         (health_check_id,)).fetchall()
@@ -349,9 +354,34 @@ def load_report_data(conn, health_check_id):
     dictionary = load_dictionary_texts(conn)
     conn.commit()
 
+    collected = {(c["target_id"], c["collector_key"]) for c in collections
+                 if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS")}
+    nodes = [only_collected(n, collected) for n in nodes]
+    storage = [s_ for s_ in storage if (s_["target_id"], "PG_HOST_SNAPSHOT") in collected]
+    if (check["target_id"], "PG_DATABASE_INVENTORY") not in collected:
+        databases = []
+
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
-            "databases": databases, "as_of": as_of, **dictionary}
+            "databases": databases, "as_of": finished, **dictionary}
+
+
+NODE_CONTEXT = {
+    "PG_INSTANCE_INVENTORY": ("server_address", "server_port", "server_version", "in_recovery",
+                              "postmaster_start_time"),
+    "PG_HOST_SNAPSHOT": ("hostname", "os_name", "os_version", "logical_cpu_count",
+                         "memory_total_bytes", "host_captured_at"),
+    "PG_CONFIGURATION_SNAPSHOT": ("data_directory",),
+}
+
+
+def only_collected(node, collected):
+    """A node row without the parts this check did not collect (no older data shown as current)."""
+    node = dict(node)
+    for key, fields in NODE_CONTEXT.items():
+        if (node["target_id"], key) not in collected:
+            node.update({field: None for field in fields})
+    return node
 
 
 # -----------------------------------------------------------------------------
@@ -392,8 +422,8 @@ def fmt_quantity(value, unit, t):
         return fmt_duration(value, t)
     if unit == "PERCENT":
         return t["percent"].format(n=f"{value:g}")
-    if unit == "TRANSACTION" and value >= 1e9:
-        return f"{value / 1e9:g} {t['billion']} {t['unit_TRANSACTION']}"
+    if unit in ("TRANSACTION", "MULTIXACT") and value >= 1e9:
+        return f"{value / 1e9:g} {t['billion']} {t['unit_' + unit]}"
     number = f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
     return f"{number} {t.get('unit_' + (unit or ''), unit or '')}".strip()
 
@@ -869,8 +899,18 @@ def render_topics(data, lang, t):
         elif status == "unknown":
             text = t["topic_unknown_text"]
         else:
-            text = "; ".join(rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
-                             for r in topic["results"] if r["outcome"] == "ATTENTION_REQUIRED")
+            # Problems first (name: what is happening, how many), then what was fine in this area.
+            problems = []
+            for r in topic["results"]:
+                if r["outcome"] != "ATTENTION_REQUIRED":
+                    continue
+                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
+                problems.append(
+                    f"{rule_text(data, r['rule_id'], lang, 'NAME', r['rule_name'])} "
+                    f"({count} {t['findings_word']}): "
+                    + first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
+            fine = [healthy_text(data, r, lang, t) for r in topic["results"] if r["outcome"] == "HEALTHY"]
+            text = " ".join(problems + fine)
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
                     f'{badge(status, t["topic_" + status])}<span class="text">{e(text)}</span></div>')
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
@@ -1058,7 +1098,8 @@ def render_results(data, lang, t):
             if r["outcome"] == "HEALTHY":
                 note = healthy_text(data, r, lang, t)
             elif r["outcome"] == "ATTENTION_REQUIRED":
-                note = threshold_line(r, t)
+                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
+                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',
