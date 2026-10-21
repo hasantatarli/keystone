@@ -828,11 +828,12 @@ class CurrentEvidenceTests(unittest.TestCase):
                 {"captured_at": NOW - timedelta(seconds=601)}]
         self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW), rows[:1])
 
-    def test_rows_before_the_health_check_are_dropped(self):
-        rows = [{"captured_at": NOW - timedelta(seconds=60)},
-                {"captured_at": NOW - timedelta(seconds=10)}]
-        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW,
-                                             evidence_since=NOW - timedelta(seconds=30)), rows[1:])
+    def test_rows_of_targets_the_health_check_did_not_collect_are_dropped(self):
+        rows = [{"target_id": 1, "captured_at": NOW}, {"target_id": 2, "captured_at": NOW}]
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW, "PG_HOST_SNAPSHOT",
+                                             {(1, "PG_HOST_SNAPSHOT")}), rows[1:])
+        self.assertEqual(engine.current_rows(rows, self.REQUIREMENT, NOW, "PG_HOST_SNAPSHOT",
+                                             {(1, "PG_CONFIGURATION_SNAPSHOT")}), rows)
 
     def test_freshest_primary_wins_after_a_failover(self):
         nodes = [{"node_name": "old", "in_recovery": False, "captured_at": NOW - timedelta(hours=1)},

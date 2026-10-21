@@ -254,10 +254,12 @@ def load_report_data(conn, health_check_id):
         "WHERE hc.health_check_id = %s", (health_check_id,)).fetchone()
     if check is None:
         raise ValueError(f"Health check {health_check_id} does not exist.")
-    as_of = check["finished_at"] or datetime.now(timezone.utc)
-    # Context data only from this check: a report is a snapshot of that moment.
-    # Same window as the assessments: target clocks may be slightly behind the repository's.
-    since = check["started_at"] - timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
+    finished = check["finished_at"] or datetime.now(timezone.utc)
+    # Context only from what this check collected (filtered below by its collections);
+    # target clocks may differ from the repository's, so the window is generous and
+    # the collection status, not the time, decides.
+    since = check["started_at"] - timedelta(days=1)
+    as_of = finished + timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)
 
     results = conn.execute(
         """
@@ -288,7 +290,8 @@ def load_report_data(conn, health_check_id):
         """, (health_check_id,)).fetchall()
 
     collections = conn.execute(
-        "SELECT c.collector_key, c.purpose, c.status, c.status_message, t.name AS target_name "
+        "SELECT c.target_id, c.collector_key, c.purpose, c.status, c.status_message, "
+        "t.name AS target_name "
         "FROM keystone.health_check_collection c JOIN keystone.target t USING (target_id) "
         "WHERE c.health_check_id = %s ORDER BY c.purpose DESC, c.collector_key, t.name",
         (health_check_id,)).fetchall()
@@ -351,9 +354,34 @@ def load_report_data(conn, health_check_id):
     dictionary = load_dictionary_texts(conn)
     conn.commit()
 
+    collected = {(c["target_id"], c["collector_key"]) for c in collections
+                 if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS")}
+    nodes = [only_collected(n, collected) for n in nodes]
+    storage = [s_ for s_ in storage if (s_["target_id"], "PG_HOST_SNAPSHOT") in collected]
+    if (check["target_id"], "PG_DATABASE_INVENTORY") not in collected:
+        databases = []
+
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
-            "databases": databases, "as_of": as_of, **dictionary}
+            "databases": databases, "as_of": finished, **dictionary}
+
+
+NODE_CONTEXT = {
+    "PG_INSTANCE_INVENTORY": ("server_address", "server_port", "server_version", "in_recovery",
+                              "postmaster_start_time"),
+    "PG_HOST_SNAPSHOT": ("hostname", "os_name", "os_version", "logical_cpu_count",
+                         "memory_total_bytes", "host_captured_at"),
+    "PG_CONFIGURATION_SNAPSHOT": ("data_directory",),
+}
+
+
+def only_collected(node, collected):
+    """A node row without the parts this check did not collect (no older data shown as current)."""
+    node = dict(node)
+    for key, fields in NODE_CONTEXT.items():
+        if (node["target_id"], key) not in collected:
+            node.update({field: None for field in fields})
+    return node
 
 
 # -----------------------------------------------------------------------------
@@ -871,8 +899,18 @@ def render_topics(data, lang, t):
         elif status == "unknown":
             text = t["topic_unknown_text"]
         else:
-            text = "; ".join(rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
-                             for r in topic["results"] if r["outcome"] == "ATTENTION_REQUIRED")
+            # Problems first (name: what is happening, how many), then what was fine in this area.
+            problems = []
+            for r in topic["results"]:
+                if r["outcome"] != "ATTENTION_REQUIRED":
+                    continue
+                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
+                problems.append(
+                    f"{rule_text(data, r['rule_id'], lang, 'NAME', r['rule_name'])} "
+                    f"({count} {t['findings_word']}): "
+                    + first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
+            fine = [healthy_text(data, r, lang, t) for r in topic["results"] if r["outcome"] == "HEALTHY"]
+            text = " ".join(problems + fine)
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
                     f'{badge(status, t["topic_" + status])}<span class="text">{e(text)}</span></div>')
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)

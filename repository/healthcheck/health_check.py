@@ -8,7 +8,6 @@ health check; its rules end INSUFFICIENT_EVIDENCE and the reason is kept.
     python -m repository.healthcheck.health_check --target 1
 """
 
-from datetime import timedelta
 import argparse
 import getpass
 import time
@@ -189,6 +188,18 @@ def record_collection(conn, health_check_id, target_id, key, purpose,
     ).fetchone()["health_check_collection_id"]
 
 
+COLLECTED_STATUSES = ("SUCCESS", "PARTIAL_SUCCESS")
+
+
+def uncollected_evidence(conn, health_check_id):
+    """{(target_id, collector_key)} this health check did not collect."""
+    rows = conn.execute(
+        "SELECT target_id, collector_key FROM keystone.health_check_collection "
+        "WHERE health_check_id = %s AND status <> ALL(%s)",
+        (health_check_id, list(COLLECTED_STATUSES))).fetchall()
+    return {(r["target_id"], r["collector_key"]) for r in rows}
+
+
 # -----------------------------------------------------------------------------
 # Waiting
 # -----------------------------------------------------------------------------
@@ -261,8 +272,6 @@ def run_health_check(connect, target_id, assessment_key=None,
             (target_id, requested_by),
         ).fetchone()
         health_check_id = row["health_check_id"]
-        evidence_since = row["started_at"] - timedelta(
-            seconds=assessment_engine.CLOCK_SKEW_TOLERANCE_SECONDS)
         conn.commit()
 
     logger.info("Health check %s: %s (%s node(s)), assessments: %s.",
@@ -321,13 +330,16 @@ def run_health_check(connect, target_id, assessment_key=None,
             conn.commit()
 
         # 3. Assess the SYSTEM target with the evidence now in the repository.
+        # A health check judges only what it collected: older rows of failed targets are ignored.
+        with connect() as conn:
+            uncollected = uncollected_evidence(conn, health_check_id)
         for key in assessment_keys:
             with connect() as conn:
                 try:
                     # A health check judges only what it collected itself.
                     assessment_engine.run_assessment(conn, key, target_id,
                                                      health_check_id=health_check_id,
-                                                     evidence_since=evidence_since)
+                                                     uncollected=uncollected)
                 except Exception:
                     logger.error("Health check %s: assessment %s failed.", health_check_id, key,
                                  exc_info=True)

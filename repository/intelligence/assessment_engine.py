@@ -1357,23 +1357,23 @@ def highest_severity(findings):
 CLOCK_SKEW_TOLERANCE_SECONDS = 120
 
 
-def current_rows(rows, requirement, evaluation_time, evidence_since=None):
-    """Rows young enough to judge, each on its own capture time.
+def current_rows(rows, requirement, evaluation_time, source=None, uncollected=None):
+    """Rows that describe the present, each judged on its own capture time.
 
     A node whose collection failed keeps its last snapshot in the repository;
-    that snapshot must not be judged as the node's current state.
+    that snapshot must not be judged as the node's current state. uncollected
+    is {(target_id, evidence_source)} a health check failed to collect.
     """
     max_age = requirement["max_age_seconds"]
     return [r for r in rows
             if (max_age is None or (evaluation_time - r["captured_at"]).total_seconds() <= max_age)
-            and (evidence_since is None or r["captured_at"] >= evidence_since)]
+            and (r.get("target_id"), source) not in (uncollected or ())]
 
 
-def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, evidence_since=None):
+def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncollected=None):
     """Evaluate one rule -> (outcome, findings, reason).
 
     Missing/stale evidence returns INSUFFICIENT_EVIDENCE; real problems raise.
-    evidence_since (a health check's start) excludes evidence collected before it.
     """
     evaluator = RULE_EVALUATORS.get(rule["rule_key"])
     if evaluator is None:
@@ -1414,14 +1414,14 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, eviden
             evidence_cache[evidence_source] = loader(conn, target_id)
 
         loaded = evidence_cache[evidence_source]
-        rows = current_rows(loaded, requirement, evaluation_time, evidence_since)
+        rows = current_rows(loaded, requirement, evaluation_time, evidence_source, uncollected)
         valid, reason = validate_evidence_freshness(
             rows or loaded,
             requirement,
             evaluation_time,
         )
         if valid and not rows and loaded:
-            # Only rows from before this health check: they were not collected now.
+            # Only rows of targets this health check could not collect.
             valid, reason = validate_evidence_freshness([], requirement, evaluation_time)
 
         if not valid:
@@ -1487,7 +1487,7 @@ def run_assessment(
     evaluation_time=None,
     scheduled_at=None,
     health_check_id=None,
-    evidence_since=None,
+    uncollected=None,
 ):
     """Run all enabled rules of one assessment for one target; returns run id.
 
@@ -1534,7 +1534,7 @@ def run_assessment(
                         target_id,
                         evaluation_time,
                         evidence_cache,
-                        evidence_since,
+                        uncollected,
                     )
 
                     for finding in findings:

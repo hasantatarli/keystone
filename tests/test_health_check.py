@@ -181,6 +181,7 @@ class HealthCheckTests(unittest.TestCase):
             "INSERT INTO postgresql.configuration_snapshot (target_id, captured_at, setting_name, "
             "setting_value) VALUES (%s, now() - interval '90 minutes', 'ssl', 'off')", (self.node1,))
         self.conn.commit()
+        self.failing = {"PG_CONFIGURATION_SNAPSHOT"}     # unreachable in this check
         check_id = self.run_check(assessment_key="PG_SECURITY_HEALTH")
         row = self.conn.execute(
             "SELECT res.outcome, res.finding_count FROM keystone.assessment_result res "
