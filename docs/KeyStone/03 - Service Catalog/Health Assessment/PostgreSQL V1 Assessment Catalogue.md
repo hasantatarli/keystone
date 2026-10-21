@@ -45,10 +45,10 @@ Sources combined:
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-CONF-001 | Pending restart | A setting was changed but needs a restart (`pending_restart`) — WARNING | Ready: PG-002 | DB parameters | P1 |
-| PG-CONF-002 | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING (may be a conscious choice) | Ready: PG-002 | DB parameters | P1 |
+| **PG-CONF-001** | Pending restart | A setting was changed but needs a restart (`pending_restart`) — WARNING | Ready: PG-002 | DB parameters | Done |
+| **PG-CONF-002** | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING (may be a conscious choice) | Ready: PG-002 | DB parameters | Done |
 | PG-CONF-003 | Settings far from the recommendation for this server | Current value far outside the recommended range computed from the server's facts (memory, CPUs, storage, connections, workload); first: memory settings. Recommendations are shown for every covered setting, findings only for large deviations | Ready: PG-002 + host memory/CPU · Gap: storage type, workload type | Memory setting | P1 |
-| PG-CONF-004 | Autovacuum disabled | `autovacuum = off` — CRITICAL; per-table `autovacuum_enabled = false` on large tables — WARNING | Ready (global): PG-002 · Gap (per table): reloptions in PG-005 | Vacuum & Statistics | P1 |
+| **PG-CONF-004** | Autovacuum disabled | `autovacuum = off` — CRITICAL; per-table `autovacuum_enabled = false` on large tables — WARNING | Ready (global): PG-002 · Gap (per table): reloptions in PG-005 | Vacuum & Statistics | Done |
 | PG-CONF-005 | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later | Ready: PG-002 | pg_stat_statements extension | P2 |
 | PG-CONF-006 | No safety timeouts | `idle_in_transaction_session_timeout = 0` while PG-TRAN-001 findings exist — recommendation, not a stand-alone finding | Ready: PG-002 | — | P3 |
 
@@ -57,7 +57,7 @@ Sources combined:
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | **PG-CONN-001** | Aborted idle transaction connections | ≥ 1 session idle in an aborted transaction | Ready: PG-008 | active sessions monitor | Done |
-| PG-CONN-002 | Connection capacity | Client connections ≥ 80 % of `max_connections − superuser_reserved_connections` — WARNING, ≥ 90 % — CRITICAL | Ready: PG-008 + PG-002 | active sessions monitor | P1 |
+| **PG-CONN-002** | Connection capacity | Client connections ≥ 80 % of `max_connections − superuser_reserved_connections` — WARNING, ≥ 90 % — CRITICAL | Ready: PG-008 + PG-002 | active sessions monitor | Done |
 | PG-CONN-003 | Database connection limit | A database at ≥ 90 % of its own `datconnlimit` | Ready: PG-003 + PG-008 | List of databases | P3 |
 | PG-CONN-004 | Many idle connections without pooling | Idle share high and `max_connections` large — INFO with explanation only (constraint: a breakdown alone is not proof) | Ready: PG-008 | — | P3 |
 

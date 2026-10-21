@@ -359,6 +359,60 @@ Unit tests: boundaries, threshold order, mount selection, independent nodes, mis
 
 ---
 
+# PG_CONFIGURATION_HEALTH — Configuration Health
+
+All three rules read the latest `PG_CONFIGURATION_SNAPSHOT` (`pg_settings`) of every node (freshness 86400 s) and produce one finding per node and setting. Only server-level values are visible; per-user, per-database and per-session values are not.
+
+## PG-CONF-001 — Pending Restart
+
+| | |
+| --- | --- |
+| Condition | `pending_restart = true` |
+| Severity | WARNING |
+| Details | Node, setting, running value, source |
+
+**Known limitations**  
+The new (not yet active) value is in `pg_file_settings`, which is not collected; the finding shows the running value.
+
+## PG-CONF-002 — Unsafe Durability Settings
+
+| | |
+| --- | --- |
+| Condition | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING |
+| Severity | Per setting (rule has no default severity) |
+
+**Design notes**  
+fsync and full_page_writes off can corrupt the database after a crash. synchronous_commit off loses only the last commits and is a conscious choice in some systems; WARNING per the review decision of 2026-10-20. Accepted risks belong to the finding lifecycle (Phase 2).
+
+## PG-CONF-004 — Autovacuum Disabled
+
+| | |
+| --- | --- |
+| Condition | `autovacuum = off`, or `track_counts = off` (autovacuum cannot work without it) |
+| Severity | CRITICAL |
+
+**Known limitations**  
+Per-table `autovacuum_enabled = false` is not visible yet (needs reloptions in PG-005).
+
+**Verification (PG-CONF-001/002/004)**  
+Unit tests; repository test runs the real configuration collector on a disposable PostgreSQL, the worker persistence and the assessment. Lab: pending.
+
+---
+
+# PG_CONNECTION_HEALTH — additional rule
+
+## PG-CONN-002 — Connection Capacity
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONNECTION_ACTIVITY` (primary, 600 s); `PG_CONFIGURATION_SNAPSHOT` (86400 s) and `PG_INSTANCE_INVENTORY` (3600 s) to find the primary's limits; all required |
+| Metric | client backends / (`max_connections` − `superuser_reserved_connections` − `reserved_connections`) in percent |
+| Thresholds | WARNING ≥ 80 %, CRITICAL ≥ 90 % |
+| Details | Connections in use, max_connections, reserved, usable, active / idle / idle in transaction |
+
+**Known limitations**  
+Replicas are not evaluated (connections are collected through the SYSTEM connection, which reaches the primary). Background workers and replication connections are not counted against the limit here.
+
 # Adding a Rule
 
 Texts (V029, V030, V034): every rule has NAME, HEALTHY, MEANING, CAUSES, IMPACT and RECOMMENDATION in every Dictionary language. MEANING is one statement of what is happening; CAUSES and RECOMMENDATION are short lists (one item per line starting with "- "), rendered as bullets, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
@@ -380,9 +434,7 @@ Not implemented; recorded so they are not lost.
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
 | MultiXact wraparound risk | PG-TRAN-002 limitation, roadmap PG-029 | Yes (`mxid_age`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
-| Connection capacity vs `max_connections` | 2026-09-21 evidence matrix | Yes (connection activity + configuration) |
 | Dead tuple pressure, analyze freshness | 2026-09-21 evidence matrix | Yes (`PG_VACUUM_ANALYZE`); needs multi-parameter thresholds |
-| Pending restart configuration | 2026-09-21 evidence matrix | Yes (`PG_CONFIGURATION_SNAPSHOT`) |
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
 | Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
 | Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |

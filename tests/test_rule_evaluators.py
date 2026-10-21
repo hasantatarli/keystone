@@ -699,5 +699,78 @@ class SyncStandbyMissingTests(unittest.TestCase):
         self.assertEqual(self.evaluate([{"sync_state": "quorum"}], "ANY 1 (*)"), [])
 
 
+def settings(node_id, node_name, **values):
+    return [{"target_id": node_id, "node_name": node_name, "captured_at": NOW,
+             "setting_name": name, "setting_value": str(value), "unit": None,
+             "source": "configuration file", "pending_restart": False}
+            for name, value in values.items()]
+
+
+class ConfigurationRuleTests(unittest.TestCase):
+    def test_pending_restart_per_node_and_setting(self):
+        rows = settings(1, "pg-1", shared_buffers="16384") + settings(2, "pg-2", shared_buffers="16384")
+        rows[1]["pending_restart"] = True
+        findings = engine.evaluate_pending_restart(rows, rule("WARNING"), [])
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("pg-2: shared_buffers", "WARNING")])
+        self.assertEqual(findings[0]["details"]["value"], "16384")
+
+    def test_unsafe_durability_severities(self):
+        rows = settings(1, "pg-1", fsync="off", full_page_writes="off", synchronous_commit="off")
+        findings = engine.evaluate_unsafe_durability(rows, rule(), [])
+        self.assertEqual({f["details"]["setting"]: f["severity"] for f in findings},
+                         {"fsync": "CRITICAL", "full_page_writes": "CRITICAL",
+                          "synchronous_commit": "WARNING"})
+
+    def test_safe_durability_values(self):
+        rows = settings(1, "pg-1", fsync="on", full_page_writes="on", synchronous_commit="local")
+        self.assertEqual(engine.evaluate_unsafe_durability(rows, rule(), []), [])
+
+    def test_autovacuum_or_track_counts_off(self):
+        rows = settings(1, "pg-1", autovacuum="off", track_counts="on") + \
+            settings(2, "pg-2", autovacuum="on", track_counts="off")
+        findings = engine.evaluate_autovacuum_disabled(rows, rule("CRITICAL"), [])
+        self.assertEqual(sorted(f["subject_identifier"] for f in findings),
+                         ["pg-1: autovacuum", "pg-2: track_counts"])
+
+
+CONNECTION_THRESHOLDS = [threshold("WARNING", 80, "PERCENT"), threshold("CRITICAL", 90, "PERCENT")]
+
+
+class ConnectionCapacityTests(unittest.TestCase):
+    def evaluate(self, connections, max_connections=100, superuser=3, reserved=None):
+        values = {"max_connections": max_connections, "superuser_reserved_connections": superuser}
+        if reserved is not None:
+            values["reserved_connections"] = reserved
+        evidence = {
+            "PG_CONNECTION_ACTIVITY": [{"snapshot_id": 1, "target_id": 9, "captured_at": NOW,
+                                        "total_client_connections": connections,
+                                        "active_connections": 5, "idle_connections": connections - 5,
+                                        "idle_in_transaction_connections": 0}],
+            "PG_CONFIGURATION_SNAPSHOT": settings(1, "pg-1", **values) + settings(2, "pg-2", max_connections=500),
+            "PG_INSTANCE_INVENTORY": inventory(("pg-1", "10.0.0.1", False), ("pg-2", "10.0.0.2", True)),
+        }
+        evidence["PG_INSTANCE_INVENTORY"][0]["target_id"] = 1
+        evidence["PG_INSTANCE_INVENTORY"][1]["target_id"] = 2
+        return engine.evaluate_connection_capacity(evidence, rule(), CONNECTION_THRESHOLDS)
+
+    def test_boundaries_against_usable_slots_of_the_primary(self):
+        self.assertEqual(self.evaluate(77), [])                    # 77 / 97 = 79.4 %
+        self.assertEqual(severities(self.evaluate(78)), ["WARNING"])     # 80.4 %
+        self.assertEqual(severities(self.evaluate(88)), ["CRITICAL"])    # 90.7 %
+
+    def test_reserved_connections_are_not_usable(self):
+        finding = self.evaluate(80, reserved=5)[0]                 # 100 - 3 - 5 = 92
+        self.assertEqual(finding["details"]["usable_connections"], 92)
+        self.assertEqual(finding["details"]["reserved_connections"], 8)
+        self.assertEqual(finding["observed_value"], 87.0)
+
+    def test_finding_shows_count_and_limit(self):
+        finding = self.evaluate(90)[0]
+        self.assertEqual(finding["template_values"], {"connections": 90, "usable": 97, "percent": "92.8"})
+        self.assertEqual(finding["details"]["max_connections"], 100)
+        self.assertEqual(finding["subject_identifier"], "pg-1")
+
+
 if __name__ == "__main__":
     unittest.main()

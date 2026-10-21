@@ -1020,6 +1020,111 @@ def evaluate_sync_standby_missing(rows, rule, thresholds):
     ]
 
 
+def settings_by_node(rows):
+    """{target_id: {setting_name: row}} from configuration snapshot rows."""
+    nodes = {}
+    for row in rows:
+        nodes.setdefault(row["target_id"], {})[row["setting_name"]] = row
+    return nodes
+
+
+def setting_finding(severity, row):
+    """A finding about one setting on one node."""
+    return {"severity": severity, "snapshot_id": None,
+            "template_values": {"node_name": row["node_name"], "setting": row["setting_name"],
+                                "value": row["setting_value"]},
+            "observed_value": None, "observed_unit": None, "subject_type": "SETTING",
+            "subject_identifier": f"{row['node_name']}: {row['setting_name']}",
+            "details": {"node": row["node_name"], "setting": row["setting_name"],
+                        "value": row["setting_value"], "setting_source": row.get("source"),
+                        "captured_at": iso(row.get("captured_at"))}}
+
+
+def evaluate_pending_restart(rows, rule, thresholds):
+    """PG-CONF-001: settings changed in the configuration but waiting for a restart."""
+    findings = []
+    for row in rows:
+        if not row["pending_restart"]:
+            continue
+        findings.append(setting_finding(rule["default_severity"], row))
+    return findings
+
+
+# Durability settings: value that is unsafe -> severity (conscious choices are WARNING).
+UNSAFE_DURABILITY = {
+    "fsync": ("off", "CRITICAL"),
+    "full_page_writes": ("off", "CRITICAL"),
+    "synchronous_commit": ("off", "WARNING"),
+}
+
+
+def evaluate_unsafe_durability(rows, rule, thresholds):
+    """PG-CONF-002: settings that trade crash safety for speed, per node."""
+    findings = []
+    for row in rows:
+        unsafe = UNSAFE_DURABILITY.get(row["setting_name"])
+        if unsafe is None or row["setting_value"] != unsafe[0]:
+            continue
+        findings.append(setting_finding(unsafe[1], row))
+    return findings
+
+
+def evaluate_autovacuum_disabled(rows, rule, thresholds):
+    """PG-CONF-004: autovacuum off, or track_counts off (autovacuum cannot work without it)."""
+    findings = []
+    for row in rows:
+        if row["setting_name"] in ("autovacuum", "track_counts") and row["setting_value"] == "off":
+            findings.append(setting_finding(rule["default_severity"], row))
+    return findings
+
+
+def usable_connections(settings):
+    """max_connections minus the slots reserved for superusers and pg_use_reserved_connections."""
+    def number(name):
+        row = settings.get(name)
+        try:
+            return int(row["setting_value"]) if row else 0
+        except (TypeError, ValueError):
+            return 0
+    maximum = number("max_connections")
+    reserved = number("superuser_reserved_connections") + number("reserved_connections")
+    return maximum, reserved, maximum - reserved
+
+
+def evaluate_connection_capacity(evidence, rule, thresholds):
+    """PG-CONN-002: client connections on the primary against its usable connection slots."""
+    activity = evidence["PG_CONNECTION_ACTIVITY"]
+    nodes = settings_by_node(evidence["PG_CONFIGURATION_SNAPSHOT"])
+    primary = next((n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"] is False), None)
+    settings = nodes.get(primary["target_id"]) if primary else None
+    if not activity or not settings:
+        return []
+    maximum, reserved, usable = usable_connections(settings)
+    if usable <= 0:
+        return []
+    row = activity[0]
+    connections = row["total_client_connections"] or 0
+    percent = round(100 * connections / usable, 1)
+    matched_threshold = match_threshold(percent, thresholds, "PERCENT")
+    if matched_threshold is None:
+        return []
+    return [{
+        "severity": matched_threshold["severity"],
+        "snapshot_id": row["snapshot_id"],
+        "template_values": {"connections": connections, "usable": usable, "percent": f"{percent:g}"},
+        "observed_value": percent,
+        "observed_unit": "PERCENT",
+        "subject_type": "SYSTEM",
+        "subject_identifier": primary["node_name"],
+        "details": {"node": primary["node_name"], "connections": connections,
+                    "max_connections": maximum, "reserved_connections": reserved,
+                    "usable_connections": usable, "active": row["active_connections"],
+                    "idle": row["idle_connections"],
+                    "idle_in_transaction": row["idle_in_transaction_connections"],
+                    "captured_at": iso(row["captured_at"])},
+    }]
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
@@ -1112,6 +1217,10 @@ RULE_EVALUATORS = {
     "PG-REP-004": evaluate_replica_not_streaming,
     "PG-REP-005": evaluate_inactive_replication_slot,
     "PG-REP-006": evaluate_sync_standby_missing,
+    "PG-CONF-001": evaluate_pending_restart,
+    "PG-CONF-002": evaluate_unsafe_durability,
+    "PG-CONF-004": evaluate_autovacuum_disabled,
+    "PG-CONN-002": evaluate_connection_capacity,
 }
 
 
