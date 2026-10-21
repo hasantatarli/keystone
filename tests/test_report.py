@@ -382,6 +382,32 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("<li>a</li>", report.render_text("- a\n- b"))
         self.assertEqual(report.render_text("One. Two.", short=True), "One.")
 
+    def test_configuration_rules_on_real_settings(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/configuration_snapshot.sql").read_text()
+        for node in (self.node1, self.node2):
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                rows = cur.execute(sql).fetchall()
+            worker.save_configuration_snapshot(self.conn, {"target_id": node}, rows)
+        # Defaults are safe; one node with synchronous_commit off is a conscious-choice WARNING.
+        self.conn.execute("UPDATE postgresql.configuration_snapshot SET setting_value = 'off' "
+                          "WHERE target_id = %s AND setting_name = 'synchronous_commit'", (self.node2,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_HEALTH", self.system)
+        outcomes = {r["rule_key"]: (r["outcome"], r["max_severity"]) for r in self.conn.execute(
+            "SELECT rd.rule_key, res.outcome, res.max_severity FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE res.assessment_run_id = (SELECT max(assessment_run_id) FROM keystone.assessment_run)"
+        ).fetchall()}
+        self.assertEqual(outcomes, {"PG-CONF-001": ("HEALTHY", None),
+                                    "PG-CONF-002": ("ATTENTION_REQUIRED", "WARNING"),
+                                    "PG-CONF-004": ("HEALTHY", None)})
+        text = self.conn.execute("SELECT finding_text FROM keystone.finding ORDER BY finding_id DESC "
+                                 "LIMIT 1").fetchone()["finding_text"]
+        self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
+
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
         self.conn.execute(

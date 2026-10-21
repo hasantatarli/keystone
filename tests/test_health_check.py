@@ -170,15 +170,17 @@ class HealthCheckTests(unittest.TestCase):
             "JOIN keystone.assessment_definition ad USING (assessment_id) "
             "WHERE ar.health_check_id = %s ORDER BY 1", (check_id,)).fetchall()
         self.assertEqual([r["assessment_key"] for r in runs],
-                         ["PG_CAPACITY_HEALTH", "PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH",
-                          "PG_TRANSACTION_HEALTH"])
+                         ["PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH", "PG_CONNECTION_HEALTH",
+                          "PG_REPLICATION_HEALTH", "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
     def test_single_assessment_collects_only_its_evidence(self):
         check_id = self.run_check(assessment_key="PG_CONNECTION_HEALTH")
         evidence = {k for (t, k), r in self.collections(check_id).items()
                     if r["purpose"] == "EVIDENCE"}
-        self.assertEqual(evidence, {"PG_CONNECTION_ACTIVITY"})
+        # PG-CONN-002 also needs the primary's configuration and the node roles.
+        self.assertEqual(evidence, {"PG_CONNECTION_ACTIVITY", "PG_CONFIGURATION_SNAPSHOT",
+                                    "PG_INSTANCE_INVENTORY"})
 
     def test_collector_past_the_wait_limit_is_not_waited_for(self):
         self.slow = {"PG_TRANSACTION_WRAPAROUND": 4}
