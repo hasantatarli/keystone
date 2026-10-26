@@ -295,12 +295,13 @@ def insert_finding(
                 observed_unit,
                 subject_type,
                 subject_identifier,
-                details
+                details,
+                template_values
             )
             VALUES
             (
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s
             )
             RETURNING finding_id
             """,
@@ -316,6 +317,8 @@ def insert_finding(
                 finding["subject_type"],
                 finding["subject_identifier"],
                 Jsonb(finding["details"]) if finding.get("details") else None,
+                # Kept so reports can phrase the finding in their own language.
+                Jsonb(finding["template_values"]),
             ),
         )
 
@@ -960,11 +963,13 @@ def evaluate_replication_lag(evidence, rule, thresholds):
             continue
         # The measured lag stays the observed value; the threshold applies to the part beyond the delay.
         details = replica_details(row)
-        delay_note = ""
+        delay_note, delay_values = "", {}
         if delay:
             details["apply_delay_seconds"] = delay
             details["beyond_delay_seconds"] = round(excess, 1)
             delay_note = f" ({excess:.1f} seconds beyond its intended apply delay of {delay:g} seconds)"
+            # The alternative Dictionary sentence (FINDING_ALT) names the delay.
+            delay_values = {"_alt": True, "beyond_seconds": f"{excess:.1f}", "delay_seconds": f"{delay:g}"}
         findings.append(
             {
                 "severity": matched_threshold["severity"],
@@ -973,6 +978,7 @@ def evaluate_replication_lag(evidence, rule, thresholds):
                     "replica": replica_label(row),
                     "lag_seconds": f"{lag:.1f}",
                     "delay_note": delay_note,
+                    **delay_values,
                 },
                 "observed_value": round(lag, 1),
                 "observed_unit": "SECOND",
@@ -1103,7 +1109,8 @@ def setting_finding(severity, row):
             "observed_value": None, "observed_unit": None, "subject_type": "SETTING",
             "subject_identifier": f"{row['node_name']}: {row['setting_name']}",
             "details": {"node": row["node_name"], "setting": row["setting_name"],
-                        "value": row["setting_value"], "setting_source": row.get("source"),
+                        "value": row["setting_value"], "setting_unit": row.get("unit"),
+                        "setting_source": row.get("source"),
                         "captured_at": iso(row.get("captured_at"))}}
 
 
@@ -1174,6 +1181,7 @@ def evaluate_wal_archiving(evidence, rule, thresholds):
         finding = setting_finding("CRITICAL", settings.get("archive_command") or mode)
         finding["details"]["archive_mode"] = mode["setting_value"]
         finding["template_values"]["value"] = "empty while archive_mode is " + mode["setting_value"]
+        finding["template_values"].update({"_alt": True, "archive_mode": mode["setting_value"]})
         return [finding]
     return []
 
@@ -1289,6 +1297,7 @@ def evaluate_stale_statistics(rows, rule, thresholds):
         findings.append(table_finding(
             severity, row, percent, {"modified_rows": modified},
             {"modified_rows": modified, "trigger": trigger,
+             "never_analyzed": not row["last_analyze"] and not row["last_autoanalyze"],
              "last_autoanalyze": iso(row["last_autoanalyze"]), "last_analyze": iso(row["last_analyze"]),
              "autoanalyze_count": row["autoanalyze_count"]}))
     return findings
