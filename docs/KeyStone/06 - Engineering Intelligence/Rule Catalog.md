@@ -499,7 +499,7 @@ No history is needed, so a first health check can answer. Only the current timel
 Planned switchovers and unplanned failovers look the same. A whole cluster restored from a backup also starts a new timeline and is reported.
 
 **Verification (V041)**  
-Unit tests for every condition; repository test runs both real collectors on a disposable PostgreSQL, the worker persistence and the three assessments, including the insufficient-evidence path. Lab: pending.
+Unit tests for every condition; repository test runs both real collectors on a disposable PostgreSQL, the worker persistence and the three assessments, including the insufficient-evidence path. Lab 2026-10-26 (hc37): clean state as expected; with `archive_command = /bin/false` PG-BKP-001 CRITICAL (no successful archive recorded, FINDING_ALT) and PG-BKP-002 healthy; a prepared transaction after 6 minutes PG-TRAN-005 WARNING; PG-HA-001 WARNING for the failover 3 hours earlier, a Patroni restart did not count as a failover.
 
 ---
 
