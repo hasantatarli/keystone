@@ -188,6 +188,28 @@ EXPECTED_RULES = {
         "thresholds": {},
         "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
     },
+    "PG-MAINT-001": {
+        "assessment": "PG_MAINTENANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("20"), "PERCENT"),
+            "CRITICAL": (Decimal("40"), "PERCENT"),
+        },
+        "evidence": {"PG_VACUUM_ANALYZE": (True, 86400)},
+        "parameters": {"min_dead_tuples": (Decimal("10000"), "ROW"),
+                       "large_table_dead_tuples": (Decimal("50000000"), "ROW")},
+    },
+    "PG-MAINT-002": {
+        "assessment": "PG_MAINTENANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("20"), "PERCENT"),
+            "CRITICAL": (Decimal("50"), "PERCENT"),
+        },
+        "evidence": {"PG_VACUUM_ANALYZE": (True, 86400)},
+        "parameters": {"min_modifications": (Decimal("10000"), "ROW"),
+                       "large_table_modifications": (Decimal("50000000"), "ROW")},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
@@ -350,6 +372,16 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
                 else:
                     self.assertGreaterEqual(len(lines), 2)
                     self.assertTrue(all(line.startswith("- ") for line in lines))
+
+    def test_clean_install_creates_expected_parameters(self):
+        rows = self.query(
+            "SELECT rd.rule_key, rp.parameter_key, rp.parameter_value, rp.parameter_unit "
+            "FROM keystone.rule_parameter rp JOIN keystone.rule_definition rd USING (rule_id)")
+        installed = {}
+        for rule_key, key, value, unit in rows:
+            installed.setdefault(rule_key, {})[key] = (value, unit)
+        expected = {k: r["parameters"] for k, r in EXPECTED_RULES.items() if r.get("parameters")}
+        self.assertEqual(installed, expected)
 
     def test_healthy_text_placeholders_have_thresholds(self):
         # A {warning}/{critical} limit in a HEALTHY text must come from a real threshold.

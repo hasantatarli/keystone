@@ -211,8 +211,9 @@ def insert_assessment_result(
     reason,
     evaluated_at,
     thresholds=None,
+    parameters=None,
 ):
-    """Persist the outcome of one rule in one run (ADR-0014), with the thresholds used."""
+    """Persist the outcome of one rule in one run (ADR-0014), with the thresholds and parameters used."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -225,9 +226,10 @@ def insert_assessment_result(
                 finding_count,
                 reason,
                 evaluated_at,
-                thresholds_used
+                thresholds_used,
+                parameters_used
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 assessment_run_id,
@@ -238,8 +240,26 @@ def insert_assessment_result(
                 reason,
                 evaluated_at,
                 Jsonb(thresholds_snapshot(thresholds)) if thresholds is not None else None,
+                Jsonb(parameters) if parameters else None,
             ),
         )
+
+
+def load_parameters(conn, rule_id):
+    """{parameter_key: {"value", "unit"}}: rule preconditions and limits besides the severity thresholds."""
+    rows = conn.execute(
+        "SELECT parameter_key, parameter_value, parameter_unit FROM keystone.rule_parameter "
+        "WHERE rule_id = %s ORDER BY parameter_key", (rule_id,)).fetchall()
+    return {r["parameter_key"]: {"value": float(r["parameter_value"]), "unit": r["parameter_unit"]}
+            for r in rows}
+
+
+def parameter(rule, key):
+    """A parameter value of the rule; a missing parameter is a Dictionary error."""
+    try:
+        return rule["parameters"][key]["value"]
+    except KeyError:
+        raise RuntimeError(f"Rule {rule['rule_key']} has no parameter {key}.") from None
 
 
 def thresholds_snapshot(thresholds):
@@ -491,6 +511,24 @@ def load_instance_inventory(conn, target_id):
         WHERE ii.target_id = ANY(%s)
         ORDER BY ii.target_id
         """, (node_target_ids(conn, target_id),)).fetchall()
+
+
+def load_latest_vacuum_analyze_snapshot(conn, target_id):
+    """Latest PG_VACUUM_ANALYZE snapshot per database of the target (one row per table)."""
+    return conn.execute(
+        """
+        SELECT v.snapshot_id, v.target_id, v.captured_at, v.database_name, v.schema_name,
+               v.object_name, v.is_partition, v.n_live_tup, v.n_dead_tup, v.n_mod_since_analyze,
+               v.last_vacuum, v.last_autovacuum, v.last_analyze, v.last_autoanalyze,
+               v.autovacuum_count, v.autoanalyze_count
+        FROM postgresql.vacuum_analyze_snapshot v
+        JOIN (
+            SELECT database_name, max(captured_at) AS captured_at
+            FROM postgresql.vacuum_analyze_snapshot WHERE target_id = %s GROUP BY database_name
+        ) latest ON latest.database_name = v.database_name AND latest.captured_at = v.captured_at
+        WHERE v.target_id = %s
+        ORDER BY v.database_name, v.schema_name, v.object_name
+        """, (target_id, target_id)).fetchall()
 
 
 def load_latest_storage_snapshot(conn, target_id):
@@ -1187,6 +1225,75 @@ def evaluate_connection_capacity(evidence, rule, thresholds):
     }]
 
 
+def table_name(row):
+    return f"{row['database_name']}.{row['schema_name']}.{row['object_name']}"
+
+
+def table_finding(severity, row, percent, template_values, details):
+    return {"severity": severity, "snapshot_id": row["snapshot_id"],
+            "template_values": {"table": table_name(row), "percent": f"{percent:g}", **template_values},
+            "observed_value": percent, "observed_unit": "PERCENT", "subject_type": "TABLE",
+            "subject_identifier": table_name(row),
+            "details": {"database": row["database_name"], "table": f"{row['schema_name']}.{row['object_name']}",
+                        "live_rows": row["n_live_tup"], **details,
+                        "captured_at": iso(row["captured_at"])}}
+
+
+def ratio_or_size_severity(percent, count, thresholds, large_limit):
+    """Ratio thresholds decide; a count beyond the large-table limit is at least a WARNING."""
+    matched = match_threshold(percent, thresholds, "PERCENT")
+    if matched is not None:
+        return matched["severity"], "ratio"
+    if count >= large_limit:
+        return "WARNING", "large_table"
+    return None, None
+
+
+def evaluate_dead_tuple_pressure(rows, rule, thresholds):
+    """PG-MAINT-001: dead rows as a share of all rows, or many dead rows in a large table."""
+    minimum = parameter(rule, "min_dead_tuples")
+    large = parameter(rule, "large_table_dead_tuples")
+    findings = []
+    for row in rows:
+        dead, live = row["n_dead_tup"] or 0, row["n_live_tup"] or 0
+        if dead < minimum:
+            continue
+        ratio = 100 * dead / (dead + live)     # judged unrounded; shown rounded
+        severity, trigger = ratio_or_size_severity(ratio, dead, thresholds, large)
+        percent = round(ratio, 1)
+        if severity is None:
+            continue
+        findings.append(table_finding(
+            severity, row, percent, {"dead_rows": dead},
+            {"dead_rows": dead, "trigger": trigger,
+             "last_autovacuum": iso(row["last_autovacuum"]), "last_vacuum": iso(row["last_vacuum"]),
+             "autovacuum_count": row["autovacuum_count"]}))
+    return findings
+
+
+def evaluate_stale_statistics(rows, rule, thresholds):
+    """PG-MAINT-002: rows changed since the last analyze, as a share of live rows or in a large table."""
+    minimum = parameter(rule, "min_modifications")
+    large = parameter(rule, "large_table_modifications")
+    findings = []
+    for row in rows:
+        modified, live = row["n_mod_since_analyze"] or 0, row["n_live_tup"] or 0
+        if modified < minimum:
+            continue
+        # An empty table changes nothing for the planner's estimates in percent; judge by count.
+        ratio = 100 * modified / live if live else 0.0
+        severity, trigger = ratio_or_size_severity(ratio, modified, thresholds, large)
+        percent = round(ratio, 1)
+        if severity is None:
+            continue
+        findings.append(table_finding(
+            severity, row, percent, {"modified_rows": modified},
+            {"modified_rows": modified, "trigger": trigger,
+             "last_autoanalyze": iso(row["last_autoanalyze"]), "last_analyze": iso(row["last_analyze"]),
+             "autoanalyze_count": row["autoanalyze_count"]}))
+    return findings
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
@@ -1260,6 +1367,7 @@ EVIDENCE_LOADERS = {
     "PG_CONFIGURATION_SNAPSHOT": load_latest_configuration_snapshot,
     "PG_REPLICATION_STATUS": load_latest_replication_status,
     "PG_INSTANCE_INVENTORY": load_instance_inventory,
+    "PG_VACUUM_ANALYZE": load_latest_vacuum_analyze_snapshot,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -1287,6 +1395,8 @@ RULE_EVALUATORS = {
     "PG-BKP-002": evaluate_wal_archiving,
     "PG-SEC-002": setting_is("password_encryption", {"md5"}),
     "PG-SEC-003": setting_is("ssl", {"off"}),
+    "PG-MAINT-001": evaluate_dead_tuple_pressure,
+    "PG-MAINT-002": evaluate_stale_statistics,
 }
 
 
@@ -1382,6 +1492,7 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
         )
 
     thresholds = load_thresholds(conn, rule["rule_id"])
+    rule = {**rule, "parameters": load_parameters(conn, rule["rule_id"])}
     evidence_requirements = load_evidence_requirements(
         conn,
         rule["rule_id"],
@@ -1561,6 +1672,7 @@ def run_assessment(
                         reason,
                         evaluation_time,
                         load_thresholds(conn, rule["rule_id"]),
+                        load_parameters(conn, rule["rule_id"]),
                     )
 
             except Exception as exc:

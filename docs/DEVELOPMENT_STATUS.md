@@ -127,11 +127,9 @@ A rule can be skipped because required evidence is missing or stale while the as
 
 SUCCESS currently means technical execution success; it must not be interpreted as a healthy database. We need an explicit MVP decision for representing insufficient evidence without overloading technical run status.
 
-### 3. Threshold model
+### 3. Threshold model — extended by rule parameters (V039, 2026-10-26)
 
-The current `rule_threshold` model supports one threshold value per rule/severity. This works for the first five rules but will become limiting for rules that require multiple metrics, such as a vacuum rule combining dead tuple count and ratio.
-
-Do not introduce a generic DSL. Revisit the smallest useful extension, such as named metrics or rule parameters, when implementing the next rule that genuinely needs it.
+Severity thresholds stay one value per severity on the rule's main metric. Any number of named rule parameters (`keystone.rule_parameter`) add preconditions and limits; the evaluator combines them in code. No generic rule DSL.
 
 ### 4. Multi-source evaluators — resolved by PG-CAP-001 (2026-10-20)
 

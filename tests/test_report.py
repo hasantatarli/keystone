@@ -156,7 +156,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 10 / 15 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 11 / 16 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -450,6 +450,55 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Açık kalma süresi", topics)        # the healthy rule of the same topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+
+    def test_many_findings_show_ten_and_the_rest_on_demand(self):
+        check_id = self.make_check()
+        run = self.conn.execute(
+            "SELECT assessment_run_id, rule_id FROM keystone.finding LIMIT 1").fetchone()
+        for i in range(14):
+            self.conn.execute(
+                "INSERT INTO keystone.finding (assessment_run_id, rule_id, severity, title, finding_text, "
+                "recommendation, observed_value, observed_unit, subject_type, subject_identifier) "
+                "VALUES (%s, %s, 'WARNING', 't', %s, 'r', %s, 'SECOND', 'SESSION', %s)",
+                (run["assessment_run_id"], run["rule_id"], f"extra finding {i:02d}", 400 + i, str(i)))
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        technical = page[page.index(TECH_PANEL):]
+        self.assertIn('<details class="more"><summary>Tümünü göster (15)</summary>', technical)
+        shown = technical[:technical.index('<details class="more">')]
+        self.assertEqual(shown.count('class="instance"'), 10)
+        self.assertIn("extra finding 13", shown)          # largest values first
+        self.assertNotIn("extra finding 00", shown)
+
+    def test_maintenance_rules_end_to_end_with_parameters(self):
+        from repository.intelligence import assessment_engine as engine
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        rows = [  # (captured_at offset, database, table, live, dead, modified)
+            (-600, "app", "old_orders", 1000, 900000, 0),     # older snapshot of app: ignored
+            (0, "app", "orders", 60000, 40000, 0),           # 40 % dead -> CRITICAL
+            (0, "app", "events", 1000000000, 60000000, 0),   # large table -> WARNING
+            (0, "crm", "contacts", 100000, 0, 30000),        # 30 % changed -> WARNING (stale)
+        ]
+        for i, (offset, db, table, live, dead, modified) in enumerate(rows):
+            self.conn.execute(
+                "INSERT INTO postgresql.vacuum_analyze_snapshot (target_id, captured_at, database_oid, "
+                "database_name, schema_name, object_oid, object_name, is_partition, n_live_tup, "
+                "n_dead_tup, n_mod_since_analyze) VALUES (%s, %s + make_interval(secs => %s), 1, %s, "
+                "'public', %s, %s, FALSE, %s, %s, %s)",
+                (self.system, now, offset, db, 100 + i, table, live, dead, modified))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_MAINTENANCE_HEALTH", self.system)
+        findings = {r["subject_identifier"]: r["severity"] for r in self.conn.execute(
+            "SELECT f.subject_identifier, f.severity FROM keystone.finding f "
+            "WHERE f.assessment_run_id = (SELECT max(assessment_run_id) FROM keystone.assessment_run)"
+        ).fetchall()}
+        self.assertEqual(findings, {"app.public.orders": "CRITICAL", "app.public.events": "WARNING",
+                                    "crm.public.contacts": "WARNING"})
+        used = self.conn.execute(
+            "SELECT res.parameters_used FROM keystone.assessment_result res "
+            "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-MAINT-001' "
+            "ORDER BY res.assessment_result_id DESC LIMIT 1").fetchone()["parameters_used"]
+        self.assertEqual(used["large_table_dead_tuples"], {"value": 50000000.0, "unit": "ROW"})
 
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()

@@ -90,13 +90,19 @@ TEXTS = {
         "detail_node": "Sunucu", "detail_mount": "Disk", "detail_data_directory": "Veri dizini",
         "detail_usage": "Kullanım", "detail_sync_state": "Senkronizasyon", "detail_wal_behind": "Geride kalan WAL",
         "detail_apply_delay": "Bilinçli uygulama gecikmesi",
-        "detail_setting": "Ayar", "detail_value": "Geçerli değer", "detail_setting_source": "Kaynak",
+        "detail_setting": "Ayar", "detail_table": "Tablo", "detail_live_rows": "Canlı satır",
+        "detail_dead_rows": "Dead tuple", "detail_modified_rows": "Son ANALYZE'dan beri değişen",
+        "detail_autovacuum_count": "Autovacuum sayısı", "detail_autoanalyze_count": "Autoanalyze sayısı",
+        "detail_trigger": "Sebep", "trigger_large_table": "Büyük tablo sınırı aşıldı",
+        "detail_last_autovacuum": "Son autovacuum", "detail_last_vacuum": "Son vacuum",
+        "detail_last_autoanalyze": "Son autoanalyze", "detail_last_analyze": "Son analyze",
+        "parameters": "Parametreler", "show_all": "Tümünü göster ({n})", "detail_value": "Geçerli değer", "detail_setting_source": "Kaynak",
         "detail_connections": "Kullanılan bağlantı", "detail_max_connections": "max_connections",
         "detail_reserved_connections": "Ayrılmış", "detail_usable_connections": "Kullanılabilir",
         "detail_active": "Aktif", "detail_idle": "Boşta", "detail_idle_in_transaction": "Transaction içinde boşta", "detail_beyond_delay": "Bilinçli gecikmenin üzerindeki kısım",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -171,13 +177,19 @@ TEXTS = {
         "detail_node": "Server", "detail_mount": "Disk", "detail_data_directory": "Data directory",
         "detail_usage": "Usage", "detail_sync_state": "Sync state", "detail_wal_behind": "WAL behind",
         "detail_apply_delay": "Intended apply delay",
-        "detail_setting": "Setting", "detail_value": "Running value", "detail_setting_source": "Source",
+        "detail_setting": "Setting", "detail_table": "Table", "detail_live_rows": "Live rows",
+        "detail_dead_rows": "Dead tuples", "detail_modified_rows": "Changed since last ANALYZE",
+        "detail_autovacuum_count": "Autovacuum count", "detail_autoanalyze_count": "Autoanalyze count",
+        "detail_trigger": "Reason", "trigger_large_table": "Large-table limit exceeded",
+        "detail_last_autovacuum": "Last autovacuum", "detail_last_vacuum": "Last vacuum",
+        "detail_last_autoanalyze": "Last autoanalyze", "detail_last_analyze": "Last analyze",
+        "parameters": "Parameters", "show_all": "Show all ({n})", "detail_value": "Running value", "detail_setting_source": "Source",
         "detail_connections": "Connections in use", "detail_max_connections": "max_connections",
         "detail_reserved_connections": "Reserved", "detail_usable_connections": "Usable",
         "detail_active": "Active", "detail_idle": "Idle", "detail_idle_in_transaction": "Idle in transaction", "detail_beyond_delay": "Beyond the intended delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -270,7 +282,12 @@ def load_report_data(conn, health_check_id):
                                                        'value', th.threshold_value,
                                                        'unit', th.threshold_unit))
                    FROM keystone.rule_threshold th WHERE th.rule_id = rd.rule_id
-               )) AS thresholds
+               )) AS thresholds,
+               COALESCE(res.parameters_used, (
+                   SELECT jsonb_object_agg(rp.parameter_key, jsonb_build_object(
+                              'value', rp.parameter_value, 'unit', rp.parameter_unit))
+                   FROM keystone.rule_parameter rp WHERE rp.rule_id = rd.rule_id
+               )) AS parameters
         FROM keystone.assessment_run ar
         JOIN keystone.assessment_definition ad ON ad.assessment_id = ar.assessment_id
         JOIN keystone.assessment_result res ON res.assessment_run_id = ar.assessment_run_id
@@ -678,6 +695,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .card dt{color:var(--muted);font-size:13px;font-weight:600}
 .card dd{margin:0}
 .items{margin:0;padding-left:18px}.items li{margin:1px 0}
+.more summary{cursor:pointer;color:var(--accent);font-size:14px;margin-top:8px}
 .instance{background:var(--soft);border-radius:4px;padding:8px 10px;margin-top:8px;font-size:14px}
 .instance code{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .facts{color:var(--muted);font-size:13px;margin-top:4px}
@@ -1010,7 +1028,11 @@ def render_system(data, t):
     return "".join(parts)
 
 
-DETAIL_LABELS = (("node", "detail_node"), ("setting", "detail_setting"), ("value", "detail_value"),
+DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows", "detail_live_rows"),
+                 ("dead_rows", "detail_dead_rows"), ("modified_rows", "detail_modified_rows"),
+                 ("autovacuum_count", "detail_autovacuum_count"),
+                 ("autoanalyze_count", "detail_autoanalyze_count"), ("trigger", "detail_trigger"),
+                 ("setting", "detail_setting"), ("value", "detail_value"),
                  ("setting_source", "detail_setting_source"),
                  ("connections", "detail_connections"), ("max_connections", "detail_max_connections"),
                  ("reserved_connections", "detail_reserved_connections"),
@@ -1029,6 +1051,8 @@ DETAIL_LABELS = (("node", "detail_node"), ("setting", "detail_setting"), ("value
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
                ("state_change", "detail_state_change"),
+               ("last_autovacuum", "detail_last_autovacuum"), ("last_vacuum", "detail_last_vacuum"),
+               ("last_autoanalyze", "detail_last_autoanalyze"), ("last_analyze", "detail_last_analyze"),
                ("captured_at", "detail_captured_at"))
 
 
@@ -1051,6 +1075,13 @@ def render_instance(f, t):
     for key in ("apply_delay", "beyond_delay"):
         if details.get(key + "_seconds") is not None:
             details[key] = fmt_duration(float(details[key + "_seconds"]), t)
+    if details.get("trigger") == "large_table":
+        details["trigger"] = t["trigger_large_table"]
+    else:
+        details.pop("trigger", None)
+    for key in ("live_rows", "dead_rows", "modified_rows"):
+        if isinstance(details.get(key), (int, float)):
+            details[key] = f"{details[key]:,}"
     if details.get("wal_behind_bytes") is not None:
         details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
     if details.get("total_bytes"):
@@ -1072,18 +1103,37 @@ def render_instance(f, t):
             + query + "</div>")
 
 
+# Findings shown open per rule; the rest stays in the report behind "show all".
+FINDINGS_SHOWN = 10
+
+
+def parameter_line(result, t):
+    params = result.get("parameters") or {}
+    if not params:
+        return ""
+    return f"{t['parameters']}: " + " · ".join(
+        f"{key} = {fmt_quantity(p['value'], p['unit'], t)}" for key, p in sorted(params.items()))
+
+
 def render_findings_detail(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
-        worst = min((f["severity"] for f in findings), key=lambda s: SEVERITY_ORDER.get(s, 9))
+        # Worst first, then the largest measured value.
+        findings = sorted(findings, key=lambda f: (SEVERITY_ORDER.get(f["severity"], 9),
+                                                   -float(f["observed_value"] or 0)))
+        worst = findings[0]["severity"]
         rid = result["rule_id"]
+        shown, rest = findings[:FINDINGS_SHOWN], findings[FINDINGS_SHOWN:]
+        more = (f'<details class="more"><summary>{e(t["show_all"].format(n=len(findings)))}</summary>'
+                + "".join(render_instance(f, t) for f in rest) + "</details>") if rest else ""
+        facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
         cards.append(
             f'<div class="card {e(worst)}"><h3>{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
             f'<span class="rule">{e(result["rule_key"])}</span></h3>'
-            + (f'<div class="facts">{e(threshold_line(result, t))}</div>' if threshold_line(result, t) else "")
+            + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + "".join(render_instance(f, t) for f in findings) + "</div>")
+            + "</dl>" + "".join(render_instance(f, t) for f in shown) + more + "</div>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 

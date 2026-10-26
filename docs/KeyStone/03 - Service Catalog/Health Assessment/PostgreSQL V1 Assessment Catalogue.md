@@ -78,8 +78,8 @@ Sources combined:
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-MAINT-001 | Dead tuple pressure | Dead tuples ≥ X % of live **and** ≥ N rows (two parameters; revisits the one-threshold model) | Ready: PG-005 | Vacuum & Statistics | P1 |
-| PG-MAINT-002 | Stale statistics | Many modifications since the last analyze on an active table | Ready: PG-005 | Vacuum & Statistics | P1 |
+| **PG-MAINT-001** | Dead tuple pressure | Dead tuples ≥ X % of live **and** ≥ N rows (two parameters; revisits the one-threshold model) | Ready: PG-005 | Vacuum & Statistics | Done |
+| **PG-MAINT-002** | Stale statistics | Many modifications since the last analyze on an active table | Ready: PG-005 | Vacuum & Statistics | Done |
 | PG-MAINT-003 | Table never vacuumed / analyzed | Active table with no vacuum or analyze since the statistics reset (constraint: a null timestamp alone is not a finding) | Ready: PG-005 | Vacuum & Statistics | P2 |
 | PG-MAINT-004 | Table and index bloat | Estimated bloat ≥ X % and ≥ N MB | Gap: PG-014 | Fragmentation (Bloat) | P2 |
 
