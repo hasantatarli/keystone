@@ -171,8 +171,8 @@ class HealthCheckTests(unittest.TestCase):
             "WHERE ar.health_check_id = %s ORDER BY 1", (check_id,)).fetchall()
         self.assertEqual([r["assessment_key"] for r in runs],
                          ["PG_BACKUP_HEALTH", "PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH",
-                          "PG_CONNECTION_HEALTH", "PG_REPLICATION_HEALTH", "PG_SECURITY_HEALTH",
-                          "PG_TRANSACTION_HEALTH"])
+                          "PG_CONNECTION_HEALTH", "PG_MAINTENANCE_HEALTH", "PG_REPLICATION_HEALTH",
+                          "PG_SECURITY_HEALTH", "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
     def test_evidence_from_before_the_check_is_not_judged(self):

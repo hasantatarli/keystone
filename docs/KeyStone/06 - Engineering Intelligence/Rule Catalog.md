@@ -53,6 +53,7 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 - **Thresholds are inclusive.** A value equal to a threshold reaches it (`>=`).
 - **Highest reached threshold wins**, independent of the order thresholds are stored or loaded. Thresholds with a different unit are ignored.
 - **Rules without thresholds** use `rule_definition.default_severity`.
+- **Rule parameters** (V039, 2026-10-26): besides the severity thresholds on the main metric, a rule can have any number of named parameters in `keystone.rule_parameter` (preconditions such as a minimum row count, limits such as a large-table count). The evaluator combines them in code; there is no rule expression language. Parameters used are stored per result (`parameters_used`) and shown in the technical report.
 - **One finding per affected subject** (session, database, slot or system), not one per rule.
 - **Severities:** INFO, WARNING, CRITICAL.
 
@@ -452,6 +453,37 @@ Unit tests for every condition and boundary. Lab: pending.
 
 ---
 
+# PG_MAINTENANCE_HEALTH — Maintenance Health (V039)
+
+Both rules read the latest `PG_VACUUM_ANALYZE` snapshot per database (one row per table, freshness 86400 s) and produce one finding per table. Severity: ratio ≥ WARNING / CRITICAL threshold; below the ratio but count ≥ the large-table parameter → WARNING; below the minimum count the table is not judged. Ratios are judged unrounded and shown rounded. The report shows the worst 10 findings per rule and the rest under "show all".
+
+## PG-MAINT-001 — Dead Tuple Pressure
+
+| | |
+| --- | --- |
+| Metric | `n_dead_tup / (n_live_tup + n_dead_tup)` |
+| Thresholds | WARNING ≥ 20 %, CRITICAL ≥ 40 % |
+| Parameters | `min_dead_tuples` 10 000; `large_table_dead_tuples` 50 000 000 |
+
+## PG-MAINT-002 — Stale Statistics
+
+| | |
+| --- | --- |
+| Metric | `n_mod_since_analyze / n_live_tup` (empty tables judged by count only) |
+| Thresholds | WARNING ≥ 20 %, CRITICAL ≥ 50 % |
+| Parameters | `min_modifications` 10 000; `large_table_modifications` 50 000 000 |
+
+**Design notes**  
+Defaults sit just above PostgreSQL's autovacuum scale factors (vacuum 20 %, analyze 10 %), so a finding means autovacuum is behind. The large-table limit (Hasan, 2026-10-26) catches tables where 20 % is already hundreds of millions of rows.
+
+**Known limitations**  
+`n_live_tup` / `n_dead_tup` are estimates from the statistics system and reset with `pg_stat_reset`. Per-table autovacuum settings (reloptions) are not collected, so a table tuned on purpose is judged with the defaults. Bloat in bytes is PG-MAINT-004 (needs a collector).
+
+**Verification**  
+Unit tests for boundaries, the large-table path and parameters; repository test with snapshots of two databases. Lab: pending.
+
+---
+
 # Adding a Rule
 
 Texts (V029, V030, V034): every rule has NAME, HEALTHY, MEANING, CAUSES, IMPACT and RECOMMENDATION in every Dictionary language. MEANING is one statement of what is happening; CAUSES and RECOMMENDATION are short lists (one item per line starting with "- "), rendered as bullets, a topic and at least one impact category. A HEALTHY text states only what the rule checked and its limit, using `{warning}` / `{critical}` for thresholds so the text always matches the thresholds used. Contract tests enforce both.
@@ -472,7 +504,6 @@ Not implemented; recorded so they are not lost.
 | --- | --- | --- |
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
 | XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
-| Dead tuple pressure, analyze freshness | 2026-09-21 evidence matrix | Yes (`PG_VACUUM_ANALYZE`); needs multi-parameter thresholds |
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
 | Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
 | Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |

@@ -843,5 +843,70 @@ class CurrentEvidenceTests(unittest.TestCase):
         self.assertIsNone(engine.current_primary(nodes[2:]))
 
 
+def table_row(name, live, dead=0, modified=0):
+    return {"snapshot_id": 1, "target_id": 1, "captured_at": NOW, "database_name": "app",
+            "schema_name": "public", "object_name": name, "is_partition": False,
+            "n_live_tup": live, "n_dead_tup": dead, "n_mod_since_analyze": modified,
+            "last_vacuum": None, "last_autovacuum": NOW - timedelta(days=2), "last_analyze": None,
+            "last_autoanalyze": None, "autovacuum_count": 3, "autoanalyze_count": 1}
+
+
+def maintenance_rule(prefix):
+    keys = {"dead": ("min_dead_tuples", "large_table_dead_tuples"),
+            "mod": ("min_modifications", "large_table_modifications")}[prefix]
+    return {"rule_key": "PG-MAINT", "default_severity": None,
+            "parameters": {keys[0]: {"value": 10000.0, "unit": "ROW"},
+                           keys[1]: {"value": 50000000.0, "unit": "ROW"}}}
+
+
+class MaintenanceRuleTests(unittest.TestCase):
+    DEAD = [threshold("WARNING", 20, "PERCENT"), threshold("CRITICAL", 40, "PERCENT")]
+    STALE = [threshold("WARNING", 20, "PERCENT"), threshold("CRITICAL", 50, "PERCENT")]
+
+    def dead(self, *rows):
+        return engine.evaluate_dead_tuple_pressure(list(rows), maintenance_rule("dead"), self.DEAD)
+
+    def stale(self, *rows):
+        return engine.evaluate_stale_statistics(list(rows), maintenance_rule("mod"), self.STALE)
+
+    def test_small_tables_are_not_judged(self):
+        self.assertEqual(self.dead(table_row("tiny", live=10, dead=9_999)), [])   # 99.9 % but small
+
+    def test_dead_ratio_boundaries(self):
+        self.assertEqual(self.dead(table_row("t", live=80_001, dead=20_000)), [])      # 19.99 %
+        self.assertEqual(severities(self.dead(table_row("t", live=80_000, dead=20_000))), ["WARNING"])
+        self.assertEqual(severities(self.dead(table_row("t", live=60_000, dead=40_000))), ["CRITICAL"])
+
+    def test_large_table_warns_below_the_ratio(self):
+        # 60 M dead rows in a 1 billion row table: 5.7 %, still a WARNING.
+        finding = self.dead(table_row("big", live=1_000_000_000, dead=60_000_000))[0]
+        self.assertEqual(finding["severity"], "WARNING")
+        self.assertEqual(finding["details"]["trigger"], "large_table")
+        self.assertEqual(finding["observed_value"], 5.7)
+        self.assertEqual(finding["template_values"]["dead_rows"], 60_000_000)
+
+    def test_ratio_wins_over_the_large_table_limit(self):
+        finding = self.dead(table_row("big", live=60_000_000, dead=60_000_000))[0]
+        self.assertEqual((finding["severity"], finding["details"]["trigger"]), ("CRITICAL", "ratio"))
+
+    def test_stale_statistics(self):
+        self.assertEqual(self.stale(table_row("t", live=100_000, modified=19_999)), [])
+        self.assertEqual(severities(self.stale(table_row("t", live=100_000, modified=20_000))), ["WARNING"])
+        self.assertEqual(severities(self.stale(table_row("t", live=100_000, modified=50_000))), ["CRITICAL"])
+        big = self.stale(table_row("big", live=2_000_000_000, modified=60_000_000))[0]
+        self.assertEqual((big["severity"], big["details"]["trigger"]), ("WARNING", "large_table"))
+
+    def test_finding_names_the_table(self):
+        finding = self.dead(table_row("orders", live=50_000, dead=50_000))[0]
+        self.assertEqual(finding["subject_identifier"], "app.public.orders")
+        self.assertEqual(finding["template_values"]["percent"], "50")
+        self.assertEqual(finding["details"]["live_rows"], 50_000)
+
+    def test_missing_parameter_is_a_dictionary_error(self):
+        with self.assertRaises(RuntimeError):
+            engine.evaluate_dead_tuple_pressure([table_row("t", 1, 20_000)],
+                                                {"rule_key": "X", "parameters": {}}, self.DEAD)
+
+
 if __name__ == "__main__":
     unittest.main()

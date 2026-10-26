@@ -90,7 +90,7 @@ class AssessmentScheduleTests(unittest.TestCase):
 
     def test_defaults_create_one_schedule_per_assessment_and_are_idempotent(self):
         created = self.apply_defaults()
-        self.assertEqual(created, 7)
+        self.assertEqual(created, 8)
         self.assertEqual(self.apply_defaults(), 0)
 
         rows = self.conn.execute(
@@ -101,7 +101,7 @@ class AssessmentScheduleTests(unittest.TestCase):
                          {"PG_CONNECTION_HEALTH": 300, "PG_REPLICATION_HEALTH": 300,
                           "PG_TRANSACTION_HEALTH": 300, "PG_CAPACITY_HEALTH": 900,
                           "PG_CONFIGURATION_HEALTH": 3600, "PG_BACKUP_HEALTH": 3600,
-                          "PG_SECURITY_HEALTH": 3600})
+                          "PG_SECURITY_HEALTH": 3600, "PG_MAINTENANCE_HEALTH": 3600})
         self.assertTrue(all(r["offset_seconds"] == 30 for r in rows))
 
     def test_offset_must_be_shorter_than_interval(self):
@@ -154,7 +154,7 @@ class AssessmentScheduleTests(unittest.TestCase):
         scheduler = Scheduler([jobs], clock=lambda: slot)
 
         dispatched = scheduler.tick(self.conn)
-        self.assertEqual(len(dispatched), 7)
+        self.assertEqual(len(dispatched), 8)
 
         deadline = time.monotonic() + 5
         while len(calls) < 2 and time.monotonic() < deadline:
