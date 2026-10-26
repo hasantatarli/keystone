@@ -132,6 +132,8 @@ python -m repository.intelligence.assessment_engine --help
 
 The engine evaluates the evidence already in the repository; it does not collect.
 
+Assessments (2026-10-26): `PG_TRANSACTION_HEALTH`, `PG_REPLICATION_HEALTH`, `PG_CONNECTION_HEALTH`, `PG_CAPACITY_HEALTH`, `PG_CONFIGURATION_HEALTH`, `PG_BACKUP_HEALTH`, `PG_SECURITY_HEALTH`, `PG_MAINTENANCE_HEALTH`. Current list: `SELECT assessment_key FROM keystone.assessment_definition ORDER BY 1;`
+
 ---
 
 ## 6. Health check (one-off)

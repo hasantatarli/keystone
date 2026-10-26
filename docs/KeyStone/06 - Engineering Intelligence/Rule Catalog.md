@@ -1,7 +1,7 @@
 # Engineering Intelligence Rule Catalog
 
 **Status:** Current  
-**Last Updated:** 2026-10-09  
+**Last Updated:** 2026-10-26  
 **Provider:** PostgreSQL (15+)
 
 ## Purpose
@@ -10,7 +10,7 @@ This catalog explains, in engineering terms, what each Keystone rule detects, wh
 
 It is documentation, not configuration. The machine-readable source of truth is:
 
-- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V022),
+- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V041),
 - the evaluators in `repository/intelligence/assessment_engine.py`,
 - the expected Dictionary contract in `tests/test_intelligence_dictionary.py` (`EXPECTED_RULES`).
 
@@ -39,7 +39,7 @@ For each enabled rule of an assessment:
 2. Load each evidence source once per run (`EVIDENCE_LOADERS`) and reuse it for other rules in the same run.
 3. Validate freshness: the newest evidence row must be no older than `max_age_seconds` at evaluation time.
 4. If required evidence is missing or stale, the rule is **not evaluated** and its result is INSUFFICIENT_EVIDENCE.
-5. Otherwise call the evaluator, which returns zero or more findings.
+5. Otherwise call the evaluator, which returns zero or more findings. An evaluator that finds the evidence cannot answer the rule (for example no primary among the collected nodes) raises `InsufficientEvidence`; the result is INSUFFICIENT_EVIDENCE with a coded reason (V041).
 6. Persist each finding with the rule's finding template and recommendation, and the rule's result (HEALTHY or ATTENTION_REQUIRED with the highest severity).
 
 Each rule runs in its own transaction. If anything fails, the rule's partial work is rolled back and its result is ERROR with the error message.
@@ -62,8 +62,8 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 These apply to every rule and are tracked in `docs/DEVELOPMENT_STATUS.md`:
 
 - **Outcomes are persisted per rule (since V023, ADR-0014).** Every evaluated rule records HEALTHY, ATTENTION_REQUIRED, INSUFFICIENT_EVIDENCE (with the evidence source and age) or ERROR in `keystone.assessment_result`. A rule that fails technically does not stop the others; the run then ends PARTIAL.
-- **Empty evidence looks like missing evidence.** A collector that legitimately returns no rows (for example no replication slots) cannot be distinguished from a collector that never ran.
-- **Findings can persist after recovery within the freshness window.** If a condition is resolved but no new evidence has been collected, the previous snapshot still produces the finding until fresh evidence arrives or the evidence becomes stale.
+- **Empty evidence looks like missing evidence** for collectors that return only detail rows (for example no replication slots). Collectors written since V041 always return a SYSTEM row, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`); older collectors are not changed yet.
+- **Findings can persist after recovery within the freshness window** when an assessment runs on scheduled evidence. A health check collects fresh evidence first and judges only what it collected, so it is not affected.
 - **No finding lifecycle yet.** Every run creates new findings; the same condition seen in consecutive runs is not linked. Required for continuous assessment (MVP Plan Phase 2).
 
 ---
@@ -557,4 +557,3 @@ Not implemented; recorded so they are not lost.
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
 | Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
 | Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |
-| Unplanned failover / primary changed | Lab 2026-10-20: host laptop slept, Patroni promoted postgre-2 unnoticed | Partly: role per node is collected; needs role history (instance inventory keeps only the current row) or the timeline ID (`pg_control_checkpoint()`), which increases on every promotion |

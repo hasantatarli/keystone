@@ -1,7 +1,7 @@
 # PostgreSQL MVP Plan
 
 **Status:** Current  
-**Last Updated:** 2026-10-09
+**Last Updated:** 2026-10-26
 
 ## Purpose
 
@@ -9,7 +9,13 @@ Order the work required to turn the current PostgreSQL implementation into somet
 
 This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMENT_STATUS.md` in the repository.
 
-## Where We Are (2026-10-05)
+## Where We Are (2026-10-26)
+
+- Phase 0 done. Phase 1: collector and assessment scheduling, the one-command health check and the HTML report (executive summary and technical details, Turkish and English) are done and lab-verified. Offline evidence is open.
+- 24 rules in 8 assessments from the PostgreSQL V1 Assessment Catalogue; rule texts (meaning, causes, impact, steps, finding sentences) in Turkish and English; rule parameters besides thresholds (V039).
+- Next: remaining P1 checks (indexes, sequence capacity, roles, public schema), then configuration recommendations.
+
+### Earlier state (2026-10-05)
 
 - Collection foundation: targets, assignments, queue, workers, run history, eleven PostgreSQL collectors including host and session activity evidence.
 - Engineering Intelligence foundation: Dictionary tables, generic assessment engine with evidence and evaluator registries, freshness validation, findings with recommendations.
@@ -35,7 +41,7 @@ Order revised on 2026-10-14 (ADR-0015): scheduling comes first, because the manu
 - **Assessment schedule:** `keystone.assessment_schedule` (assessment, target, interval in seconds, enabled) with default intervals in the Dictionary; the scheduler runs due assessments. Warning when a collector interval exceeds a dependent rule's freshness limit.
 - **One-command health check:** queue the required collectors once, let the worker drain them, run the assessments. Replaces the manual queue / worker / engine sequence.
 - **Report:** a readable health check report generated from a run: coverage, healthy areas, findings, insufficient evidence, recommendations.
-  - **Language (decided 2026-10-14):** the report frame (headings, summary, section labels such as healthy areas and areas not assessed) is produced in Turkish and English; rule finding and recommendation texts remain English in the Dictionary for now. Turkey is the initial market; a multilingual Dictionary is added when a real customer needs translated rule texts. The report generator must not hard-code a single language.
+  - **Language (decided 2026-10-14, revised 2026-10-19):** the report frame and all rule texts are Turkish and English. Rule texts live in the Dictionary per language (V029, V034, V040); the report generator does not hard-code a language.
 
 - **Offline evidence (no installation on the customer side):** many customers allow only a GUI client such as pgAdmin on a monitored jump server, with no CLI and no permission to install software. For them the health check must also accept evidence collected without a Keystone connection:
   - **Customer side:** a read-only SQL bundle script, generated automatically from the existing collector SQL (never maintained by hand), that returns one JSON document in one cell. It runs in pgAdmin, psql or DBeaver and creates no objects. One script for SYSTEM-scoped collectors, one to run in each database for DATABASE-scoped collectors.
@@ -60,7 +66,7 @@ Outcome: Keystone can run unattended in a long-term customer engagement.
 
 Runs alongside every phase. New rules are derived from the MVP evidence matrix (Design History, 2026-09-21) and real engagements. The coverage of one-off tools such as `awslabs/pg-collector` is used as the minimum bar for the Manual Assessment report.
 
-The threshold model limitation (one value per severity) is revisited when the first rule that genuinely needs multiple parameters is implemented, not before.
+The threshold model limitation was resolved with the first rules that needed it: named rule parameters besides the thresholds (V039, PG-MAINT-001/002).
 
 ### After the MVP
 

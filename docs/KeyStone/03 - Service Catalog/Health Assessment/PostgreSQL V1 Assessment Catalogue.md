@@ -186,12 +186,12 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 7 | 25 | 22 | 8 |
-| of which evidence ready | 7 | 17 | 9 | 3 |
+| Checks | 24 | 6 | 22 | 10 |
+| of which evidence ready | 24 | 1 | 9 | 5 |
 
-With the 17 ready P1 checks Keystone reaches 24 checks without new collectors. Collectors needed for the remaining P1 checks, in proposed order:
+Status 2026-10-26: 24 checks done (V031–V041). Remaining P1: PG-IDX-001/002, PG-CAP-002 and PG-SEC-004 (per-database collection), PG-SEC-001 (roles), and PG-CONF-003, which comes last as the configuration recommendation capability (decision 2, separate ADR). Collectors for the remaining P1 checks, in the order worked:
 
-1. **Release reference table** (Dictionary, not a collector) — PG-LIFE-001/002.
+1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
 3. **PG-010 / PG-011 Index usage and quality** — PG-IDX-001/002.
 4. **PG-019 Sequence / integer key capacity** — PG-CAP-002.
