@@ -225,7 +225,7 @@ Rule batches 2026-10-26:
 
 Next:
 
-1. P1 rules with per-database collectors: PG-IDX-001/002, PG-CAP-002, PG-SEC-004; then PG-SEC-001.
+1. P1 rules with per-database collectors: PG-IDX-001/002, PG-SEC-004; then PG-SEC-001. PG-CAP-002 (sequences) is on hold: reading sequence values needs a privilege beyond `pg_monitor` (Assessment Catalogue, open question 6).
 2. Configuration recommendation capability (PG-CONF-003): ADR first, then implementation.
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.

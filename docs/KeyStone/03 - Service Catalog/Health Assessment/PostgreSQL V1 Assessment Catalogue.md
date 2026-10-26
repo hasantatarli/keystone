@@ -246,6 +246,8 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 
 7. **Group 1 of the collector P1s** (2026-10-26, Hasan): PG-BKP-001 is CRITICAL only while the last failure is newer than the last success; "no success for a long time" is not judged. PG-TRAN-005 uses 5 / 60 minutes. PG-HA-001 dates the last failover from the current timeline's history file (works on a first check); a failover within 24 h is a WARNING.
 
+8. **Group 2 collectors** (2026-10-26, Hasan): one collector per topic (indexes, schema privileges, sequences), not one combined collector. No extension is needed.
+
 ## Open questions for review
 
 1. ~~Priorities~~ — decided: P1 → P3.
@@ -253,3 +255,4 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 3. **Superuser-only evidence** (`pg_hba_file_rules`, password hashes in `pg_authid`): accept as optional, or only in a separate security profile?
 4. ~~Backup tools~~ — decided: detect the method in use (see decisions).
 5. ~~Severity of conscious choices~~ — decided: WARNING.
+6. **PG-CAP-002 sequence capacity — on hold (2026-10-26, Hasan thinking it over).** `pg_sequences.last_value` is NULL without SELECT / USAGE on the sequence; `pg_monitor` is not enough. Options: (a) `pg_read_all_data` (PG 14+, but grants reading all table data), (b) `GRANT SELECT ON ALL SEQUENCES IN SCHEMA …` plus `ALTER DEFAULT PRIVILEGES` per schema, (c) without the privilege the rule ends INSUFFICIENT_EVIDENCE and names the missing privilege. Proposed: (c) by default, (a) or (b) documented as an optional privilege. Planned evidence per sequence: schema, name, data type, max_value, last_value, increment_by, cycle, owning table and column, column data type; usage = last_value / min(sequence limit, column type limit), WARNING ≥ 75 %, CRITICAL ≥ 90 %. Application-generated keys (`max(id) + 1`) are out of scope.
