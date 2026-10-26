@@ -500,6 +500,27 @@ class ReportTests(test_health_check.HealthCheckTests):
             "ORDER BY res.assessment_result_id DESC LIMIT 1").fetchone()["parameters_used"]
         self.assertEqual(used["large_table_dead_tuples"], {"value": 50000000.0, "unit": "ROW"})
 
+    def test_finding_sentence_in_the_report_language(self):
+        check_id = self.make_check()
+        self.conn.execute("UPDATE keystone.finding SET template_values = %s",
+                          ('{"pid": 4711, "duration_seconds": "1200.0", "dead_rows": 50000}',))
+        self.conn.commit()
+        self.assertIn("4711 numaralı session 1200.0 saniyedir transaction içinde boşta bekliyor.",
+                      self.render(check_id, "tr"))
+        self.assertIn("Session 4711 has been idle in transaction for 1200.0 seconds.",
+                      self.render(check_id, "en"))
+        self.assertEqual(report.template_value_text("dead_rows", 50000), "50,000")
+
+    def test_finding_without_values_keeps_the_stored_text(self):
+        page = self.render(self.make_check(), "tr")
+        self.assertIn("Session 4711 idle &lt;script&gt;", page)
+
+    def test_setting_values_are_readable(self):
+        t = report.TEXTS["tr"]
+        self.assertEqual(report.setting_value_text("32768", "8kB", t), "32768 (256.0 MB)")
+        self.assertEqual(report.setting_value_text("off", None, t), "off")
+        self.assertEqual(report.setting_value_text("300000", "ms", t), "300000 (5 dakika)")
+
     def test_no_problems_found_is_scoped_to_evaluated_rules(self):
         check_id = self.make_check()
         self.conn.execute(

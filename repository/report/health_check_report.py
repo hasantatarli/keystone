@@ -94,6 +94,7 @@ TEXTS = {
         "detail_dead_rows": "Dead tuple", "detail_modified_rows": "Son ANALYZE'dan beri değişen",
         "detail_autovacuum_count": "Autovacuum sayısı", "detail_autoanalyze_count": "Autoanalyze sayısı",
         "detail_trigger": "Sebep", "trigger_large_table": "Büyük tablo sınırı aşıldı",
+        "detail_analyze_status": "ANALYZE", "never_analyzed": "hiç çalışmamış",
         "detail_last_autovacuum": "Son autovacuum", "detail_last_vacuum": "Son vacuum",
         "detail_last_autoanalyze": "Son autoanalyze", "detail_last_analyze": "Son analyze",
         "parameters": "Parametreler", "show_all": "Tümünü göster ({n})", "detail_value": "Geçerli değer", "detail_setting_source": "Kaynak",
@@ -181,6 +182,7 @@ TEXTS = {
         "detail_dead_rows": "Dead tuples", "detail_modified_rows": "Changed since last ANALYZE",
         "detail_autovacuum_count": "Autovacuum count", "detail_autoanalyze_count": "Autoanalyze count",
         "detail_trigger": "Reason", "trigger_large_table": "Large-table limit exceeded",
+        "detail_analyze_status": "ANALYZE", "never_analyzed": "never run",
         "detail_last_autovacuum": "Last autovacuum", "detail_last_vacuum": "Last vacuum",
         "detail_last_autoanalyze": "Last autoanalyze", "detail_last_analyze": "Last analyze",
         "parameters": "Parameters", "show_all": "Show all ({n})", "detail_value": "Running value", "detail_setting_source": "Source",
@@ -299,7 +301,8 @@ def load_report_data(conn, health_check_id):
     findings = conn.execute(
         """
         SELECT f.finding_id, f.rule_id, f.severity, f.title, f.finding_text, f.recommendation,
-               f.observed_value, f.observed_unit, f.subject_type, f.subject_identifier, f.details
+               f.observed_value, f.observed_unit, f.subject_type, f.subject_identifier, f.details,
+               f.template_values
         FROM keystone.finding f
         JOIN keystone.assessment_run ar ON ar.assessment_run_id = f.assessment_run_id
         WHERE ar.health_check_id = %s
@@ -1032,6 +1035,7 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("dead_rows", "detail_dead_rows"), ("modified_rows", "detail_modified_rows"),
                  ("autovacuum_count", "detail_autovacuum_count"),
                  ("autoanalyze_count", "detail_autoanalyze_count"), ("trigger", "detail_trigger"),
+                 ("analyze_status", "detail_analyze_status"),
                  ("setting", "detail_setting"), ("value", "detail_value"),
                  ("setting_source", "detail_setting_source"),
                  ("connections", "detail_connections"), ("max_connections", "detail_max_connections"),
@@ -1064,7 +1068,51 @@ def fmt_clock(value):
         return str(value)
 
 
-def render_instance(f, t):
+# Units of pg_settings values and their size in bytes or seconds.
+SETTING_BYTES = {"B": 1, "kB": 1024, "8kB": 8192, "16kB": 16384, "MB": 1024 ** 2, "GB": 1024 ** 3}
+SETTING_SECONDS = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}
+
+
+def setting_value_text(value, unit, t):
+    """'32768' with unit '8kB' -> '32768 (256.0 MB)'; other values unchanged."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    if unit in SETTING_BYTES:
+        return f"{value} ({fmt_bytes(number * SETTING_BYTES[unit])})"
+    if unit in SETTING_SECONDS and number > 0:
+        return f"{value} ({fmt_duration(number * SETTING_SECONDS[unit], t)})"
+    return value
+
+
+# Counts get thousands separators; identifiers such as pid stay as they are.
+COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
+                "connection_count"}
+
+
+def template_value_text(key, value):
+    if key in COUNT_VALUES and isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    return value
+
+
+def finding_sentence(f, data, lang):
+    """The finding in the report language from its stored values; the stored English text otherwise."""
+    values = f.get("template_values")
+    if not values:
+        return f["finding_text"]
+    text_type = "FINDING_ALT" if values.get("_alt") else "FINDING"
+    template = data["rule_texts"].get(f["rule_id"], {}).get(lang, {}).get(text_type)
+    if not template:
+        return f["finding_text"]
+    try:
+        return template.format(**{k: template_value_text(k, v) for k, v in values.items()})
+    except (KeyError, IndexError, ValueError):
+        return f["finding_text"]
+
+
+def render_instance(f, data, lang, t):
     """One finding: technical text, measured value, subject and context (who / where)."""
     facts = []
     if f["observed_value"] is not None:
@@ -1072,6 +1120,10 @@ def render_instance(f, t):
     if f["subject_identifier"]:
         facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
     details = dict(f["details"] or {})
+    if details.get("setting_unit") and details.get("value") is not None:
+        details["value"] = setting_value_text(details["value"], details["setting_unit"], t)
+    if details.get("never_analyzed"):
+        details["analyze_status"] = t["never_analyzed"]
     for key in ("apply_delay", "beyond_delay"):
         if details.get(key + "_seconds") is not None:
             details[key] = fmt_duration(float(details[key + "_seconds"]), t)
@@ -1096,7 +1148,7 @@ def render_instance(f, t):
     query = (f'<div class="facts">{e(t["detail_last_query"])}: '
              f'<code>{e(details["last_query"])}</code></div>' if details.get("last_query") else "")
     return (f'<div class="instance">{badge(f["severity"], t["severity"].get(f["severity"], f["severity"]))} '
-            f"{e(f['finding_text'])}"
+            f"{e(finding_sentence(f, data, lang))}"
             + (f'<div class="facts">{" · ".join(facts)}</div>' if facts else "")
             + (f'<div class="facts">{" · ".join(context)}</div>' if context else "")
             + (f'<div class="facts">{" · ".join(times)}</div>' if times else "")
@@ -1125,7 +1177,7 @@ def render_findings_detail(data, lang, t):
         rid = result["rule_id"]
         shown, rest = findings[:FINDINGS_SHOWN], findings[FINDINGS_SHOWN:]
         more = (f'<details class="more"><summary>{e(t["show_all"].format(n=len(findings)))}</summary>'
-                + "".join(render_instance(f, t) for f in rest) + "</details>") if rest else ""
+                + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
         facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
         cards.append(
             f'<div class="card {e(worst)}"><h3>{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
@@ -1133,7 +1185,7 @@ def render_findings_detail(data, lang, t):
             + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + "".join(render_instance(f, t) for f in shown) + more + "</div>")
+            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</div>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 

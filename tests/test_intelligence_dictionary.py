@@ -373,6 +373,20 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
                     self.assertGreaterEqual(len(lines), 2)
                     self.assertTrue(all(line.startswith("- ") for line in lines))
 
+    def test_finding_sentences_use_the_values_of_the_english_template(self):
+        # V040: a FINDING text may only use values the evaluator provides for finding_template.
+        import string
+        names = lambda text: {f for _, f, _, _ in string.Formatter().parse(text) if f}  # noqa: E731
+        rows = self.query(
+            "SELECT rd.rule_key, rd.finding_template, l.language_code, t.text "
+            "FROM keystone.rule_definition rd CROSS JOIN keystone.dictionary_language l "
+            "LEFT JOIN keystone.rule_text t ON t.rule_id = rd.rule_id "
+            "AND t.language_code = l.language_code AND t.text_type = 'FINDING' WHERE rd.is_enabled")
+        for rule_key, template, language, text in rows:
+            with self.subTest(rule=rule_key, language=language):
+                self.assertIsNotNone(text)
+                self.assertLessEqual(names(text), names(template))
+
     def test_clean_install_creates_expected_parameters(self):
         rows = self.query(
             "SELECT rd.rule_key, rp.parameter_key, rp.parameter_value, rp.parameter_unit "
