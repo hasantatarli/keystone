@@ -1,7 +1,7 @@
 # Engineering Intelligence Rule Catalog
 
 **Status:** Current  
-**Last Updated:** 2026-10-09  
+**Last Updated:** 2026-10-26  
 **Provider:** PostgreSQL (15+)
 
 ## Purpose
@@ -10,7 +10,7 @@ This catalog explains, in engineering terms, what each Keystone rule detects, wh
 
 It is documentation, not configuration. The machine-readable source of truth is:
 
-- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V022),
+- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V041),
 - the evaluators in `repository/intelligence/assessment_engine.py`,
 - the expected Dictionary contract in `tests/test_intelligence_dictionary.py` (`EXPECTED_RULES`).
 
@@ -39,7 +39,7 @@ For each enabled rule of an assessment:
 2. Load each evidence source once per run (`EVIDENCE_LOADERS`) and reuse it for other rules in the same run.
 3. Validate freshness: the newest evidence row must be no older than `max_age_seconds` at evaluation time.
 4. If required evidence is missing or stale, the rule is **not evaluated** and its result is INSUFFICIENT_EVIDENCE.
-5. Otherwise call the evaluator, which returns zero or more findings.
+5. Otherwise call the evaluator, which returns zero or more findings. An evaluator that finds the evidence cannot answer the rule (for example no primary among the collected nodes) raises `InsufficientEvidence`; the result is INSUFFICIENT_EVIDENCE with a coded reason (V041).
 6. Persist each finding with the rule's finding template and recommendation, and the rule's result (HEALTHY or ATTENTION_REQUIRED with the highest severity).
 
 Each rule runs in its own transaction. If anything fails, the rule's partial work is rolled back and its result is ERROR with the error message.
@@ -62,8 +62,8 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 These apply to every rule and are tracked in `docs/DEVELOPMENT_STATUS.md`:
 
 - **Outcomes are persisted per rule (since V023, ADR-0014).** Every evaluated rule records HEALTHY, ATTENTION_REQUIRED, INSUFFICIENT_EVIDENCE (with the evidence source and age) or ERROR in `keystone.assessment_result`. A rule that fails technically does not stop the others; the run then ends PARTIAL.
-- **Empty evidence looks like missing evidence.** A collector that legitimately returns no rows (for example no replication slots) cannot be distinguished from a collector that never ran.
-- **Findings can persist after recovery within the freshness window.** If a condition is resolved but no new evidence has been collected, the previous snapshot still produces the finding until fresh evidence arrives or the evidence becomes stale.
+- **Empty evidence looks like missing evidence** for collectors that return only detail rows (for example no replication slots). Collectors written since V041 always return a SYSTEM row, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`); older collectors are not changed yet.
+- **Findings can persist after recovery within the freshness window** when an assessment runs on scheduled evidence. A health check collects fresh evidence first and judges only what it collected, so it is not affected.
 - **No finding lifecycle yet.** Every run creates new findings; the same condition seen in consecutive runs is not linked. Required for continuous assessment (MVP Plan Phase 2).
 
 ---
@@ -436,7 +436,7 @@ Known limitations: relative to `autovacuum_multixact_freeze_max_age` not evaluat
 | Condition | On the primary: `archive_mode = off` — WARNING (no point-in-time recovery; may be a conscious choice); `archive_mode` on / always with empty `archive_command` and `archive_library` — CRITICAL (WAL accumulates until the disk is full) |
 | Subject | SETTING on the primary |
 
-Known limitations: whether archiving succeeds (`pg_stat_archiver`) is PG-BKP-001 and needs a new collector. Backups themselves are detected later by method (catalogue decision 4).
+Known limitations: whether archiving succeeds is PG-BKP-001 (V041). Backups themselves are detected later by method (catalogue decision 4).
 
 ## PG-SEC-002 — MD5 Password Encryption / PG-SEC-003 — SSL Disabled (PG_SECURITY_HEALTH, topic SECURITY)
 
@@ -450,6 +450,56 @@ Known limitations: roles that still have md5 hashes need `pg_authid` (superuser)
 
 **Verification (V038)**  
 Unit tests for every condition and boundary. Lab: pending.
+
+---
+
+# Batch of 2026-10-26 — archive failures, prepared transactions, failover (V041, PG015)
+
+Two new collectors: `PG_WAL_STATUS` (NODE: `pg_stat_archiver`, `archive_mode`, the primary's current timeline from its WAL file name and the modification time of that timeline's history file from `pg_ls_waldir()`) and `PG_PREPARED_TRANSACTIONS` (SYSTEM: one status row, always present, plus one row per `pg_prepared_xacts` entry). Both work with `pg_monitor`.
+
+An evaluator may now raise `InsufficientEvidence(source, code, message)`: the rule ends INSUFFICIENT_EVIDENCE with the reason `SOURCE: [code] message`, and the report explains the code in its language.
+
+## PG-BKP-001 — WAL Archive Failures (PG_BACKUP_HEALTH, topic BACKUP)
+
+| | |
+| --- | --- |
+| Evidence | `PG_WAL_STATUS`, required, 900 s |
+| Condition | Per node that archives (primary with `archive_mode` on / always; replica only with always): `last_failed_time` newer than `last_archived_time` (or no success recorded) |
+| Severity | CRITICAL |
+| Subject | NODE; FINDING_ALT when no successful archive is recorded |
+| Details | failed / archived counts, last failed and last archived WAL and time, statistics reset |
+
+Known limitations: failures followed by a success are history, not a finding. "No success for a long time" is not judged; a quiet system may not switch WAL files for hours (needs WAL generation rate). Nodes with `archive_mode = off` are PG-BKP-002. Counters reset with `pg_stat_reset_shared('archiver')`.
+
+## PG-TRAN-005 — Long Prepared Transaction (PG_TRANSACTION_HEALTH, topic TRANSACTIONS)
+
+| | |
+| --- | --- |
+| Evidence | `PG_PREPARED_TRANSACTIONS`, required, 600 s |
+| Metric | `captured_at − prepared` per prepared transaction |
+| Thresholds | WARNING ≥ 5 min, CRITICAL ≥ 1 h |
+| Subject | PREPARED_TRANSACTION (gid); details database, owner, transaction id |
+
+A prepared transaction keeps its locks and holds back vacuum with no session attached, so PG-TRAN-003 cannot see it. The recommendation warns against rolling back without the transaction manager. `max_prepared_transactions = 0` simply means no findings.
+
+## PG-HA-001 — Recent Failover (PG_REPLICATION_HEALTH, topic REPLICATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_WAL_STATUS`, required, 900 s |
+| Metric | time since the primary's current timeline began (`captured_at − timeline_started_at`, both from the primary's clock) |
+| Condition | within parameter `recent_failover_window` (86 400 s) → WARNING |
+| Insufficient evidence | no primary among the collected nodes (`no_primary`); timeline > 1 but its history file is not in `pg_wal` (`no_timeline_history`) |
+| Subject | NODE (current primary) |
+
+**Design notes**  
+No history is needed, so a first health check can answer. Only the current timeline's history file is used: it is written by the primary's own promotion. Older history files are copied by `pg_basebackup` / `pg_rewind` with a new modification time (lab 2026-10-26: `00000044.history` showed the time a node was rebuilt), so they cannot date older failovers and failovers are not counted. Timeline 1 means the cluster was never promoted. The executive inventory shows the last failover (or "never") from this check's collection, whether or not the rule fires.
+
+**Known limitations**  
+Planned switchovers and unplanned failovers look the same. A whole cluster restored from a backup also starts a new timeline and is reported.
+
+**Verification (V041)**  
+Unit tests for every condition; repository test runs both real collectors on a disposable PostgreSQL, the worker persistence and the three assessments, including the insufficient-evidence path. Lab 2026-10-26 (hc37): clean state as expected; with `archive_command = /bin/false` PG-BKP-001 CRITICAL (no successful archive recorded, FINDING_ALT) and PG-BKP-002 healthy; a prepared transaction after 6 minutes PG-TRAN-005 WARNING; PG-HA-001 WARNING for the failover 3 hours earlier, a Patroni restart did not count as a failover.
 
 ---
 
@@ -507,4 +557,3 @@ Not implemented; recorded so they are not lost.
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
 | Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
 | Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |
-| Unplanned failover / primary changed | Lab 2026-10-20: host laptop slept, Patroni promoted postgre-2 unnoticed | Partly: role per node is collected; needs role history (instance inventory keeps only the current row) or the timeline ID (`pg_control_checkpoint()`), which increases on every promotion |

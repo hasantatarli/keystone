@@ -570,6 +570,46 @@ def load_latest_configuration_snapshot(conn, target_id):
         """, (node_target_ids(conn, target_id),)).fetchall()
 
 
+def load_latest_wal_status(conn, target_id):
+    """Latest PG_WAL_STATUS per node: archiver statistics, timeline and when it began."""
+    return conn.execute(
+        """
+        SELECT w.snapshot_id, w.target_id, t.name AS node_name, w.captured_at, w.in_recovery,
+               w.archive_mode, w.timeline_id, w.timeline_history_file, w.timeline_started_at,
+               w.archived_count, w.last_archived_wal, w.last_archived_time, w.failed_count,
+               w.last_failed_wal, w.last_failed_time, w.stats_reset
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT * FROM postgresql.wal_status_snapshot s
+            WHERE s.target_id = t.target_id ORDER BY s.captured_at DESC LIMIT 1
+        ) w ON TRUE
+        WHERE t.target_id = ANY(%s)
+        ORDER BY w.target_id
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
+def load_latest_prepared_transactions(conn, target_id):
+    """Latest PG_PREPARED_TRANSACTIONS: the SYSTEM row and the transactions captured with it."""
+    system = conn.execute(
+        """
+        SELECT 'SYSTEM' AS record_type, snapshot_id, target_id, captured_at,
+               max_prepared_transactions, prepared_count
+        FROM postgresql.prepared_transaction_status_snapshot
+        WHERE target_id = %s ORDER BY captured_at DESC LIMIT 1
+        """, (target_id,)).fetchone()
+    if system is None:
+        return []
+    transactions = conn.execute(
+        """
+        SELECT 'TRANSACTION' AS record_type, snapshot_id, target_id, captured_at,
+               transaction_id::text AS transaction_id, gid, prepared_at, owner, database_name
+        FROM postgresql.prepared_transaction_snapshot
+        WHERE target_id = %s AND captured_at = %s
+        ORDER BY prepared_at
+        """, (target_id, system["captured_at"])).fetchall()
+    return [system] + transactions
+
+
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
@@ -1361,6 +1401,105 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
     return findings
 
 
+class InsufficientEvidence(Exception):
+    """Raised by an evaluator when the evidence it got cannot answer the rule."""
+
+    def __init__(self, source, code, message):
+        super().__init__(f"{source}: [{code}] {message}")
+
+
+def clock(value):
+    """Time in a finding sentence: 'YYYY-MM-DD HH:MM:SS'."""
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value is not None else None
+
+
+def archives(row):
+    """Whether the node archives WAL: a primary with archive_mode on/always, a replica only with always."""
+    return row["archive_mode"] == "always" or (row["archive_mode"] == "on" and not row["in_recovery"])
+
+
+def evaluate_archive_failures(rows, rule, thresholds):
+    """PG-BKP-001: the last archive failure is newer than the last success (archiving stuck now)."""
+    findings = []
+    for row in rows:
+        failed, archived = row["last_failed_time"], row["last_archived_time"]
+        if not archives(row) or failed is None or (archived is not None and archived >= failed):
+            continue
+        values = {"node_name": row["node_name"], "last_failed_time": clock(failed),
+                  "last_failed_wal": row["last_failed_wal"],
+                  "last_archived_time": clock(archived) or "never"}
+        if archived is None:
+            values["_alt"] = True
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": values, "observed_value": None, "observed_unit": None,
+            "subject_type": "NODE", "subject_identifier": row["node_name"],
+            "details": {"node": row["node_name"], "archive_mode": row["archive_mode"],
+                        "failed_count": row["failed_count"], "archived_count": row["archived_count"],
+                        "last_failed_wal": row["last_failed_wal"],
+                        "last_archived_wal": row["last_archived_wal"],
+                        "last_failed_time": iso(failed), "last_archived_time": iso(archived),
+                        "stats_reset": iso(row["stats_reset"]),
+                        "captured_at": iso(row["captured_at"])}})
+    return findings
+
+
+def evaluate_long_prepared_transaction(rows, rule, thresholds):
+    """PG-TRAN-005: prepared transactions waiting for COMMIT/ROLLBACK PREPARED, by age."""
+    findings = []
+    for row in rows:
+        if row["record_type"] != "TRANSACTION":
+            continue
+        age = (row["captured_at"] - row["prepared_at"]).total_seconds()
+        matched = match_threshold(age, thresholds, "SECOND")
+        if matched is None:
+            continue
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": {"gid": row["gid"], "database_name": row["database_name"],
+                                "owner": row["owner"], "age_seconds": round(age)},
+            "observed_value": round(age, 1), "observed_unit": "SECOND",
+            "subject_type": "PREPARED_TRANSACTION", "subject_identifier": row["gid"],
+            "details": {"gid": row["gid"], "database": row["database_name"], "user": row["owner"],
+                        "transaction_id": row["transaction_id"],
+                        "prepared_at": iso(row["prepared_at"]),
+                        "captured_at": iso(row["captured_at"])}})
+    return findings
+
+
+def evaluate_recent_failover(rows, rule, thresholds):
+    """PG-HA-001: the primary's current timeline began within the recent failover window.
+
+    The history file of the current timeline is written by the primary's own
+    promotion; both times come from the same server clock.
+    """
+    primaries = [r for r in rows if r["in_recovery"] is False and r["timeline_id"] is not None]
+    if not primaries:
+        raise InsufficientEvidence("PG_WAL_STATUS", "no_primary",
+                                   "No primary among the collected nodes.")
+    primary = max(primaries, key=lambda r: r["captured_at"])
+    if primary["timeline_id"] == 1:
+        return []                       # never promoted
+    started = primary["timeline_started_at"]
+    if started is None:
+        raise InsufficientEvidence("PG_WAL_STATUS", "no_timeline_history",
+                                   f"History file of timeline {primary['timeline_id']} is not in pg_wal.")
+    since = max((primary["captured_at"] - started).total_seconds(), 0.0)
+    window = parameter(rule, "recent_failover_window")
+    if since > window:
+        return []
+    return [{
+        "severity": rule["default_severity"], "snapshot_id": primary["snapshot_id"],
+        "template_values": {"node_name": primary["node_name"], "timeline_id": primary["timeline_id"],
+                            "timeline_started_at": clock(started), "since_seconds": round(since)},
+        "observed_value": round(since, 1), "observed_unit": "SECOND",
+        "subject_type": "NODE", "subject_identifier": primary["node_name"],
+        "details": {"node": primary["node_name"], "timeline_id": primary["timeline_id"],
+                    "timeline_history_file": primary["timeline_history_file"],
+                    "timeline_started_at": iso(started),
+                    "captured_at": iso(primary["captured_at"])}}]
+
+
 # -----------------------------------------------------------------------------
 # Evaluation Registry
 # -----------------------------------------------------------------------------
@@ -1377,6 +1516,8 @@ EVIDENCE_LOADERS = {
     "PG_REPLICATION_STATUS": load_latest_replication_status,
     "PG_INSTANCE_INVENTORY": load_instance_inventory,
     "PG_VACUUM_ANALYZE": load_latest_vacuum_analyze_snapshot,
+    "PG_WAL_STATUS": load_latest_wal_status,
+    "PG_PREPARED_TRANSACTIONS": load_latest_prepared_transactions,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -1406,6 +1547,9 @@ RULE_EVALUATORS = {
     "PG-SEC-003": setting_is("ssl", {"off"}),
     "PG-MAINT-001": evaluate_dead_tuple_pressure,
     "PG-MAINT-002": evaluate_stale_statistics,
+    "PG-BKP-001": evaluate_archive_failures,
+    "PG-TRAN-005": evaluate_long_prepared_transaction,
+    "PG-HA-001": evaluate_recent_failover,
 }
 
 
@@ -1559,11 +1703,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
 
     evidence = (next(iter(evidence_sets.values()))
                 if len(evidence_sets) == 1 else evidence_sets)
-    findings = evaluator(
-        evidence,
-        rule,
-        thresholds,
-    )
+    try:
+        findings = evaluator(evidence, rule, thresholds)
+    except InsufficientEvidence as exc:
+        return OUTCOME_INSUFFICIENT_EVIDENCE, [], str(exc)
 
     if findings:
         return OUTCOME_ATTENTION_REQUIRED, findings, None

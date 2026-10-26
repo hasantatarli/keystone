@@ -2132,6 +2132,46 @@ def save_host_snapshot(conn, task, rows):
 
 
 
+WAL_STATUS_COLUMNS = ("captured_at", "in_recovery", "archive_mode", "timeline_id",
+                      "timeline_history_file", "timeline_started_at", "archived_count",
+                      "last_archived_wal", "last_archived_time", "failed_count", "last_failed_wal",
+                      "last_failed_time", "stats_reset")
+
+
+def save_wal_status_snapshot(conn, task, rows):
+    """Persist the PG_WAL_STATUS row of one node."""
+    if len(rows) != 1:
+        raise RuntimeError(f"PG_WAL_STATUS returned {len(rows)} rows; expected 1.")
+    columns = ", ".join(("target_id",) + WAL_STATUS_COLUMNS)
+    values = ", ".join(f"%({c})s" for c in ("target_id",) + WAL_STATUS_COLUMNS)
+    conn.execute(f"INSERT INTO postgresql.wal_status_snapshot ({columns}) VALUES ({values})",
+                 {"target_id": task["target_id"], **{c: rows[0][c] for c in WAL_STATUS_COLUMNS}})
+
+
+def save_prepared_transactions_snapshot(conn, task, rows):
+    """Persist PG_PREPARED_TRANSACTIONS: the SYSTEM row and one row per prepared transaction."""
+    system = [r for r in rows if r["record_type"] == "SYSTEM"]
+    if len(system) != 1:
+        raise RuntimeError(f"PG_PREPARED_TRANSACTIONS returned {len(system)} SYSTEM rows; expected 1.")
+    if len({r["captured_at"] for r in rows}) != 1:
+        raise RuntimeError("PG_PREPARED_TRANSACTIONS rows contain multiple captured_at values.")
+    system = system[0]
+    conn.execute(
+        "INSERT INTO postgresql.prepared_transaction_status_snapshot "
+        "(target_id, captured_at, max_prepared_transactions, prepared_count) VALUES (%s, %s, %s, %s)",
+        (task["target_id"], system["captured_at"], system["max_prepared_transactions"],
+         system["prepared_count"]))
+    transactions = [r for r in rows if r["record_type"] == "TRANSACTION"]
+    if transactions:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO postgresql.prepared_transaction_snapshot (target_id, captured_at, "
+                "transaction_id, gid, prepared_at, owner, database_name) "
+                "VALUES (%s, %s, %s::xid, %s, %s, %s, %s)",
+                [(task["target_id"], r["captured_at"], str(r["transaction_id"]), r["gid"],
+                  r["prepared_at"], r["owner"], r["database_name"]) for r in transactions])
+
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -2144,6 +2184,8 @@ COLLECTOR_HANDLERS = {
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,
+    "PG_WAL_STATUS": save_wal_status_snapshot,
+    "PG_PREPARED_TRANSACTIONS": save_prepared_transactions_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):

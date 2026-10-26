@@ -1,6 +1,6 @@
 # Keystone Development Status
 
-Last updated: 2026-10-09
+Last updated: 2026-10-26
 
 This document is the working checkpoint for the PostgreSQL MVP. It records what is implemented and verified, what is currently being worked on, and what comes next. It is intentionally narrower than a long-term product roadmap.
 
@@ -28,18 +28,20 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 
 ## Engineering Intelligence Implemented
 
-Six real PostgreSQL rules are currently implemented. The Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`) documents each of them.
+24 PostgreSQL rules in 8 assessments (2026-10-26, V016–V041). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
 
-| Rule | Assessment | Evidence | Result logic |
-| --- | --- | --- | --- |
-| PG-TRAN-001 | PG_TRANSACTION_HEALTH | PG_ACTIVITY_SNAPSHOT | Long idle transaction; idle time since `state_change`, WARNING 300 s / CRITICAL 900 s |
-| PG-TRAN-003 | PG_TRANSACTION_HEALTH | PG_ACTIVITY_SNAPSHOT | Long-running transaction; transaction age in any non-aborted state, WARNING 30 min / CRITICAL 1 h |
-| PG-TRAN-002 | PG_TRANSACTION_HEALTH | PG_TRANSACTION_WRAPAROUND | Database XID age; WARNING/CRITICAL by transaction threshold |
-| PG-REP-001 | PG_REPLICATION_HEALTH | PG_REPLICATION_SLOTS | WAL status `extended`; default WARNING |
-| PG-REP-002 | PG_REPLICATION_HEALTH | PG_REPLICATION_SLOTS | WAL status `unreserved` or `lost`; default CRITICAL |
-| PG-CONN-001 | PG_CONNECTION_HEALTH | PG_CONNECTION_ACTIVITY | Aborted idle transaction connection count; WARNING from 1 connection |
+| Assessment | Rules |
+| --- | --- |
+| PG_TRANSACTION_HEALTH | PG-TRAN-001 long idle transaction, PG-TRAN-002 XID wraparound, PG-TRAN-003 long-running transaction, PG-TRAN-004 MultiXact wraparound, PG-TRAN-005 long prepared transaction |
+| PG_REPLICATION_HEALTH | PG-REP-001 slot WAL retention, PG-REP-002 slot WAL lost, PG-REP-003 replication lag, PG-REP-004 replica not streaming, PG-REP-005 inactive slot, PG-REP-006 sync replication without sync standby, PG-HA-001 recent failover |
+| PG_CONNECTION_HEALTH | PG-CONN-001 aborted idle transactions, PG-CONN-002 connection capacity |
+| PG_CAPACITY_HEALTH | PG-CAP-001 data disk usage |
+| PG_CONFIGURATION_HEALTH | PG-CONF-001 pending restart, PG-CONF-002 unsafe durability settings, PG-CONF-004 autovacuum disabled |
+| PG_BACKUP_HEALTH | PG-BKP-001 WAL archive failures, PG-BKP-002 WAL archiving |
+| PG_SECURITY_HEALTH | PG-SEC-002 md5 password encryption, PG-SEC-003 SSL disabled |
+| PG_MAINTENANCE_HEALTH | PG-MAINT-001 dead tuples, PG-MAINT-002 stale statistics |
 
-The Dictionary currently contains assessment definitions, rule definitions, thresholds, and evidence requirements. Runtime results are persisted as assessment runs and findings.
+The Dictionary contains assessment definitions, rules, thresholds, rule parameters, evidence requirements, topics, impact categories and rule texts in Turkish and English. Runtime results are persisted as assessment runs and findings.
 
 ## Clean Install Integrity (2026-10-05)
 
@@ -147,11 +149,17 @@ The checksum is a SHA-256 of the raw file bytes. A Windows checkout (CRLF) and a
 
 The installer stores the header `Description` in `keystone.migration_history`, a `VARCHAR(500)` column. A longer description fails the installation. Keep the header description short and put detailed rationale in a separate SQL comment block (see V021).
 
-### 8. Empty evidence vs missing evidence
+### 8. Empty evidence vs missing evidence — partly resolved (V041)
+
+New collectors always return a SYSTEM row (`PG_PREPARED_TRANSACTIONS`), so "none" is evidence. Older detail-only collectors (`PG_REPLICATION_SLOTS`) are unchanged. Original note:
+
 
 Some collectors legitimately return zero rows (for example `PG_REPLICATION_SLOTS` on a server without replication slots). Evidence loaders read the latest captured rows, so "collected, nothing to report" is indistinguishable from "never collected" and is treated as missing evidence. Part of the open decision in issue 2.
 
-### 9. Findings can persist after recovery within the freshness window
+### 9. Findings can persist after recovery within the freshness window — resolved for health checks (PR #15, 2026-10-21)
+
+A health check collects fresh evidence first and ignores what it could not collect. Scheduled assessments still judge the latest evidence within its freshness limit. Original note:
+
 
 The engine evaluates the latest evidence that is still within `max_age_seconds`. If the condition is resolved but no new evidence has been collected, the old evidence still produces the finding. Observed in run 19: the aborted transaction was rolled back but the collector had not run again, so PG-CONN-001 still reported WARNING. Correct behaviour for the current model, but it must be documented in the Rule Catalog and considered when a health check triggers collection.
 
@@ -159,7 +167,8 @@ The engine evaluates the latest evidence that is still within `max_age_seconds`.
 
 PG-TRAN-001 matches `state = 'idle in transaction'` only. A session in `idle in transaction (aborted)` is never reported as a long idle transaction, however long it stays open; it only appears in PG-CONN-001 as a count without duration. Decide whether this is intended before writing the Rule Catalog entry.
 
-### 11. Manual collection workflow is error-prone
+### 11. Manual collection workflow is error-prone — resolved by the one-command health check (PR #15)
+
 
 A lab regression currently requires inserting a queue row, running the worker and running the engine by hand. A skipped queue insert produced a misleading result (run 19). This supports a later "run health check" entry point that collects the required evidence before evaluating. Not an MVP engine change by itself.
 
@@ -169,7 +178,7 @@ Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through 
 
 ## Active Work
 
-Current checkpoint: MVP Plan Phase 0 complete; next is Phase 1 (scheduling, then the one-command health check and report).
+Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (24 checks done, P1 remaining: indexes, sequence capacity, roles, public schema, then configuration recommendations). Open in Phase 1: offline evidence bundle.
 
 Done:
 
@@ -203,26 +212,23 @@ Report, inventory and rule coverage (2026-10-19/20, PR #16, #17 lab-verified and
 - Executive tiles count checks (they add up); affected areas name the problem.
 - **PostgreSQL V1 Assessment Catalogue** (Service Catalog → Health Assessment): 62 checks, priorities P1 → P3, pg_collector coverage, review decisions (configuration recommendations, backup method detection, conscious choices are WARNING).
 
-In progress — PR #18 (draft), replication and HA rules PG-REP-003…006 (V032, PG014):
-- Lab 2026-10-20: clean state and stopped replica (PG-REP-004 + PG-REP-005) as expected. PG-REP-006 not simulable with Patroni (it manages `synchronous_standby_names`); covered by tests.
-- **Open:** the lag test (replay paused on a replica, writes on the primary) produced no PG-REP-003 finding. Suspected: `replay_lag` stops growing when replay is stuck. Next: Hasan runs `pg_stat_replication` with WAL bytes behind while replay is paused; then add a WAL-bytes condition (proposal 256 MB / 1 GB), which needs a second unit per rule (Known Issue 3).
-- **Agreed direction:** problem cards in bullets — "What is happening" (one sentence), "Likely causes" (list, new rule text type CAUSES), "Why it matters", "What to do" (steps). Rewrite TR/EN texts of all rules. To be confirmed by Hasan before implementation (likely in PR #18).
-
 Rule batches from the Assessment Catalogue (2026-10-21):
 - PR #18 merged: PG-REP-003…006 (V032–V035), problem cards with causes and steps (CAUSES text type), lag beyond an intended apply delay; the observed value is always what was measured (Rule Catalog principle).
 - PR #19 lab-verified: PG-CONF-001/002/004, PG-CONN-002 (V036, V037). Patroni resumes paused replay; `pg_wal_replay_pause()` cannot simulate lag there.
 - Improvement noted: PG-CONF-001 should show the pending new value (`pg_file_settings`) and setting values in readable units (32768 × 8 kB → 256 MB). Finding sentences are still English only in the Dictionary (`finding_template`); make them TR/EN.
 
-Next (MVP Plan Phase 1):
+Rule batches 2026-10-26:
+- PR #21 merged: PG_MAINTENANCE_HEALTH, PG-MAINT-001/002 with rule parameters (V039).
+- PR #22 merged: finding sentences per language (FINDING / FINDING_ALT, V040), readable setting values. The pending new value of PG-CONF-001 stays out: `pg_file_settings` is superuser-only.
+- PR #23 lab-verified: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
+- Next: P1 rules that need per-database collectors (indexes, sequence capacity, roles and public schema), then the configuration recommendation ADR.
 
-1. HTML report from a health check (Turkish/English frame): first draft in PR #16 (draft), lab report generated 2026-10-14. To discuss next session:
-   - Plain-language results ("explain it to a non-DBA"): per rule a healthy statement, meaning / likely cause, and impact, stored in the Dictionary per language (rule text table: rule, language, text type, text); report groups rules by topic (replication, transactions, connections…) with one plain sentence each. Revisits the 2026-10-14 decision that rule texts stay English. Claude drafts TR/EN texts for the six rules, Hasan reviews as DBA.
-   - Two report levels (Hasan, 2026-10-14): **C-level** (CTO/CEO: visuals, numbers, short sentences, which business areas are affected, decisions) and **technical** (DBA / IT manager: rule details, evidence, collection status). Same health check data, two renderings; decide whether one file with two parts or two files.
-   - Later, Engineering Intelligence: combine findings into one diagnosis (advanced RCA).
-   - Open report questions: logo / company name, customer name, extra sections, PDF output.
-   - Several independent systems of one customer: per-system report plus an overview page; needs a customer concept in the data model.
-2. Default collector intervals from collector header metadata.
-3. Windows service setup for the agent.
+Next:
+
+1. P1 rules with per-database collectors: PG-IDX-001/002, PG-CAP-002, PG-SEC-004; then PG-SEC-001.
+2. Configuration recommendation capability (PG-CONF-003): ADR first, then implementation.
+3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
+4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.
 
 Small gaps noted: `collector_assignment` has no creation time / creator (needed when the web interface edits assignments).
 

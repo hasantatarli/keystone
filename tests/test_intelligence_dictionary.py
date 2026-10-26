@@ -210,6 +210,28 @@ EXPECTED_RULES = {
         "parameters": {"min_modifications": (Decimal("10000"), "ROW"),
                        "large_table_modifications": (Decimal("50000000"), "ROW")},
     },
+    "PG-BKP-001": {
+        "assessment": "PG_BACKUP_HEALTH",
+        "default_severity": "CRITICAL",
+        "thresholds": {},
+        "evidence": {"PG_WAL_STATUS": (True, 900)},
+    },
+    "PG-TRAN-005": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("300"), "SECOND"),
+            "CRITICAL": (Decimal("3600"), "SECOND"),
+        },
+        "evidence": {"PG_PREPARED_TRANSACTIONS": (True, 600)},
+    },
+    "PG-HA-001": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_WAL_STATUS": (True, 900)},
+        "parameters": {"recent_failover_window": (Decimal("86400"), "SECOND")},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
