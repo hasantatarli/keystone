@@ -69,7 +69,7 @@ Sources combined:
 | **PG-TRAN-003** | Long-running transaction | Transaction age ≥ 30 / 60 min | Ready: PG-009 (activity) | — | Done |
 | **PG-TRAN-002** | XID wraparound risk | `age(datfrozenxid)` ≥ 1.5 / 1.8 billion | Ready: PG-006 | Transaction ID TXID | Done |
 | **PG-TRAN-004** | MultiXact wraparound risk | `mxid_age` relative to limits | Ready: PG-006 | datminmxid | Done |
-| PG-TRAN-005 | Orphaned prepared transactions | A prepared transaction older than 5 min — WARNING, 1 h — CRITICAL (holds locks and xmin, survives restarts) | Gap: PG-020 | Orphaned prepare transactions | P1 |
+| **PG-TRAN-005** | Orphaned prepared transactions | A prepared transaction older than 5 min — WARNING, 1 h — CRITICAL (holds locks and xmin, survives restarts) | Ready: PG_PREPARED_TRANSACTIONS | Orphaned prepare transactions | Done |
 | PG-TRAN-006 | XID age relative to `autovacuum_freeze_max_age` | Anti-wraparound vacuum overdue or repeatedly not finishing | Ready: PG-006 + PG-002 | Transaction ID TXID | P2 |
 | PG-LOCK-001 | Blocking and lock waits | Sessions waiting on locks longer than N seconds; the blocking session named | Gap: PG-009 locking | — | P2 |
 | PG-TRAN-007 | Long-running query | An active statement running longer than N minutes | Ready: PG-009 (activity) | active sessions monitor | P2 |
@@ -114,18 +114,18 @@ Sources combined:
 | **PG-REP-004** | Replica missing or disconnected | Fewer streaming replicas than the NODE replicas Keystone knows | Ready: PG_REPLICATION_STATUS + target tree | — | Done |
 | **PG-REP-005** | Inactive replication slot | `active = false` (retains WAL, holds xmin) | Ready: PG-007 | Replication slot | Done |
 | **PG-REP-006** | Synchronous replication without a synchronous standby | `synchronous_standby_names` set but no standby in `sync` state — CRITICAL, writes can hang | Ready: PG-002 + PG_REPLICATION_STATUS | — | Done |
-| PG-HA-001 | Unplanned failover | Timeline ID increased since the last check, or the primary moved to another node | Gap: timeline ID in PG-001, role history | — | P1 |
+| **PG-HA-001** | Recent failover | The primary's current timeline began within the last 24 h (history file time; no history needed) — WARNING | Ready: PG_WAL_STATUS | — | Done |
 | PG-HA-002 | Recently restarted node | `postmaster_start_time` within the last 24 h — INFO, context for other findings | Ready: PG-001 | DB_START_DATE, UP_TIME | P2 |
 | PG-HA-003 | Replica smaller than primary | Replica with fewer CPUs or < 90 % of the primary's memory | Ready: host | — | P2 |
 | PG-HA-004 | Mixed versions across nodes | Different PostgreSQL minor versions in one cluster | Ready: PG-001 | — | P2 |
 
 ## 8. Backup & Recovery
 
-No evidence is collected today. This is the area with the highest real-world risk.
+WAL archiving settings and archiver statistics are collected (PG_CONFIGURATION_SNAPSHOT, PG_WAL_STATUS); backups themselves are not yet. This is the area with the highest real-world risk.
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-BKP-001 | WAL archiving failing | `pg_stat_archiver`: last failure after last success, or failures increasing — CRITICAL | Gap: new archiver collector | — | P1 |
+| **PG-BKP-001** | WAL archiving failing | `pg_stat_archiver`: last failure after last success — CRITICAL | Ready: PG_WAL_STATUS | — | Done |
 | **PG-BKP-002** | No point-in-time recovery possible | `archive_mode = off` on a primary — WARNING with explanation | Ready: PG-002 | — | Done |
 | PG-BKP-003 | Unlogged tables | Unlogged tables exist: lost after a crash, not replicated — WARNING with the table list | Gap: PG-030 | Unlogged Tables | P2 |
 | PG-BKP-004 | Last successful backup age | No successful backup within N hours (pgBackRest, Barman, pg_dump logs) | Gap: backup tool integration over SSH | — | P3 |
@@ -192,12 +192,12 @@ A health check shows performance indicators; it does not replace a Performance I
 With the 17 ready P1 checks Keystone reaches 24 checks without new collectors. Collectors needed for the remaining P1 checks, in proposed order:
 
 1. **Release reference table** (Dictionary, not a collector) — PG-LIFE-001/002.
-2. **Archiver statistics** (new) — PG-BKP-001.
+2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
 3. **PG-010 / PG-011 Index usage and quality** — PG-IDX-001/002.
 4. **PG-019 Sequence / integer key capacity** — PG-CAP-002.
-5. **PG-020 Prepared transactions** — PG-TRAN-005.
+5. ~~**PG-020 Prepared transactions** — PG-TRAN-005.~~ Done: PG_PREPARED_TRANSACTIONS (V041).
 6. **PG-016 Roles**, **PG-018 schema privileges** — PG-SEC-001/004.
-7. **Timeline ID** in PG-001 — PG-HA-001.
+7. ~~**Timeline ID** in PG-001 — PG-HA-001.~~ Done: PG_WAL_STATUS (V041).
 
 ## pg_collector coverage
 
@@ -243,6 +243,8 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 5. **Conscious choices** (`synchronous_commit = off`, `archive_mode = off` and similar) are WARNING by default. A customer's explicit acceptance ("accepted risk" with a reason) belongs to the finding lifecycle (MVP Plan Phase 2).
 
 6. **Version checks deferred** (2026-10-21, Hasan): PG-LIFE-001/002 need current release data. Many customer servers have no internet access, and a manually maintained list creates recurring work. Moved to P3; revisit with a release table shipped with Keystone updates.
+
+7. **Group 1 of the collector P1s** (2026-10-26, Hasan): PG-BKP-001 is CRITICAL only while the last failure is newer than the last success; "no success for a long time" is not judged. PG-TRAN-005 uses 5 / 60 minutes. PG-HA-001 dates the last failover from the current timeline's history file (works on a first check); a failover within 24 h is a WARNING.
 
 ## Open questions for review
 

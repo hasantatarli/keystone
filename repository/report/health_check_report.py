@@ -103,6 +103,17 @@ TEXTS = {
         "detail_active": "Aktif", "detail_idle": "Boşta", "detail_idle_in_transaction": "Transaction içinde boşta", "detail_beyond_delay": "Bilinçli gecikmenin üzerindeki kısım",
         "detail_slot": "Slot", "detail_slot_type": "Slot tipi", "detail_wal_status": "WAL durumu",
         "detail_sync_names": "synchronous_standby_names",
+        "detail_gid": "gid", "detail_transaction_id": "Transaction ID", "detail_prepared_at": "Hazırlanma zamanı",
+        "detail_archive_mode": "archive_mode", "detail_failed_count": "Başarısız arşiv sayısı",
+        "detail_archived_count": "Başarılı arşiv sayısı", "detail_last_failed_wal": "Son başarısız WAL",
+        "detail_last_archived_wal": "Son arşivlenen WAL", "detail_last_failed_time": "Son hata",
+        "detail_last_archived_time": "Son başarılı arşiv", "detail_stats_reset": "İstatistik sıfırlama",
+        "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
+        "detail_timeline_started_at": "Primary olma zamanı",
+        "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
+                         "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı."},
+        "inv_failover": "Son failover", "inv_failover_ago": "{ago} önce",
+        "inv_failover_never": "Hiç olmamış", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
@@ -191,6 +202,17 @@ TEXTS = {
         "detail_active": "Active", "detail_idle": "Idle", "detail_idle_in_transaction": "Idle in transaction", "detail_beyond_delay": "Beyond the intended delay",
         "detail_slot": "Slot", "detail_slot_type": "Slot type", "detail_wal_status": "WAL status",
         "detail_sync_names": "synchronous_standby_names",
+        "detail_gid": "gid", "detail_transaction_id": "Transaction ID", "detail_prepared_at": "Prepared at",
+        "detail_archive_mode": "archive_mode", "detail_failed_count": "Failed archives",
+        "detail_archived_count": "Archived", "detail_last_failed_wal": "Last failed WAL",
+        "detail_last_archived_wal": "Last archived WAL", "detail_last_failed_time": "Last failure",
+        "detail_last_archived_time": "Last success", "detail_stats_reset": "Statistics reset",
+        "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
+        "detail_timeline_started_at": "Became primary at",
+        "reason_codes": {"no_primary": "There is no primary among the collected servers.",
+                         "no_timeline_history": "The history file of the current timeline is not in pg_wal."},
+        "inv_failover": "Last failover", "inv_failover_ago": "{ago} ago",
+        "inv_failover_never": "Never", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
@@ -371,6 +393,19 @@ def load_report_data(conn, health_check_id):
         ORDER BY d.database_size_bytes DESC NULLS LAST, d.database_name
         """, (check["target_id"], check["target_id"], since, as_of)).fetchall()
 
+    wal_status = conn.execute(
+        """
+        SELECT w.target_id, w.captured_at, w.in_recovery, w.timeline_id, w.timeline_started_at
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT * FROM postgresql.wal_status_snapshot s
+            WHERE s.target_id = t.target_id AND s.captured_at BETWEEN %s AND %s
+            ORDER BY s.captured_at DESC LIMIT 1
+        ) w ON TRUE
+        WHERE (t.parent_target_id = %s AND t.target_type = 'NODE' AND t.is_active)
+           OR (t.target_id = %s AND t.target_type = 'NODE')
+        """, (since, as_of, check["target_id"], check["target_id"])).fetchall()
+
     dictionary = load_dictionary_texts(conn)
     conn.commit()
 
@@ -380,10 +415,11 @@ def load_report_data(conn, health_check_id):
     storage = [s_ for s_ in storage if (s_["target_id"], "PG_HOST_SNAPSHOT") in collected]
     if (check["target_id"], "PG_DATABASE_INVENTORY") not in collected:
         databases = []
+    wal_status = [w for w in wal_status if (w["target_id"], "PG_WAL_STATUS") in collected]
 
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
-            "databases": databases, "as_of": finished, **dictionary}
+            "databases": databases, "wal_status": wal_status, "as_of": finished, **dictionary}
 
 
 NODE_CONTEXT = {
@@ -495,8 +531,15 @@ REASON_PATTERN = re.compile(
     r"|(?P<missing>Required evidence is not available\.))$")
 
 
+# Reasons an evaluator gives itself: "SOURCE: [code] English message".
+REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] ")
+
+
 def explain_reason(reason, data, t):
     """Engine reason in plain words; says when this check failed to collect the source."""
+    coded = REASON_CODE_PATTERN.match(reason or "")
+    if coded and coded.group("code") in t["reason_codes"]:
+        return t["reason_codes"][coded.group("code")]
     match = REASON_PATTERN.match(reason or "")
     if not match:
         return reason or ""
@@ -822,6 +865,23 @@ def disk_cell(disk, limits, t):
             f'{e(t["percent"].format(n=pct))}')
 
 
+def failover_item(data, t):
+    """(label, value, sub) for the last failover of the primary collected in this check, or None."""
+    primaries = [w for w in data.get("wal_status", [])
+                 if w["in_recovery"] is False and w["timeline_id"] is not None]
+    if not primaries:
+        return None
+    primary = max(primaries, key=lambda w: w["captured_at"])
+    timeline = t["inv_timeline"].format(n=primary["timeline_id"])
+    if primary["timeline_id"] == 1:
+        return t["inv_failover"], t["inv_failover_never"], timeline
+    started = primary["timeline_started_at"]
+    if started is None:
+        return t["inv_failover"], t["inv_failover_unknown"], timeline
+    ago = t["inv_failover_ago"].format(ago=fmt_duration((primary["captured_at"] - started).total_seconds(), t))
+    return t["inv_failover"], ago, f"{timeline} · {fmt_time(started)}"
+
+
 def render_inventory(data, t):
     """Executive view of the estate: totals and a row per server when few. Displays, never judges."""
     nodes = data["nodes"]
@@ -846,6 +906,9 @@ def render_inventory(data, t):
             memory = sum(n["memory_total_bytes"] or 0 for n in hosts)
             items.append((t["inv_cpu"], t["inv_cores"].format(n=cores), partial(len(hosts))))
             items.append((t["inv_memory"], fmt_bytes(memory), partial(len(hosts))))
+    failover = failover_item(data, t)
+    if failover:
+        items.append(failover)
     if data["databases"]:
         size = sum(d["database_size_bytes"] or 0 for d in data["databases"])
         items.append((t["inv_data"], fmt_bytes(size), t["inv_databases"].format(n=len(data["databases"]))))
@@ -1050,13 +1113,21 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("database", "detail_database"), ("client_addr", "detail_client"),
                  ("state", "detail_state"), ("sync_state", "detail_sync_state"),
                  ("wal_behind", "detail_wal_behind"), ("apply_delay", "detail_apply_delay"),
-                 ("beyond_delay", "detail_beyond_delay"))
+                 ("beyond_delay", "detail_beyond_delay"), ("gid", "detail_gid"),
+                 ("transaction_id", "detail_transaction_id"), ("archive_mode", "detail_archive_mode"),
+                 ("failed_count", "detail_failed_count"), ("last_failed_wal", "detail_last_failed_wal"),
+                 ("archived_count", "detail_archived_count"),
+                 ("last_archived_wal", "detail_last_archived_wal"), ("timeline_id", "detail_timeline"),
+                 ("timeline_history_file", "detail_timeline_history_file"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
                ("state_change", "detail_state_change"),
                ("last_autovacuum", "detail_last_autovacuum"), ("last_vacuum", "detail_last_vacuum"),
                ("last_autoanalyze", "detail_last_autoanalyze"), ("last_analyze", "detail_last_analyze"),
+               ("prepared_at", "detail_prepared_at"), ("last_failed_time", "detail_last_failed_time"),
+               ("last_archived_time", "detail_last_archived_time"), ("stats_reset", "detail_stats_reset"),
+               ("timeline_started_at", "detail_timeline_started_at"),
                ("captured_at", "detail_captured_at"))
 
 
@@ -1089,11 +1160,15 @@ def setting_value_text(value, unit, t):
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
                 "connection_count"}
+# Durations in seconds read as '2 saat 5 dakika' in the report language.
+DURATION_VALUES = {"age_seconds", "since_seconds"}
 
 
-def template_value_text(key, value):
+def template_value_text(key, value, t=None):
     if key in COUNT_VALUES and isinstance(value, int) and not isinstance(value, bool):
         return f"{value:,}"
+    if key in DURATION_VALUES and t is not None and isinstance(value, (int, float)):
+        return fmt_duration(value, t)
     return value
 
 
@@ -1106,8 +1181,9 @@ def finding_sentence(f, data, lang):
     template = data["rule_texts"].get(f["rule_id"], {}).get(lang, {}).get(text_type)
     if not template:
         return f["finding_text"]
+    t = TEXTS.get(lang)
     try:
-        return template.format(**{k: template_value_text(k, v) for k, v in values.items()})
+        return template.format(**{k: template_value_text(k, v, t) for k, v in values.items()})
     except (KeyError, IndexError, ValueError):
         return f["finding_text"]
 

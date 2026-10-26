@@ -908,5 +908,100 @@ class MaintenanceRuleTests(unittest.TestCase):
                                                 {"rule_key": "X", "parameters": {}}, self.DEAD)
 
 
+def wal_row(node, in_recovery=False, archive_mode="on", failed=None, archived=None,
+            timeline=126, started=None, target_id=1):
+    return {"snapshot_id": target_id, "target_id": target_id, "node_name": node, "captured_at": NOW,
+            "in_recovery": in_recovery, "archive_mode": archive_mode,
+            "timeline_id": None if in_recovery else timeline,
+            "timeline_history_file": f"{timeline:08X}.history" if started else None,
+            "timeline_started_at": started, "archived_count": 10, "last_archived_wal": "0000007E00000001",
+            "last_archived_time": archived, "failed_count": 3 if failed else 0,
+            "last_failed_wal": "0000007E00000002" if failed else None, "last_failed_time": failed,
+            "stats_reset": NOW - timedelta(days=30)}
+
+
+class ArchiveFailureTests(unittest.TestCase):
+    def evaluate(self, *rows):
+        return engine.evaluate_archive_failures(list(rows), rule("CRITICAL"), [])
+
+    def test_failure_after_the_last_success_is_critical(self):
+        findings = self.evaluate(wal_row("pg-1", failed=NOW - timedelta(minutes=1),
+                                         archived=NOW - timedelta(minutes=10)))
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("pg-1", "CRITICAL")])
+        self.assertNotIn("_alt", findings[0]["template_values"])
+        self.assertEqual(findings[0]["details"]["failed_count"], 3)
+
+    def test_failure_followed_by_success_is_history(self):
+        self.assertEqual(self.evaluate(wal_row("pg-1", failed=NOW - timedelta(minutes=10),
+                                               archived=NOW - timedelta(minutes=1))), [])
+
+    def test_never_succeeded_uses_the_alternative_sentence(self):
+        values = self.evaluate(wal_row("pg-1", failed=NOW))[0]["template_values"]
+        self.assertTrue(values["_alt"])
+        self.assertEqual(values["last_archived_time"], "never")
+
+    def test_archiving_off_is_left_to_bkp_002(self):
+        self.assertEqual(self.evaluate(wal_row("pg-1", archive_mode="off", failed=NOW)), [])
+
+    def test_replica_counts_only_with_archive_mode_always(self):
+        self.assertEqual(self.evaluate(wal_row("pg-2", in_recovery=True, failed=NOW)), [])
+        self.assertEqual(len(self.evaluate(wal_row("pg-2", in_recovery=True, archive_mode="always",
+                                                   failed=NOW))), 1)
+
+
+class PreparedTransactionTests(unittest.TestCase):
+    THRESHOLDS = [threshold("WARNING", 300, "SECOND"), threshold("CRITICAL", 3600, "SECOND")]
+
+    def evaluate(self, *ages):
+        rows = [{"record_type": "SYSTEM", "snapshot_id": 1, "target_id": 1, "captured_at": NOW,
+                 "max_prepared_transactions": 10, "prepared_count": len(ages)}]
+        rows += [{"record_type": "TRANSACTION", "snapshot_id": 2 + i, "target_id": 1, "captured_at": NOW,
+                  "transaction_id": str(1000 + i), "gid": f"tm-{i}", "prepared_at": NOW - timedelta(seconds=a),
+                  "owner": "app", "database_name": "orders"} for i, a in enumerate(ages)]
+        return engine.evaluate_long_prepared_transaction(rows, rule(), self.THRESHOLDS)
+
+    def test_none_prepared_is_healthy(self):
+        self.assertEqual(self.evaluate(), [])
+
+    def test_age_boundaries(self):
+        findings = self.evaluate(299, 300, 3600)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("tm-1", "WARNING"), ("tm-2", "CRITICAL")])
+        self.assertEqual((findings[1]["observed_value"], findings[1]["observed_unit"]), (3600.0, "SECOND"))
+        self.assertEqual(findings[1]["template_values"],
+                         {"gid": "tm-2", "database_name": "orders", "owner": "app", "age_seconds": 3600})
+
+
+class RecentFailoverTests(unittest.TestCase):
+    RULE = {"rule_key": "PG-HA-001", "default_severity": "WARNING",
+            "parameters": {"recent_failover_window": {"value": 86400.0, "unit": "SECOND"}}}
+
+    def evaluate(self, *rows):
+        return engine.evaluate_recent_failover(list(rows), self.RULE, [])
+
+    def test_failover_within_the_window_is_a_warning(self):
+        findings = self.evaluate(wal_row("pg-3", started=NOW - timedelta(hours=3)),
+                                 wal_row("pg-1", in_recovery=True, target_id=2))
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings], [("pg-3", "WARNING")])
+        self.assertEqual(findings[0]["template_values"]["since_seconds"], 10800)
+        self.assertEqual(findings[0]["template_values"]["timeline_id"], 126)
+        self.assertEqual(findings[0]["observed_unit"], "SECOND")
+
+    def test_older_failover_is_healthy(self):
+        self.assertEqual(self.evaluate(wal_row("pg-3", started=NOW - timedelta(hours=25))), [])
+
+    def test_timeline_one_never_failed_over(self):
+        self.assertEqual(self.evaluate(wal_row("pg-1", timeline=1)), [])
+
+    def test_missing_history_file_is_insufficient_evidence(self):
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[no_timeline_history\]"):
+            self.evaluate(wal_row("pg-1"))
+
+    def test_no_primary_is_insufficient_evidence(self):
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[no_primary\]"):
+            self.evaluate(wal_row("pg-2", in_recovery=True))
+
+
 if __name__ == "__main__":
     unittest.main()

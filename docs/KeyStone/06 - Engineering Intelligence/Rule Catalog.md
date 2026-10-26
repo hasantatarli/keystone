@@ -436,7 +436,7 @@ Known limitations: relative to `autovacuum_multixact_freeze_max_age` not evaluat
 | Condition | On the primary: `archive_mode = off` — WARNING (no point-in-time recovery; may be a conscious choice); `archive_mode` on / always with empty `archive_command` and `archive_library` — CRITICAL (WAL accumulates until the disk is full) |
 | Subject | SETTING on the primary |
 
-Known limitations: whether archiving succeeds (`pg_stat_archiver`) is PG-BKP-001 and needs a new collector. Backups themselves are detected later by method (catalogue decision 4).
+Known limitations: whether archiving succeeds is PG-BKP-001 (V041). Backups themselves are detected later by method (catalogue decision 4).
 
 ## PG-SEC-002 — MD5 Password Encryption / PG-SEC-003 — SSL Disabled (PG_SECURITY_HEALTH, topic SECURITY)
 
@@ -450,6 +450,56 @@ Known limitations: roles that still have md5 hashes need `pg_authid` (superuser)
 
 **Verification (V038)**  
 Unit tests for every condition and boundary. Lab: pending.
+
+---
+
+# Batch of 2026-10-26 — archive failures, prepared transactions, failover (V041, PG015)
+
+Two new collectors: `PG_WAL_STATUS` (NODE: `pg_stat_archiver`, `archive_mode`, the primary's current timeline from its WAL file name and the modification time of that timeline's history file from `pg_ls_waldir()`) and `PG_PREPARED_TRANSACTIONS` (SYSTEM: one status row, always present, plus one row per `pg_prepared_xacts` entry). Both work with `pg_monitor`.
+
+An evaluator may now raise `InsufficientEvidence(source, code, message)`: the rule ends INSUFFICIENT_EVIDENCE with the reason `SOURCE: [code] message`, and the report explains the code in its language.
+
+## PG-BKP-001 — WAL Archive Failures (PG_BACKUP_HEALTH, topic BACKUP)
+
+| | |
+| --- | --- |
+| Evidence | `PG_WAL_STATUS`, required, 900 s |
+| Condition | Per node that archives (primary with `archive_mode` on / always; replica only with always): `last_failed_time` newer than `last_archived_time` (or no success recorded) |
+| Severity | CRITICAL |
+| Subject | NODE; FINDING_ALT when no successful archive is recorded |
+| Details | failed / archived counts, last failed and last archived WAL and time, statistics reset |
+
+Known limitations: failures followed by a success are history, not a finding. "No success for a long time" is not judged; a quiet system may not switch WAL files for hours (needs WAL generation rate). Nodes with `archive_mode = off` are PG-BKP-002. Counters reset with `pg_stat_reset_shared('archiver')`.
+
+## PG-TRAN-005 — Long Prepared Transaction (PG_TRANSACTION_HEALTH, topic TRANSACTIONS)
+
+| | |
+| --- | --- |
+| Evidence | `PG_PREPARED_TRANSACTIONS`, required, 600 s |
+| Metric | `captured_at − prepared` per prepared transaction |
+| Thresholds | WARNING ≥ 5 min, CRITICAL ≥ 1 h |
+| Subject | PREPARED_TRANSACTION (gid); details database, owner, transaction id |
+
+A prepared transaction keeps its locks and holds back vacuum with no session attached, so PG-TRAN-003 cannot see it. The recommendation warns against rolling back without the transaction manager. `max_prepared_transactions = 0` simply means no findings.
+
+## PG-HA-001 — Recent Failover (PG_REPLICATION_HEALTH, topic REPLICATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_WAL_STATUS`, required, 900 s |
+| Metric | time since the primary's current timeline began (`captured_at − timeline_started_at`, both from the primary's clock) |
+| Condition | within parameter `recent_failover_window` (86 400 s) → WARNING |
+| Insufficient evidence | no primary among the collected nodes (`no_primary`); timeline > 1 but its history file is not in `pg_wal` (`no_timeline_history`) |
+| Subject | NODE (current primary) |
+
+**Design notes**  
+No history is needed, so a first health check can answer. Only the current timeline's history file is used: it is written by the primary's own promotion. Older history files are copied by `pg_basebackup` / `pg_rewind` with a new modification time (lab 2026-10-26: `00000044.history` showed the time a node was rebuilt), so they cannot date older failovers and failovers are not counted. Timeline 1 means the cluster was never promoted. The executive inventory shows the last failover (or "never") from this check's collection, whether or not the rule fires.
+
+**Known limitations**  
+Planned switchovers and unplanned failovers look the same. A whole cluster restored from a backup also starts a new timeline and is reported.
+
+**Verification (V041)**  
+Unit tests for every condition; repository test runs both real collectors on a disposable PostgreSQL, the worker persistence and the three assessments, including the insufficient-evidence path. Lab: pending.
 
 ---
 

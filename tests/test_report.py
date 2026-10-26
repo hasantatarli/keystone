@@ -156,7 +156,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 11 / 16 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 14 / 20 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -499,6 +499,98 @@ class ReportTests(test_health_check.HealthCheckTests):
             "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-MAINT-001' "
             "ORDER BY res.assessment_result_id DESC LIMIT 1").fetchone()["parameters_used"]
         self.assertEqual(used["large_table_dead_tuples"], {"value": 50000000.0, "unit": "ROW"})
+
+    def latest_outcomes(self):
+        return {r["rule_key"]: (r["outcome"], r["max_severity"], r["reason"]) for r in self.conn.execute(
+            "SELECT rd.rule_key, res.outcome, res.max_severity, res.reason "
+            "FROM keystone.assessment_result res JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE res.assessment_run_id = (SELECT max(assessment_run_id) FROM keystone.assessment_run)"
+        ).fetchall()}
+
+    def test_wal_status_and_prepared_transaction_collectors_feed_the_rules(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        wal_sql = Path("providers/postgresql/telemetry/collectors/wal_status_snapshot.sql").read_text()
+        prepared_sql = Path("providers/postgresql/telemetry/collectors/"
+                            "prepared_transactions_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            wal_rows = cur.execute(wal_sql).fetchall()
+            prepared_rows = cur.execute(prepared_sql).fetchall()
+        self.assertEqual(len(wal_rows), 1)
+        self.assertEqual((wal_rows[0]["in_recovery"], wal_rows[0]["timeline_id"]), (False, 1))
+        self.assertEqual([r["record_type"] for r in prepared_rows], ["SYSTEM"])
+        worker.save_wal_status_snapshot(self.conn, {"target_id": self.node1}, wal_rows)
+        worker.save_prepared_transactions_snapshot(self.conn, {"target_id": self.system}, prepared_rows)
+        self.conn.commit()
+
+        engine.run_assessment(self.conn, "PG_BACKUP_HEALTH", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-BKP-001"][:2], ("HEALTHY", None))
+        engine.run_assessment(self.conn, "PG_TRANSACTION_HEALTH", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-TRAN-005"][:2], ("HEALTHY", None))
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-HA-001"][:2], ("HEALTHY", None))    # timeline 1
+
+        # A failover 3 hours ago and a prepared transaction waiting for 2 hours.
+        self.conn.execute("UPDATE postgresql.wal_status_snapshot SET timeline_id = 126, "
+                          "timeline_history_file = '0000007E.history', "
+                          "timeline_started_at = captured_at - interval '3 hours'")
+        self.conn.execute(
+            "INSERT INTO postgresql.prepared_transaction_snapshot (target_id, captured_at, "
+            "transaction_id, gid, prepared_at, owner, database_name) "
+            "SELECT target_id, captured_at, '4242'::xid, 'tm-orders-17', captured_at - interval '2 hours', "
+            "'app', 'orders' FROM postgresql.prepared_transaction_status_snapshot")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-HA-001"][:2], ("ATTENTION_REQUIRED", "WARNING"))
+        engine.run_assessment(self.conn, "PG_TRANSACTION_HEALTH", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-TRAN-005"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+        finding = self.conn.execute("SELECT finding_text, template_values FROM keystone.finding "
+                                    "ORDER BY finding_id DESC LIMIT 1").fetchone()
+        self.assertEqual(finding["template_values"]["gid"], "tm-orders-17")
+
+        # Without the history file the failover time is unknown: not assessed, never healthy.
+        self.conn.execute("UPDATE postgresql.wal_status_snapshot SET timeline_history_file = NULL, "
+                          "timeline_started_at = NULL")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcome, _, reason = self.latest_outcomes()["PG-HA-001"]
+        self.assertEqual(outcome, "INSUFFICIENT_EVIDENCE")
+        self.assertIn("[no_timeline_history]", reason)
+        t = report.TEXTS["tr"]
+        self.assertEqual(report.explain_reason(reason, {"collections": []}, t),
+                         t["reason_codes"]["no_timeline_history"])
+
+    def test_last_failover_in_the_inventory_and_findings_in_turkish(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "INSERT INTO postgresql.wal_status_snapshot (target_id, captured_at, in_recovery, "
+            "archive_mode, timeline_id, timeline_history_file, timeline_started_at) "
+            "VALUES (%s, now(), FALSE, 'on', 126, '0000007E.history', now() - interval '3 hours 5 minutes'),"
+            " (%s, now(), TRUE, 'on', NULL, NULL, NULL)", (self.node1, self.node2))
+        self.conn.execute("UPDATE keystone.finding SET template_values = %s",
+                          ('{"gid": "tm-1", "database_name": "orders", "owner": "app", '
+                           '"age_seconds": 7500}',))
+        self.conn.execute("UPDATE keystone.finding SET rule_id = (SELECT rule_id FROM "
+                          "keystone.rule_definition WHERE rule_key = 'PG-TRAN-005')")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("Son failover", executive)
+        self.assertIn("3 saat 5 dakika önce", executive)
+        self.assertIn("timeline 126", executive)
+        self.assertIn("bekleme süresi: 2 saat 5 dakika.", page)
+        self.assertIn("for 2 hours 5 minutes.", self.render(check_id, "en"))
+
+    def test_last_failover_is_hidden_when_not_collected_in_this_check(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "INSERT INTO postgresql.wal_status_snapshot (target_id, captured_at, in_recovery, "
+            "archive_mode, timeline_id) VALUES (%s, now(), FALSE, 'on', 1)", (self.node1,))
+        self.conn.execute("UPDATE keystone.health_check_collection SET status = 'FAILED' "
+                          "WHERE health_check_id = %s AND collector_key = 'PG_WAL_STATUS'", (check_id,))
+        self.conn.commit()
+        self.assertNotIn("Son failover", self.render(check_id, "tr"))
 
     def test_finding_sentence_in_the_report_language(self):
         check_id = self.make_check()

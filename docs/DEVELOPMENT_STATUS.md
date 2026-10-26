@@ -213,6 +213,12 @@ Rule batches from the Assessment Catalogue (2026-10-21):
 - PR #19 lab-verified: PG-CONF-001/002/004, PG-CONN-002 (V036, V037). Patroni resumes paused replay; `pg_wal_replay_pause()` cannot simulate lag there.
 - Improvement noted: PG-CONF-001 should show the pending new value (`pg_file_settings`) and setting values in readable units (32768 × 8 kB → 256 MB). Finding sentences are still English only in the Dictionary (`finding_template`); make them TR/EN.
 
+Rule batches 2026-10-26:
+- PR #21 merged: PG_MAINTENANCE_HEALTH, PG-MAINT-001/002 with rule parameters (V039).
+- PR #22 merged: finding sentences per language (FINDING / FINDING_ALT, V040), readable setting values. The pending new value of PG-CONF-001 stays out: `pg_file_settings` is superuser-only.
+- In progress: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
+- Next: P1 rules that need per-database collectors (indexes, sequence capacity, roles and public schema), then the configuration recommendation ADR.
+
 Next (MVP Plan Phase 1):
 
 1. HTML report from a health check (Turkish/English frame): first draft in PR #16 (draft), lab report generated 2026-10-14. To discuss next session:
