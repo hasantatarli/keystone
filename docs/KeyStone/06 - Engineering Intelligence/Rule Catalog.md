@@ -512,7 +512,7 @@ New collectors: `PG_INDEX_USAGE` (scope NODE_DATABASE, ADR-0009: every database 
 | | |
 | --- | --- |
 | Evidence | `PG_INDEX_USAGE`, required, 86400 s; latest snapshot per node and database plus the list of nodes the system should have |
-| Condition | scans summed over all nodes = 0; size ≥ `min_index_size` (10 MB); not backing a primary key, unique or exclusion constraint; valid and not being built |
+| Condition | scans summed over all nodes = 0; size ≥ `min_index_size` (10 MB); not backing a primary key, unique or exclusion constraint; valid and not being built; not owned by an extension (PG017) |
 | Statistics age | shortest over the nodes (`pg_stat_database.stats_reset`, server start when never reset); always stated; under `min_statistics_age` (7 days) not judged; under `full_cycle` (365 days) the finding warns about periodic use (FINDING_ALT) |
 | Missing node | a sum above 0 on the reachable nodes decides "used"; a sum of 0 with a node not collected for that database → INSUFFICIENT_EVIDENCE (`index_usage_incomplete`, names the node) |
 | Severity | WARNING |
@@ -529,11 +529,13 @@ When statistics were never reset, the server start time is used: conservative af
 | | |
 | --- | --- |
 | Evidence | `PG_INDEX_USAGE`, required, 86400 s; rows of the current primary only |
-| Condition | `indisvalid = false` and no `CREATE INDEX CONCURRENTLY` running for it |
+| Condition | `indisvalid = false`, no `CREATE INDEX CONCURRENTLY` running for it, not owned by an extension |
 | Severity | WARNING; unique index CRITICAL (uniqueness is not enforced, FINDING_ALT) |
 | Insufficient evidence | no primary among the collected nodes (`no_primary`) |
 
 Read from the primary only: an index still being built is invalid on the replicas too, and the build progress is visible only where it runs.
+
+Indexes of extensions (the index or its table is an extension member in `pg_depend`) are left out of both rules: they are not the DBA's to drop or rebuild. Lab 2026-10-27: 13 of 14 first IDX-001 findings were TimescaleDB catalog indexes.
 
 ## PG-SEC-001 — Login Superuser (PG_SECURITY_HEALTH, topic SECURITY)
 
@@ -556,7 +558,7 @@ A replication user needs only the REPLICATION attribute and a pg_rewind user a f
 Before PostgreSQL 15 every role could create in `public` by default, and upgraded databases keep it (CVE-2018-1058 search_path attack). Known limitation: `template1` is not collected (database fan-out skips templates), so a new database may inherit the grant unseen.
 
 **Verification (V042)**  
-Unit tests for every condition, including the field cases (used only on a replica, missing node with and without scans, short statistics). Repository test runs the three real collectors on a disposable PostgreSQL with an unused index, an invalid unique index left by a failed `CREATE UNIQUE INDEX CONCURRENTLY`, PUBLIC CREATE on `public` and an extra login superuser. Lab: pending.
+Unit tests for every condition, including the field cases (used only on a replica, missing node with and without scans, short statistics). Repository test runs the three real collectors on a disposable PostgreSQL with an unused index, an invalid unique index left by a failed `CREATE UNIQUE INDEX CONCURRENTLY`, PUBLIC CREATE on `public`, an extension's own table and an extra login superuser. Lab 2026-10-27 (hc41): an index used only on a replica was not reported, its unused sibling was; an invalid unique index CRITICAL; an extra login superuser WARNING; PUBLIC CREATE found on `public` of all three lab databases (real finding).
 
 ---
 

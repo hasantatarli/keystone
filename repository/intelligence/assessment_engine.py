@@ -621,7 +621,7 @@ def load_latest_index_usage(conn, target_id):
         SELECT u.snapshot_id, u.target_id, t.name AS node_name, u.captured_at, u.record_type,
                u.database_name, u.in_recovery, u.stats_since, u.stats_since_start, u.schema_name,
                u.table_name, u.index_name, u.idx_scan, u.index_size_bytes, u.is_valid, u.is_unique,
-               u.constraint_type, u.being_built
+               u.constraint_type, u.being_built, u.extension_owned
         FROM postgresql.index_usage_snapshot u
         JOIN keystone.target t ON t.target_id = u.target_id
         JOIN (
@@ -1591,8 +1591,9 @@ def evaluate_unused_indexes(rows, rule, thresholds):
 
     indexes = {}
     for r in rows:
-        if r["record_type"] != "INDEX" or r["constraint_type"] in CONSTRAINT_INDEX_TYPES:
-            continue
+        if (r["record_type"] != "INDEX" or r["constraint_type"] in CONSTRAINT_INDEX_TYPES
+                or r["extension_owned"]):
+            continue                                   # extension objects are not the DBA's to drop
         if not r["is_valid"] or r["being_built"]:
             continue                                   # invalid indexes are PG-IDX-002
         entry = indexes.setdefault(index_name(r), {"row": r, "scans": 0, "size": 0})
@@ -1657,7 +1658,7 @@ def evaluate_invalid_indexes(rows, rule, thresholds):
     findings = []
     for r in rows:
         if (r["record_type"] != "INDEX" or r["target_id"] != primary or r["is_valid"]
-                or r["being_built"]):
+                or r["being_built"] or r["extension_owned"]):
             continue
         name = index_name(r)
         values = {"index": name, "table": f"{r['schema_name']}.{r['table_name']}"}

@@ -10,7 +10,8 @@ Description
 -----------
 Collects every user index with its scan count, size, validity and constraint,
 in every database of every node: scan counts are kept per server, so an index
-unused on the primary may be used by reports on a replica.
+unused on the primary may be used by reports on a replica. Indexes of
+extensions (TimescaleDB, PostGIS...) are marked extension_owned.
 ===============================================================================
 */
 
@@ -35,6 +36,7 @@ SELECT
     NULL::boolean AS is_unique,
     NULL::text    AS constraint_type,
     NULL::boolean AS being_built,
+    NULL::boolean AS extension_owned,
     c.captured_at
 FROM collection_context AS c
 LEFT JOIN pg_catalog.pg_stat_database AS d
@@ -57,6 +59,10 @@ SELECT
     i.indisunique,
     con.contype::text,
     p.index_relid IS NOT NULL,          -- CREATE INDEX CONCURRENTLY still running
+    EXISTS (SELECT 1 FROM pg_catalog.pg_depend AS d
+            WHERE d.classid = 'pg_catalog.pg_class'::regclass
+              AND d.objid IN (s.indexrelid, s.relid)
+              AND d.deptype = 'e'),
     c.captured_at
 FROM pg_catalog.pg_stat_user_indexes AS s
 JOIN pg_catalog.pg_index AS i

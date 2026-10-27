@@ -1021,7 +1021,8 @@ def index_rows(scans, size=50 * MB, stats_days=400, nodes=(1, 2, 3), database="a
                      "idx_scan": scans.get(t, 0), "index_size_bytes": size,
                      "is_valid": index.get("is_valid", True), "is_unique": index.get("is_unique", False),
                      "constraint_type": index.get("constraint_type"),
-                     "being_built": index.get("being_built", False)})
+                     "being_built": index.get("being_built", False),
+                     "extension_owned": index.get("extension_owned", False)})
     return rows
 
 
@@ -1066,7 +1067,7 @@ class UnusedIndexTests(unittest.TestCase):
     def test_small_constraint_invalid_and_building_indexes_are_not_judged(self):
         self.assertEqual(self.evaluate(index_rows({}, size=9 * MB)), [])
         for extra in ({"constraint_type": "p"}, {"constraint_type": "u"}, {"is_valid": False},
-                      {"being_built": True}):
+                      {"being_built": True}, {"extension_owned": True}):
             with self.subTest(**extra):
                 self.assertEqual(self.evaluate(index_rows({}, **extra)), [])
 
@@ -1087,6 +1088,10 @@ class InvalidIndexTests(unittest.TestCase):
 
     def test_index_being_built_is_not_reported(self):
         self.assertEqual(self.evaluate(index_rows({}, is_valid=False, being_built=True)), [])
+
+    def test_extension_index_is_not_reported(self):
+        # Lab 2026-10-27: TimescaleDB catalog indexes are not the DBA's to fix.
+        self.assertEqual(self.evaluate(index_rows({}, is_valid=False, extension_owned=True)), [])
 
     def test_no_primary_is_insufficient_evidence(self):
         with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[no_primary\]"):

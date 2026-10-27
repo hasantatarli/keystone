@@ -374,13 +374,18 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         card = executive[executive.index("Öne çıkan sorunlar"):executive.index("Sistem envanteri")
                          if "Sistem envanteri" in executive else None]
-        self.assertIn("<dt>Ne oluyor</dt>", card)
+        # Closed by default: name, severity and what is happening in one line; the rest on demand.
+        self.assertIn('<details class="card WARNING"><summary><h3>', card)
+        self.assertIn('<div class="lead">Bazı session', card)
+        self.assertNotIn("<dt>Ne oluyor</dt>", card)
         self.assertIn("<dt>Olası sebepler</dt><dd><ul class=\"items\"><li>", card)
         self.assertIn("<li>Connection pool session&#x27;ı bırakmıyor</li>", card)
         self.assertIn("<dt>Ne yapılmalı</dt><dd><ul class=\"items\">", card)
         technical = page[page.index(TECH_PANEL):]
         self.assertIn("<dt>Olası sebepler</dt>", technical)
         self.assertIn("idle_in_transaction_session_timeout", technical)
+        self.assertIn('<details class="card WARNING"><summary><h3>', technical)
+        self.assertIn('<details class="section"><summary><h2>Toplanan Veriler', technical)
 
     def test_list_items(self):
         self.assertEqual(report.list_items("- a\n- b"), ["a", "b"])
@@ -447,9 +452,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         topics = executive[executive.index("Alanlara göre durum"):]
         # One item per rule: the problem with its severity first, then what was fine.
-        self.assertIn('<li><span class="badge b-WARNING">Uyarı</span> <b>Uzun süre boşta bekleyen '
-                      'transaction</b> (1 bulgu): Bazı session', topics)
-        self.assertIn("<li>Açık kalma süresi", topics)    # the healthy rule of the same topic
+        # Text first in every row, severity in the last column: all texts start aligned.
+        self.assertIn('<li><span class="tx"><b>Uzun süre boşta bekleyen transaction</b> (1 bulgu): '
+                      'Bazı session', topics)
+        self.assertIn('</span><span class="sv"><span class="badge b-WARNING">Uyarı</span></span></li>', topics)
+        self.assertIn('<li><span class="tx">Açık kalma süresi', topics)   # the healthy rule of the topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
 
@@ -470,9 +477,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
         transactions = topics[topics.index("Transaction yönetimi"):]
         transactions = transactions[:transactions.index('<div class="topic">')]
-        self.assertIn('<span class="badge b-unknown">Değerlendirilemedi</span> '
-                      '<b>Uzun bekleyen prepared transaction</b>: PG_PREPARED_TRANSACTIONS verisi yok.',
-                      transactions)
+        self.assertIn('<span class="tx"><b>Uzun bekleyen prepared transaction</b>: '
+                      'PG_PREPARED_TRANSACTIONS verisi yok.</span><span class="sv">'
+                      '<span class="badge b-unknown">Değerlendirilemedi</span>', transactions)
 
     def test_many_findings_show_ten_and_the_rest_on_demand(self):
         check_id = self.make_check()
@@ -595,6 +602,9 @@ class ReportTests(test_health_check.HealthCheckTests):
                 "CREATE TABLE idx_test (id int, code text)",
                 "INSERT INTO idx_test SELECT g, 'c' || (g % 10) FROM generate_series(1, 2000) g",
                 "CREATE INDEX idx_test_unused ON idx_test (code)",
+                "CREATE TABLE idx_test_ext (id int)",
+                "CREATE INDEX idx_test_ext_id ON idx_test_ext (id)",
+                "ALTER EXTENSION plpgsql ADD TABLE idx_test_ext",     # an extension's own table
                 "GRANT CREATE ON SCHEMA public TO PUBLIC",
                 "CREATE ROLE idx_test_admin LOGIN SUPERUSER"):
             self.conn.execute(statement)
@@ -638,6 +648,7 @@ class ReportTests(test_health_check.HealthCheckTests):
                 "SELECT subject_identifier FROM keystone.finding WHERE assessment_run_id = "
                 "(SELECT max(assessment_run_id) FROM keystone.assessment_run) AND title = 'Unused Index'")}
             self.assertIn(f"{self.conn.info.dbname}.public.idx_test_unused", unused)
+            self.assertNotIn(f"{self.conn.info.dbname}.public.idx_test_ext_id", unused)
 
             engine.run_assessment(self.conn, "PG_SECURITY_HEALTH", self.system)
             outcomes = self.latest_outcomes()
@@ -650,7 +661,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         finally:
             self.conn.rollback()
             self.conn.autocommit = True
-            self.conn.execute("DROP TABLE IF EXISTS idx_test")
+            self.conn.execute("ALTER EXTENSION plpgsql DROP TABLE idx_test_ext")
+            self.conn.execute("DROP TABLE IF EXISTS idx_test, idx_test_ext")
             self.conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
             self.conn.execute("DROP ROLE IF EXISTS idx_test_admin")
             self.conn.autocommit = False

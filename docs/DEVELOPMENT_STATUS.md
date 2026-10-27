@@ -222,7 +222,7 @@ Rule batches 2026-10-26:
 - PR #21 merged: PG_MAINTENANCE_HEALTH, PG-MAINT-001/002 with rule parameters (V039).
 - PR #22 merged: finding sentences per language (FINDING / FINDING_ALT, V040), readable setting values. The pending new value of PG-CONF-001 stays out: `pg_file_settings` is superuser-only.
 - PR #23 merged: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
-- In progress (2026-10-27): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016). Report: "status by area" lists one item per rule (problems with severity, rules not assessed with the reason, then healthy statements); before, rules not assessed were missing from that section.
+- In progress (2026-10-27): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016). Report: "status by area" lists one item per rule (problems with severity, rules not assessed with the reason, then healthy statements); before, rules not assessed were missing from that section. Main problems (executive), findings and collected data (technical) are collapsible: one line each, details on demand, closed by default; printing opens them where the browser supports it (no script, by design). Extension-owned indexes are left out of the index rules (PG017).
 
 Next:
 

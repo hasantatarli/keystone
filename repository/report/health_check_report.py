@@ -67,6 +67,8 @@ TEXTS = {
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
         "topic_unknown": "Değerlendirilemedi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
+        "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
+        "collected_count": "{ok} / {total} başarılı",
         "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "what_happens": "Ne oluyor", "causes": "Olası sebepler",
         "system": "Sistem Bilgisi",
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
@@ -173,6 +175,8 @@ TEXTS = {
         "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
         "topic_unknown": "Not assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
+        "open_hint": "Click a problem for likely causes and what to do.",
+        "collected_count": "{ok} of {total} succeeded",
         "why_it_matters": "Why it matters", "what_to_do": "What to do", "what_happens": "What is happening", "causes": "Likely causes",
         "system": "System Overview",
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
@@ -738,9 +742,20 @@ h3{font-size:15px;margin:20px 0 8px}
 .impact .name{font-weight:600}
 .impact .val{font-size:14px;display:flex;flex-wrap:wrap;gap:6px 16px}
 .problem .badge{margin-right:6px}
-.topic{display:grid;grid-template-columns:minmax(160px,220px) auto 1fr;gap:6px 14px;align-items:baseline;
+.topic{display:grid;grid-template-columns:200px 130px 1fr;gap:6px 14px;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line)}
 .topic .name{font-weight:600}
+.rules{list-style:none;margin:0;padding:0}
+.topic>.badge{justify-self:start}
+.rules li{display:grid;grid-template-columns:1fr 132px;gap:12px;align-items:baseline;padding:1px 0}
+.rules .sv{text-align:right}
+details.card>summary,details.section>summary{cursor:pointer;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details.card>summary h3::before,details.section>summary h2::before{content:"▸";color:var(--muted);width:12px}
+details.card[open]>summary h3::before,details.section[open]>summary h2::before{content:"▾"}
+details.card:not([open]) h3{margin:0}
+details.section>summary h2{display:flex;gap:10px;align-items:baseline}
+.card .lead{font-size:14px;margin:4px 0 0 22px}
 table{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0 10px}
 th{text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;background:var(--soft)}
 td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
@@ -777,9 +792,11 @@ box-shadow:inset 0 3px 0 var(--accent)}
 .tabs .part{display:none}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
-table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .text{grid-column:1/-1}
+table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .rules{grid-column:1/-1}
 .impact{grid-template-columns:1fr}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
+details::details-content{content-visibility:visible;display:block}
+details.card>summary h3::before,details.section>summary h2::before{content:none}
 .tabs>label{display:none}.tabs>.panel{display:block!important;border-top:none}.tabs .part{display:block}
 .panel-tech{break-before:page}body{font-size:12px}
 .meter i,.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
@@ -1000,31 +1017,33 @@ def render_topics(data, lang, t):
         items = []
         for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
             rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+            # (text, badge): the text column starts at the same place in every row.
             if r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
-                items.append(f"{badge(severity, t['severity'].get(severity, severity))} "
-                             f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}): "
-                             + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING"))))
+                items.append((f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}): "
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING"))),
+                              badge(severity, t["severity"].get(severity, severity))))
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
-                items.append(e(healthy_text(data, r, lang, t)))
+                items.append((e(healthy_text(data, r, lang, t)), ""))
             else:
                 reason = explain_reason(r.get("reason"), data, t)
-                items.append(f"{badge('unknown', t['topic_unknown'])} <b>{e(rule_name)}</b>"
-                             + (f": {e(reason)}" if reason else ""))
+                items.append((f"<b>{e(rule_name)}</b>" + (f": {e(reason)}" if reason else ""),
+                              badge("unknown", t["topic_unknown"])))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
-                    f'{badge(status, t["topic_" + status])}<span class="text"><ul class="items">'
-                    + "".join(f"<li>{item}</li>" for item in items) + "</ul></span></div>")
+                    f'{badge(status, t["topic_" + status])}<ul class="rules">'
+                    + "".join(f'<li><span class="tx">{text}</span><span class="sv">{sev}</span></li>'
+                              for text, sev in items) + "</ul></div>")
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
             + f'<p class="note">{e(t["scope_note"])}</p>')
 
 
-def problem_rows(data, rule_id, lang, t, findings, short):
+def problem_rows(data, rule_id, lang, t, findings, short, meaning=True):
     """What is happening, likely causes, why it matters, what to do: shared by both parts."""
     causes = rule_text(data, rule_id, lang, "CAUSES")
     rows = [(t["what_happens"] if short else t["meaning"],
-             render_text(rule_text(data, rule_id, lang, "MEANING"), short)),
+             render_text(rule_text(data, rule_id, lang, "MEANING"), short) if meaning else ""),
             (t["causes"], render_text(causes) if causes else ""),
             (t["why_it_matters"] if short else t["impact"],
              render_text(rule_text(data, rule_id, lang, "IMPACT"), short)),
@@ -1039,13 +1058,17 @@ def render_main_problems(data, lang, t):
     for result, findings in findings_by_rule(data):
         worst = min((f["severity"] for f in findings), key=lambda s: SEVERITY_ORDER.get(s, 9))
         name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
+        meaning = first_sentence(rule_text(data, result["rule_id"], lang, "MEANING"))
+        # Closed by default: name, severity and one sentence; causes and steps on demand.
         cards.append(
-            f'<div class="card {e(worst)}"><h3>{badge(worst, t["severity"].get(worst, worst))}'
-            f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3><dl>"
-            + problem_rows(data, result["rule_id"], lang, t, findings, short=True)
-            + "</dl></div>")
+            f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
+            f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3>"
+            f'<div class="lead">{e(meaning)}</div></summary><dl>'
+            + problem_rows(data, result["rule_id"], lang, t, findings, short=True, meaning=False)
+            + "</dl></details>")
     return f"<h2>{e(t['problems_title'])}</h2>" + (
-        "".join(cards) or f'<p class="note">{e(t["no_problems"])}</p>')
+        f'<p class="note">{e(t["open_hint"])}</p>' + "".join(cards) if cards
+        else f'<p class="note">{e(t["no_problems"])}</p>')
 
 
 def render_executive(data, lang, t):
@@ -1285,12 +1308,14 @@ def render_findings_detail(data, lang, t):
                 + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
         facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
         cards.append(
-            f'<div class="card {e(worst)}"><h3>{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
-            f'<span class="rule">{e(result["rule_key"])}</span></h3>'
+            f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
+            f'{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
+            f'<span class="note">{len(findings)} {e(t["findings_word"])}</span>'
+            f'<span class="rule">{e(result["rule_key"])}</span></h3></summary>'
             + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</div>")
+            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</details>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 
@@ -1317,12 +1342,15 @@ def render_results(data, lang, t):
 
 def render_collections(data, t):
     purpose = {"EVIDENCE": t["purpose_evidence"], "CONTEXT": t["purpose_context"]}
-    return f"<h2>{e(t['collection'])}</h2>" + table(
+    ok = sum(1 for c in data["collections"] if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
+    summary = t["collected_count"].format(ok=ok, total=len(data["collections"]))
+    return (f'<details class="section"><summary><h2>{e(t["collection"])}'
+            f'<span class="note">{e(summary)}</span></h2></summary>' + table(
         [t["collector"], t["node"], t["purpose"], t["status"]],
         [[e(c["collector_key"]), e(c["target_name"]), e(purpose.get(c["purpose"], c["purpose"])),
           badge(c["status"], t["collection_status"].get(c["status"], c["status"])) + (
               f'<div class="facts">{e(c["status_message"])}</div>' if c["status_message"] else "")]
-         for c in data["collections"]])
+         for c in data["collections"]]) + "</details>")
 
 
 def render_technical(data, lang, t):

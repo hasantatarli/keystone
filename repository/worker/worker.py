@@ -2188,7 +2188,7 @@ def insert_rows(conn, table, task, rows, columns, casts=None):
 
 INDEX_USAGE_COLUMNS = ("record_type", "database_name", "in_recovery", "stats_since", "stats_since_start",
                        "schema_name", "table_name", "index_name", "idx_scan", "index_size_bytes",
-                       "is_valid", "is_unique", "constraint_type", "being_built")
+                       "is_valid", "is_unique", "constraint_type", "being_built", "extension_owned")
 
 
 def save_index_usage_snapshot(conn, task, rows):
