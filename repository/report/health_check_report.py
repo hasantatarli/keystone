@@ -745,10 +745,14 @@ h3{font-size:15px;margin:20px 0 8px}
 .topic{display:grid;grid-template-columns:200px 130px 1fr;gap:6px 14px;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line)}
 .topic .name{font-weight:600}
-.rules{list-style:none;margin:0;padding:0}
 .topic>.badge{justify-self:start}
-.rules li{display:grid;grid-template-columns:1fr 132px;gap:12px;align-items:baseline;padding:1px 0}
-.rules .sv{text-align:right}
+.rules{list-style:none;margin:0;padding:0}
+.rules li{position:relative;padding:1px 0 1px 18px}
+.rules li::before{content:"";position:absolute;left:2px;top:.6em;width:8px;height:8px;border-radius:50%;
+background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.rules li.r-critical::before{background:var(--crit-bar)}
+.rules li.r-warning::before{background:var(--warn-bar)}
+.rules li.r-unknown::before{background:var(--na)}
 details.card>summary,details.section>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
 details.card>summary h3::before,details.section>summary h2::before{content:"▸";color:var(--muted);width:12px}
@@ -1017,24 +1021,24 @@ def render_topics(data, lang, t):
         items = []
         for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
             rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
-            # (text, badge): the text column starts at the same place in every row.
+            # (bullet colour, text): severity shows in the bullet and in words, texts stay aligned.
             if r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
-                items.append((f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}): "
-                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING"))),
-                              badge(severity, t["severity"].get(severity, severity))))
+                label = t["severity"].get(severity, severity).lower()
+                items.append((severity.lower(),
+                              f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))))
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
-                items.append((e(healthy_text(data, r, lang, t)), ""))
+                items.append(("ok", e(healthy_text(data, r, lang, t))))
             else:
                 reason = explain_reason(r.get("reason"), data, t)
-                items.append((f"<b>{e(rule_name)}</b>" + (f": {e(reason)}" if reason else ""),
-                              badge("unknown", t["topic_unknown"])))
+                items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
+                              + (f": {e(reason)}" if reason else "")))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
                     f'{badge(status, t["topic_" + status])}<ul class="rules">'
-                    + "".join(f'<li><span class="tx">{text}</span><span class="sv">{sev}</span></li>'
-                              for text, sev in items) + "</ul></div>")
+                    + "".join(f'<li class="r-{cls}">{text}</li>' for cls, text in items) + "</ul></div>")
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
             + f'<p class="note">{e(t["scope_note"])}</p>')
 

@@ -452,11 +452,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         topics = executive[executive.index("Alanlara göre durum"):]
         # One item per rule: the problem with its severity first, then what was fine.
-        # Text first in every row, severity in the last column: all texts start aligned.
-        self.assertIn('<li><span class="tx"><b>Uzun süre boşta bekleyen transaction</b> (1 bulgu): '
-                      'Bazı session', topics)
-        self.assertIn('</span><span class="sv"><span class="badge b-WARNING">Uyarı</span></span></li>', topics)
-        self.assertIn('<li><span class="tx">Açık kalma süresi', topics)   # the healthy rule of the topic
+        # One bullet per rule; severity in the bullet colour and in words, all texts aligned.
+        self.assertIn('<li class="r-warning"><b>Uzun süre boşta bekleyen transaction</b> '
+                      '(1 bulgu, uyarı): Bazı session', topics)
+        self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
 
@@ -477,9 +476,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
         transactions = topics[topics.index("Transaction yönetimi"):]
         transactions = transactions[:transactions.index('<div class="topic">')]
-        self.assertIn('<span class="tx"><b>Uzun bekleyen prepared transaction</b>: '
-                      'PG_PREPARED_TRANSACTIONS verisi yok.</span><span class="sv">'
-                      '<span class="badge b-unknown">Değerlendirilemedi</span>', transactions)
+        self.assertIn('<li class="r-unknown"><b>Uzun bekleyen prepared transaction</b> '
+                      '(değerlendirilemedi): PG_PREPARED_TRANSACTIONS verisi yok.</li>', transactions)
 
     def test_many_findings_show_ten_and_the_rest_on_demand(self):
         check_id = self.make_check()
