@@ -1,6 +1,6 @@
 # Keystone Development Status
 
-Last updated: 2026-10-26
+Last updated: 2026-10-27
 
 This document is the working checkpoint for the PostgreSQL MVP. It records what is implemented and verified, what is currently being worked on, and what comes next. It is intentionally narrower than a long-term product roadmap.
 
@@ -28,7 +28,7 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 
 ## Engineering Intelligence Implemented
 
-24 PostgreSQL rules in 8 assessments (2026-10-26, V016–V041). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
+28 PostgreSQL rules in 9 assessments (2026-10-27, V016–V042). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
 
 | Assessment | Rules |
 | --- | --- |
@@ -38,8 +38,9 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 | PG_CAPACITY_HEALTH | PG-CAP-001 data disk usage |
 | PG_CONFIGURATION_HEALTH | PG-CONF-001 pending restart, PG-CONF-002 unsafe durability settings, PG-CONF-004 autovacuum disabled |
 | PG_BACKUP_HEALTH | PG-BKP-001 WAL archive failures, PG-BKP-002 WAL archiving |
-| PG_SECURITY_HEALTH | PG-SEC-002 md5 password encryption, PG-SEC-003 SSL disabled |
+| PG_SECURITY_HEALTH | PG-SEC-001 login superuser, PG-SEC-002 md5 password encryption, PG-SEC-003 SSL disabled, PG-SEC-004 PUBLIC can create in schema |
 | PG_MAINTENANCE_HEALTH | PG-MAINT-001 dead tuples, PG-MAINT-002 stale statistics |
+| PG_INDEX_HEALTH | PG-IDX-001 unused index (scans summed over all nodes), PG-IDX-002 invalid index |
 
 The Dictionary contains assessment definitions, rules, thresholds, rule parameters, evidence requirements, topics, impact categories and rule texts in Turkish and English. Runtime results are persisted as assessment runs and findings.
 
@@ -178,7 +179,7 @@ Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through 
 
 ## Active Work
 
-Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (24 checks done, P1 remaining: indexes, sequence capacity, roles, public schema, then configuration recommendations). Open in Phase 1: offline evidence bundle.
+Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (28 checks done; P1 remaining: sequence capacity on hold, then configuration recommendations). Open in Phase 1: offline evidence bundle.
 
 Done:
 
@@ -220,12 +221,12 @@ Rule batches from the Assessment Catalogue (2026-10-21):
 Rule batches 2026-10-26:
 - PR #21 merged: PG_MAINTENANCE_HEALTH, PG-MAINT-001/002 with rule parameters (V039).
 - PR #22 merged: finding sentences per language (FINDING / FINDING_ALT, V040), readable setting values. The pending new value of PG-CONF-001 stays out: `pg_file_settings` is superuser-only.
-- PR #23 lab-verified: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
-- Next: P1 rules that need per-database collectors (indexes, sequence capacity, roles and public schema), then the configuration recommendation ADR.
+- PR #23 merged: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
+- In progress (2026-10-27): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016).
 
 Next:
 
-1. P1 rules with per-database collectors: PG-IDX-001/002, PG-SEC-004; then PG-SEC-001. PG-CAP-002 (sequences) is on hold: reading sequence values needs a privilege beyond `pg_monitor` (Assessment Catalogue, open question 6).
+1. Lab verification of PG-IDX-001/002, PG-SEC-001/004. PG-CAP-002 (sequences) is on hold: reading sequence values needs a privilege beyond `pg_monitor` (Assessment Catalogue, open question 6).
 2. Configuration recommendation capability (PG-CONF-003): ADR first, then implementation.
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.

@@ -232,6 +232,33 @@ EXPECTED_RULES = {
         "evidence": {"PG_WAL_STATUS": (True, 900)},
         "parameters": {"recent_failover_window": (Decimal("86400"), "SECOND")},
     },
+    "PG-IDX-001": {
+        "assessment": "PG_INDEX_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_INDEX_USAGE": (True, 86400)},
+        "parameters": {"min_index_size": (Decimal("10485760"), "BYTE"),
+                       "min_statistics_age": (Decimal("604800"), "SECOND"),
+                       "full_cycle": (Decimal("31536000"), "SECOND")},
+    },
+    "PG-IDX-002": {
+        "assessment": "PG_INDEX_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_INDEX_USAGE": (True, 86400)},
+    },
+    "PG-SEC-001": {
+        "assessment": "PG_SECURITY_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_ROLES": (True, 86400)},
+    },
+    "PG-SEC-004": {
+        "assessment": "PG_SECURITY_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_SCHEMA_PRIVILEGES": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
@@ -485,13 +512,17 @@ class DevelopmentRepositoryUpgradeTests(unittest.TestCase):
         self.conn = self.server.connect(database)
         self.addCleanup(self.conn.close)
 
-    def run_installer(self, migrations):
+    def run_installer(self, migrations, register_collectors=True):
         def connect():
             return self.server.connect(self.database)
 
+        # Today's collectors may need a later schema (V042: NODE_DATABASE scope)
+        # than a partial historic install provides; they ship together in real installs.
+        register = installer.register_collectors if register_collectors else (lambda conn: None)
         with patch.object(installer, "connect_repository", connect), \
                 patch.object(installer, "discover_migrations",
                              return_value=migrations), \
+                patch.object(installer, "register_collectors", register), \
                 contextlib.redirect_stdout(io.StringIO()):
             installer.main()
 
@@ -556,7 +587,7 @@ class DevelopmentRepositoryUpgradeTests(unittest.TestCase):
         v016 = versions.index("V016")
         before_v021 = [item for item in discovered if item["version"] != "V021"]
 
-        self.run_installer(discovered[: v016 + 1])
+        self.run_installer(discovered[: v016 + 1], register_collectors=False)
         self.seed_transaction_health_manually()
         self.run_installer(before_v021)
 

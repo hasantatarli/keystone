@@ -96,7 +96,7 @@ def load_collectors(conn, keys):
 
 
 def plan_collections(conn, target, nodes, assessment_keys):
-    """[(target, collector_key, purpose, optional)] — NODE-scope collectors go to every node."""
+    """[(target, collector_key, purpose, optional)] — NODE and NODE_DATABASE collectors go to every node."""
     evidence = load_evidence_collectors(conn, assessment_keys)
     context = REPORT_CONTEXT_COLLECTORS.get(target["provider"], {})
     wanted = ([(k, "EVIDENCE", False) for k in evidence]
@@ -112,7 +112,7 @@ def plan_collections(conn, target, nodes, assessment_keys):
         if definition is None:
             plan.append((target, key, purpose, optional))   # reported as NOT_COLLECTED
             continue
-        if definition["execution_scope"] == "NODE":
+        if definition["execution_scope"] in ("NODE", "NODE_DATABASE"):
             plan.extend((node, key, purpose, optional) for node in node_targets)
         else:
             plan.append((target, key, purpose, optional))

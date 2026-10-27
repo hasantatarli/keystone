@@ -17,6 +17,7 @@ can be e-mailed, opened offline and printed.
 import argparse
 from datetime import datetime, timedelta, timezone
 import html
+import json
 from pathlib import Path
 import re
 
@@ -111,7 +112,14 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
         "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
-                         "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı."},
+                         "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
+                         "no_nodes": "Sistemin sunucu listesi bulunamadı.",
+                         "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
+                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor."},
+        "detail_index": "Index", "detail_index_size": "Boyut", "detail_nodes_checked": "Kontrol edilen sunucular",
+        "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
+        "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
+        "detail_valid_until": "Geçerlilik sonu",
         "inv_failover": "Son failover", "inv_failover_ago": "{ago} önce",
         "inv_failover_never": "Hiç olmamış", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
@@ -210,7 +218,14 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
         "reason_codes": {"no_primary": "There is no primary among the collected servers.",
-                         "no_timeline_history": "The history file of the current timeline is not in pg_wal."},
+                         "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
+                         "no_nodes": "The server list of the system was not found.",
+                         "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
+                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed."},
+        "detail_index": "Index", "detail_index_size": "Size", "detail_nodes_checked": "Servers checked",
+        "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
+        "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
+        "detail_valid_until": "Valid until",
         "inv_failover": "Last failover", "inv_failover_ago": "{ago} ago",
         "inv_failover_never": "Never", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
@@ -476,6 +491,8 @@ def fmt_quantity(value, unit, t):
     value = float(value)
     if unit == "SECOND":
         return fmt_duration(value, t)
+    if unit == "BYTE":
+        return fmt_bytes(value)
     if unit == "PERCENT":
         return t["percent"].format(n=f"{value:g}")
     if unit in ("TRANSACTION", "MULTIXACT") and value >= 1e9:
@@ -531,15 +548,19 @@ REASON_PATTERN = re.compile(
     r"|(?P<missing>Required evidence is not available\.))$")
 
 
-# Reasons an evaluator gives itself: "SOURCE: [code] English message".
-REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] ")
+# Reasons an evaluator gives itself: "SOURCE: [code] English message {values}".
+REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
 def explain_reason(reason, data, t):
     """Engine reason in plain words; says when this check failed to collect the source."""
     coded = REASON_CODE_PATTERN.match(reason or "")
     if coded and coded.group("code") in t["reason_codes"]:
-        return t["reason_codes"][coded.group("code")]
+        try:
+            values = json.loads(coded.group("values") or "{}")
+            return t["reason_codes"][coded.group("code")].format(**values)
+        except (ValueError, KeyError):
+            return reason
     match = REASON_PATTERN.match(reason or "")
     if not match:
         return reason or ""
@@ -1118,7 +1139,11 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("failed_count", "detail_failed_count"), ("last_failed_wal", "detail_last_failed_wal"),
                  ("archived_count", "detail_archived_count"),
                  ("last_archived_wal", "detail_last_archived_wal"), ("timeline_id", "detail_timeline"),
-                 ("timeline_history_file", "detail_timeline_history_file"))
+                 ("timeline_history_file", "detail_timeline_history_file"),
+                 ("index", "detail_index"), ("index_size", "detail_index_size"),
+                 ("nodes_checked", "detail_nodes_checked"), ("statistics_node", "detail_statistics_node"),
+                 ("schema", "detail_schema"), ("schema_owner", "detail_schema_owner"),
+                 ("role", "detail_role"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1128,6 +1153,7 @@ TIME_LABELS = (("transaction_start", "detail_transaction_start"),
                ("prepared_at", "detail_prepared_at"), ("last_failed_time", "detail_last_failed_time"),
                ("last_archived_time", "detail_last_archived_time"), ("stats_reset", "detail_stats_reset"),
                ("timeline_started_at", "detail_timeline_started_at"),
+               ("statistics_since", "detail_statistics_since"), ("valid_until", "detail_valid_until"),
                ("captured_at", "detail_captured_at"))
 
 
@@ -1161,7 +1187,8 @@ def setting_value_text(value, unit, t):
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
                 "connection_count"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
-DURATION_VALUES = {"age_seconds", "since_seconds"}
+DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds"}
+SIZE_VALUES = {"index_size"}
 
 
 def template_value_text(key, value, t=None):
@@ -1169,6 +1196,8 @@ def template_value_text(key, value, t=None):
         return f"{value:,}"
     if key in DURATION_VALUES and t is not None and isinstance(value, (int, float)):
         return fmt_duration(value, t)
+    if key in SIZE_VALUES and isinstance(value, (int, float)):
+        return fmt_bytes(value)
     return value
 
 
@@ -1210,6 +1239,8 @@ def render_instance(f, data, lang, t):
     for key in ("live_rows", "dead_rows", "modified_rows"):
         if isinstance(details.get(key), (int, float)):
             details[key] = f"{details[key]:,}"
+    if details.get("index_size_bytes") is not None:
+        details["index_size"] = fmt_bytes(details["index_size_bytes"])
     if details.get("wal_behind_bytes") is not None:
         details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
     if details.get("total_bytes"):

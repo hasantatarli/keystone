@@ -23,10 +23,13 @@ Collector execution scope uses:
 - `SYSTEM`
 - `NODE`
 - `DATABASE`
+- `NODE_DATABASE` (added 2026-10-27, V042)
 
 `DATABASE` is an execution scope, not a target type.
 
 Database-scoped collectors are assigned to a SYSTEM target and fan out across databases discovered at execution time.
+
+`NODE_DATABASE` collectors are assigned to every NODE target and fan out across the databases of that node. Used where statistics are kept per server but describe objects shared by the cluster: index scan counts (`PG_INDEX_USAGE`) differ between the primary and the replicas serving reads.
 
 ## Consequences
 

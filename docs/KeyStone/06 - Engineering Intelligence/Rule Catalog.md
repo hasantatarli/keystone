@@ -1,7 +1,7 @@
 # Engineering Intelligence Rule Catalog
 
 **Status:** Current  
-**Last Updated:** 2026-10-26  
+**Last Updated:** 2026-10-27  
 **Provider:** PostgreSQL (15+)
 
 ## Purpose
@@ -10,7 +10,7 @@ This catalog explains, in engineering terms, what each Keystone rule detects, wh
 
 It is documentation, not configuration. The machine-readable source of truth is:
 
-- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V041),
+- the Dictionary, seeded by migrations under `repository/migrations/core/` (V016–V042),
 - the evaluators in `repository/intelligence/assessment_engine.py`,
 - the expected Dictionary contract in `tests/test_intelligence_dictionary.py` (`EXPECTED_RULES`).
 
@@ -500,6 +500,63 @@ Planned switchovers and unplanned failovers look the same. A whole cluster resto
 
 **Verification (V041)**  
 Unit tests for every condition; repository test runs both real collectors on a disposable PostgreSQL, the worker persistence and the three assessments, including the insufficient-evidence path. Lab 2026-10-26 (hc37): clean state as expected; with `archive_command = /bin/false` PG-BKP-001 CRITICAL (no successful archive recorded, FINDING_ALT) and PG-BKP-002 healthy; a prepared transaction after 6 minutes PG-TRAN-005 WARNING; PG-HA-001 WARNING for the failover 3 hours earlier, a Patroni restart did not count as a failover.
+
+---
+
+# Batch of 2026-10-27 — indexes and security objects (V042, PG016)
+
+New collectors: `PG_INDEX_USAGE` (scope NODE_DATABASE, ADR-0009: every database of every node; a DATABASE row per collected database with `pg_is_in_recovery()` and the statistics start, an INDEX row per user index with scans, size, validity, uniqueness, constraint and whether `CREATE INDEX CONCURRENTLY` is still running), `PG_SCHEMA_PRIVILEGES` (DATABASE: PUBLIC usage / create per user schema) and `PG_ROLES` (SYSTEM: role attributes, predefined `pg_*` roles left out, no password hashes). All work with `pg_monitor`.
+
+## PG-IDX-001 — Unused Index (PG_INDEX_HEALTH, topic INDEXES)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INDEX_USAGE`, required, 86400 s; latest snapshot per node and database plus the list of nodes the system should have |
+| Condition | scans summed over all nodes = 0; size ≥ `min_index_size` (10 MB); not backing a primary key, unique or exclusion constraint; valid and not being built |
+| Statistics age | shortest over the nodes (`pg_stat_database.stats_reset`, server start when never reset); always stated; under `min_statistics_age` (7 days) not judged; under `full_cycle` (365 days) the finding warns about periodic use (FINDING_ALT) |
+| Missing node | a sum above 0 on the reachable nodes decides "used"; a sum of 0 with a node not collected for that database → INSUFFICIENT_EVIDENCE (`index_usage_incomplete`, names the node) |
+| Severity | WARNING |
+| Subject | INDEX (`database.schema.index`); observed value = size |
+
+**Design notes** (Hasan, 2026-10-26/27)  
+Scan counts are kept per server and are not replicated: an index serving reports on a replica shows 0 scans on the primary, and dropping it on the primary drops it everywhere. In the field an index used only by the year-end bank transfer was dropped as "unused" and that job failed; hence WARNING only, the statistics age in every finding and the periodic-use warning. The first recommended step is to check periodic use before dropping.
+
+**Known limitations**  
+When statistics were never reset, the server start time is used: conservative after a restart (the age looks shorter than it is). Statistics are lost after a crash. Duplicate and redundant indexes are PG-IDX-003.
+
+## PG-IDX-002 — Invalid Index (PG_INDEX_HEALTH, topic INDEXES)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INDEX_USAGE`, required, 86400 s; rows of the current primary only |
+| Condition | `indisvalid = false` and no `CREATE INDEX CONCURRENTLY` running for it |
+| Severity | WARNING; unique index CRITICAL (uniqueness is not enforced, FINDING_ALT) |
+| Insufficient evidence | no primary among the collected nodes (`no_primary`) |
+
+Read from the primary only: an index still being built is invalid on the replicas too, and the build progress is visible only where it runs.
+
+## PG-SEC-001 — Login Superuser (PG_SECURITY_HEALTH, topic SECURITY)
+
+| | |
+| --- | --- |
+| Evidence | `PG_ROLES`, required, 86400 s |
+| Condition | `rolsuper` and `rolcanlogin`, except the bootstrap superuser (OID 10, created by initdb, whatever its name) |
+| Severity | WARNING, one finding per role |
+
+A replication user needs only the REPLICATION attribute and a pg_rewind user a few function grants; neither needs superuser, so they are not excluded. A customer allow-list belongs to accepted risk (MVP Plan Phase 2). Known limitation: superusers without a password are not visible (`pg_authid`).
+
+## PG-SEC-004 — PUBLIC Can Create in Schema (PG_SECURITY_HEALTH, topic SECURITY)
+
+| | |
+| --- | --- |
+| Evidence | `PG_SCHEMA_PRIVILEGES`, required, 86400 s |
+| Condition | PUBLIC has CREATE on a user schema (system and toast schemas excluded); a NULL ACL is the owner-only default |
+| Severity | WARNING, one finding per database and schema |
+
+Before PostgreSQL 15 every role could create in `public` by default, and upgraded databases keep it (CVE-2018-1058 search_path attack). Known limitation: `template1` is not collected (database fan-out skips templates), so a new database may inherit the grant unseen.
+
+**Verification (V042)**  
+Unit tests for every condition, including the field cases (used only on a replica, missing node with and without scans, short statistics). Repository test runs the three real collectors on a disposable PostgreSQL with an unused index, an invalid unique index left by a failed `CREATE UNIQUE INDEX CONCURRENTLY`, PUBLIC CREATE on `public` and an extra login superuser. Lab: pending.
 
 ---
 

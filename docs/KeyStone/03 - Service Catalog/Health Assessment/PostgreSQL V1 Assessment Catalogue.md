@@ -87,8 +87,8 @@ Sources combined:
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-IDX-001 | Unused index | `idx_scan = 0`, statistics older than N days, size ≥ X MB, not unique / primary key / constraint | Gap: PG-010 | Unused Indexes, Index Access Profile | P1 |
-| PG-IDX-002 | Invalid index | `indisvalid = false` (failed `CREATE INDEX CONCURRENTLY`) | Gap: PG-011 | invalid indexes | P1 |
+| **PG-IDX-001** | Unused index | `idx_scan` summed over all nodes = 0, size ≥ 10 MB, not a constraint index; statistics ≥ 7 days, age always stated, under a year warns about periodic use — WARNING | Ready: PG_INDEX_USAGE (NODE_DATABASE) | Unused Indexes, Index Access Profile | Done |
+| **PG-IDX-002** | Invalid index | `indisvalid = false` on the primary, not being built — WARNING, unique — CRITICAL | Ready: PG_INDEX_USAGE | invalid indexes | Done |
 | PG-IDX-003 | Duplicate / redundant index | Same columns in the same order, or a prefix of another index | Gap: PG-011 | — | P2 |
 | PG-IDX-004 | Foreign key without index | FK columns not leading any index on a table of meaningful size | Gap: PG-022 | — | P2 |
 | PG-IDX-005 | Heavy sequential scans | Large table read mostly by sequential scans | Gap: `seq_scan`, `seq_tup_read` (extend PG-005) | Tabel Access Profile | P2 |
@@ -134,10 +134,10 @@ WAL archiving settings and archiver statistics are collected (PG_CONFIGURATION_S
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-SEC-001 | Too many superusers | Login roles with superuser beyond the expected administrators | Gap: PG-016 | Users & Roles Info | P1 |
+| **PG-SEC-001** | Login superusers | Every login superuser except the bootstrap superuser (OID 10) — WARNING | Ready: PG_ROLES | Users & Roles Info | Done |
 | **PG-SEC-002** | Weak password hashing | `password_encryption = md5` — WARNING (md5 is deprecated); roles still with md5 hashes need superuser | Ready (setting): PG-002 | Users & Roles Info | Done |
 | **PG-SEC-003** | Connections without encryption | `ssl = off` — WARNING | Ready: PG-002 | — | Done |
-| PG-SEC-004 | Anyone can create in `public` | `CREATE` on schema `public` granted to PUBLIC (default before PostgreSQL 15) | Gap: PG-018 / PG-016 | public Schema | P1 |
+| **PG-SEC-004** | Anyone can create in a schema | `CREATE` on a user schema granted to PUBLIC (default for `public` before PostgreSQL 15) — WARNING | Ready: PG_SCHEMA_PRIVILEGES | public Schema | Done |
 | PG-SEC-005 | Trust or password authentication | `trust` or plain `password` rules in `pg_hba` | Gap: PG-017 (`pg_hba_file_rules` needs superuser by default) | — | P2 |
 | PG-SEC-006 | Broad default privileges | Default privileges granting write to PUBLIC or wide roles | Gap: PG-016 | Default access privileges, Access privileges | P3 |
 | PG-SEC-007 | No audit logging | `pgaudit` not installed where compliance requires it — INFO | Gap: PG-015 | pgaudit extension | P3 |
@@ -186,17 +186,17 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 24 | 6 | 22 | 10 |
-| of which evidence ready | 24 | 1 | 9 | 5 |
+| Checks | 28 | 2 | 22 | 10 |
+| of which evidence ready | 28 | 1 | 9 | 5 |
 
-Status 2026-10-26: 24 checks done (V031–V041). Remaining P1: PG-IDX-001/002, PG-CAP-002 and PG-SEC-004 (per-database collection), PG-SEC-001 (roles), and PG-CONF-003, which comes last as the configuration recommendation capability (decision 2, separate ADR). Collectors for the remaining P1 checks, in the order worked:
+Status 2026-10-27: 28 checks done (V031–V042). Remaining P1: PG-CAP-002 (on hold, open question 6) and PG-CONF-003, which comes last as the configuration recommendation capability (decision 2, separate ADR). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
-3. **PG-010 / PG-011 Index usage and quality** — PG-IDX-001/002.
-4. **PG-019 Sequence / integer key capacity** — PG-CAP-002.
+3. ~~**PG-010 / PG-011 Index usage and quality** — PG-IDX-001/002.~~ Done: PG_INDEX_USAGE (V042).
+4. **PG-019 Sequence / integer key capacity** — PG-CAP-002. On hold (open question 6).
 5. ~~**PG-020 Prepared transactions** — PG-TRAN-005.~~ Done: PG_PREPARED_TRANSACTIONS (V041).
-6. **PG-016 Roles**, **PG-018 schema privileges** — PG-SEC-001/004.
+6. ~~**PG-016 Roles**, **PG-018 schema privileges** — PG-SEC-001/004.~~ Done: PG_ROLES, PG_SCHEMA_PRIVILEGES (V042).
 7. ~~**Timeline ID** in PG-001 — PG-HA-001.~~ Done: PG_WAL_STATUS (V041).
 
 ## pg_collector coverage
@@ -247,6 +247,8 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 7. **Group 1 of the collector P1s** (2026-10-26, Hasan): PG-BKP-001 is CRITICAL only while the last failure is newer than the last success; "no success for a long time" is not judged. PG-TRAN-005 uses 5 / 60 minutes. PG-HA-001 dates the last failover from the current timeline's history file (works on a first check); a failover within 24 h is a WARNING.
 
 8. **Group 2 collectors** (2026-10-26, Hasan): one collector per topic (indexes, schema privileges, sequences), not one combined collector. No extension is needed.
+
+9. **Group 2 rules** (2026-10-26/27, Hasan): PG-IDX-001 sums scans over all nodes (an index used only by reports on a replica was nearly dropped in practice; an index used only at year end was dropped in the field). A sum above 0 on the reachable nodes is "used" even if a node is missing; a sum of 0 with a node missing is INSUFFICIENT_EVIDENCE. Statistics age is the shortest over the nodes and always stated; no judgement under 7 days. PG-SEC-001 reports every login superuser except OID 10; a customer allow-list belongs to accepted risk (MVP Plan Phase 2).
 
 ## Open questions for review
 

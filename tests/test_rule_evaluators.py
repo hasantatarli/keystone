@@ -1003,5 +1003,114 @@ class RecentFailoverTests(unittest.TestCase):
             self.evaluate(wal_row("pg-2", in_recovery=True))
 
 
+MB = 1024 * 1024
+NODES = {1: "pg-1", 2: "pg-2", 3: "pg-3"}
+
+
+def index_rows(scans, size=50 * MB, stats_days=400, nodes=(1, 2, 3), database="app", **index):
+    """NODES marker, a DATABASE row per collected node and the index row with its scans on each node."""
+    rows = [{"record_type": "NODES", "target_id": 100, "captured_at": NOW,
+             "nodes": [{"target_id": t, "name": n} for t, n in NODES.items()]}]
+    for t in nodes:
+        rows.append({"record_type": "DATABASE", "snapshot_id": t, "target_id": t, "node_name": NODES[t],
+                     "captured_at": NOW, "database_name": database, "in_recovery": t != 1,
+                     "stats_since": NOW - timedelta(days=stats_days), "stats_since_start": False})
+        rows.append({"record_type": "INDEX", "snapshot_id": 10 + t, "target_id": t, "node_name": NODES[t],
+                     "captured_at": NOW, "database_name": database, "schema_name": "public",
+                     "table_name": "orders", "index_name": index.get("name", "ix_orders_year_end"),
+                     "idx_scan": scans.get(t, 0), "index_size_bytes": size,
+                     "is_valid": index.get("is_valid", True), "is_unique": index.get("is_unique", False),
+                     "constraint_type": index.get("constraint_type"),
+                     "being_built": index.get("being_built", False)})
+    return rows
+
+
+class UnusedIndexTests(unittest.TestCase):
+    RULE = {"rule_key": "PG-IDX-001", "default_severity": "WARNING", "parameters": {
+        "min_index_size": {"value": 10.0 * MB, "unit": "BYTE"},
+        "min_statistics_age": {"value": 7 * 86400.0, "unit": "SECOND"},
+        "full_cycle": {"value": 365 * 86400.0, "unit": "SECOND"}}}
+
+    def evaluate(self, rows):
+        return engine.evaluate_unused_indexes(rows, self.RULE, [])
+
+    def test_used_on_a_replica_only_is_used(self):
+        # Field case: the primary shows 0 scans, reports on a replica use the index.
+        self.assertEqual(self.evaluate(index_rows({2: 48000})), [])
+
+    def test_unused_on_every_node_is_a_warning(self):
+        findings = self.evaluate(index_rows({}))
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("app.public.ix_orders_year_end", "WARNING")])
+        values = findings[0]["template_values"]
+        self.assertEqual(values["nodes"], "pg-1, pg-2, pg-3")
+        self.assertNotIn("_alt", values)                      # 400 days of statistics
+        self.assertEqual((findings[0]["observed_value"], findings[0]["observed_unit"]), (50 * MB, "BYTE"))
+
+    def test_statistics_age_is_the_shortest_node_and_short_ones_warn_about_periodic_use(self):
+        rows = index_rows({}, stats_days=400)
+        rows[3]["stats_since"] = NOW - timedelta(days=12)    # pg-2 reset 12 days ago
+        values = self.evaluate(rows)[0]["template_values"]
+        self.assertEqual(values["statistics_seconds"], 12 * 86400)
+        self.assertTrue(values["_alt"])
+
+    def test_statistics_younger_than_the_minimum_are_not_judged(self):
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[statistics_too_recent\]"):
+            self.evaluate(index_rows({}, stats_days=2))
+
+    def test_missing_node_matters_only_when_the_sum_is_zero(self):
+        self.assertEqual(self.evaluate(index_rows({1: 1000, 3: 250}, nodes=(1, 3))), [])
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[index_usage_incomplete\].*pg-2"):
+            self.evaluate(index_rows({}, nodes=(1, 3)))
+
+    def test_small_constraint_invalid_and_building_indexes_are_not_judged(self):
+        self.assertEqual(self.evaluate(index_rows({}, size=9 * MB)), [])
+        for extra in ({"constraint_type": "p"}, {"constraint_type": "u"}, {"is_valid": False},
+                      {"being_built": True}):
+            with self.subTest(**extra):
+                self.assertEqual(self.evaluate(index_rows({}, **extra)), [])
+
+
+class InvalidIndexTests(unittest.TestCase):
+    def evaluate(self, rows):
+        return engine.evaluate_invalid_indexes(rows, rule("WARNING"), [])
+
+    def test_invalid_index_on_the_primary(self):
+        findings = self.evaluate(index_rows({}, is_valid=False))
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("app.public.ix_orders_year_end", "WARNING")])        # once, from the primary
+
+    def test_invalid_unique_index_is_critical(self):
+        finding = self.evaluate(index_rows({}, is_valid=False, is_unique=True))[0]
+        self.assertEqual(finding["severity"], "CRITICAL")
+        self.assertTrue(finding["template_values"]["_alt"])
+
+    def test_index_being_built_is_not_reported(self):
+        self.assertEqual(self.evaluate(index_rows({}, is_valid=False, being_built=True)), [])
+
+    def test_no_primary_is_insufficient_evidence(self):
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[no_primary\]"):
+            self.evaluate(index_rows({}, is_valid=False, nodes=(2, 3)))
+
+
+class SecurityObjectTests(unittest.TestCase):
+    def test_login_superusers_except_bootstrap(self):
+        roles = [{"snapshot_id": 1, "captured_at": NOW, "role_oid": oid, "role_name": name,
+                  "is_superuser": su, "can_login": login, "valid_until": None}
+                 for oid, name, su, login in ((10, "postgres", True, True), (16384, "app", True, True),
+                                              (16385, "admin_group", True, False),
+                                              (16386, "replicator", False, True))]
+        findings = engine.evaluate_login_superusers(roles, rule("WARNING"), [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["app"])
+
+    def test_public_create_per_schema(self):
+        rows = [{"snapshot_id": 1, "captured_at": NOW, "record_type": "DATABASE", "database_name": "app"}]
+        rows += [{"snapshot_id": 2, "captured_at": NOW, "record_type": "SCHEMA", "database_name": "app",
+                  "schema_name": name, "schema_owner": "app", "public_usage": True, "public_create": create}
+                 for name, create in (("public", True), ("sales", False))]
+        findings = engine.evaluate_public_create(rows, rule("WARNING"), [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["app.public"])
+
+
 if __name__ == "__main__":
     unittest.main()
