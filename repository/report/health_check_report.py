@@ -66,7 +66,6 @@ TEXTS = {
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
         "topic_unknown": "Değerlendirilemedi",
-        "topic_unknown_text": "Yeterli veri toplanamadığı için değerlendirilemedi.",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "what_happens": "Ne oluyor", "causes": "Olası sebepler",
         "system": "Sistem Bilgisi",
@@ -173,7 +172,6 @@ TEXTS = {
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
         "topic_unknown": "Not assessed",
-        "topic_unknown_text": "Could not be assessed; not enough data was collected.",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "why_it_matters": "Why it matters", "what_to_do": "What to do", "what_happens": "What is happening", "causes": "Likely causes",
         "system": "System Overview",
@@ -992,32 +990,32 @@ def render_impact_chart(data, lang, t):
 
 
 def render_topics(data, lang, t):
+    """Per topic one item per rule: problems first, then rules not assessed, then what was fine."""
+    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2}
     rows = []
     for key, topic in topic_summary(data):
         entry = data["topics"].get(key)
         name = localized(entry, lang, "name") if entry else key
         status = topic["status"]
-        if status == "ok":
-            # Built from the rules' own scoped statements: no claim beyond what was checked.
-            text = " ".join(healthy_text(data, r, lang, t) for r in topic["results"]
-                            if r["outcome"] == "HEALTHY")
-        elif status == "unknown":
-            text = t["topic_unknown_text"]
-        else:
-            # Problems first (name: what is happening, how many), then what was fine in this area.
-            problems = []
-            for r in topic["results"]:
-                if r["outcome"] != "ATTENTION_REQUIRED":
-                    continue
+        items = []
+        for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
+            rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+            if r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
-                problems.append(
-                    f"{rule_text(data, r['rule_id'], lang, 'NAME', r['rule_name'])} "
-                    f"({count} {t['findings_word']}): "
-                    + first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
-            fine = [healthy_text(data, r, lang, t) for r in topic["results"] if r["outcome"] == "HEALTHY"]
-            text = " ".join(problems + fine)
+                severity = r["max_severity"] or "WARNING"
+                items.append(f"{badge(severity, t['severity'].get(severity, severity))} "
+                             f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}): "
+                             + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING"))))
+            elif r["outcome"] == "HEALTHY":
+                # The rule's own scoped statement: no claim beyond what was checked.
+                items.append(e(healthy_text(data, r, lang, t)))
+            else:
+                reason = explain_reason(r.get("reason"), data, t)
+                items.append(f"{badge('unknown', t['topic_unknown'])} <b>{e(rule_name)}</b>"
+                             + (f": {e(reason)}" if reason else ""))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
-                    f'{badge(status, t["topic_" + status])}<span class="text">{e(text)}</span></div>')
+                    f'{badge(status, t["topic_" + status])}<span class="text"><ul class="items">'
+                    + "".join(f"<li>{item}</li>" for item in items) + "</ul></span></div>")
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
             + f'<p class="note">{e(t["scope_note"])}</p>')
 

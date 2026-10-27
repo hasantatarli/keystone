@@ -446,10 +446,33 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
         topics = executive[executive.index("Alanlara göre durum"):]
-        self.assertIn("Uzun süre boşta bekleyen transaction (1 bulgu): Bazı session", topics)
-        self.assertIn("Açık kalma süresi", topics)        # the healthy rule of the same topic
+        # One item per rule: the problem with its severity first, then what was fine.
+        self.assertIn('<li><span class="badge b-WARNING">Uyarı</span> <b>Uzun süre boşta bekleyen '
+                      'transaction</b> (1 bulgu): Bazı session', topics)
+        self.assertIn("<li>Açık kalma süresi", topics)    # the healthy rule of the same topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+
+    def test_topic_lists_a_rule_that_could_not_be_assessed(self):
+        # A topic must not read "no problems" while one of its rules was not assessed.
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'HEALTHY', max_severity = NULL, "
+            "finding_count = 0, reason = NULL FROM keystone.rule_definition rd "
+            "WHERE rd.rule_id = res.rule_id AND rd.rule_key IN ('PG-TRAN-001', 'PG-TRAN-003', 'PG-TRAN-005')")
+        self.conn.execute("DELETE FROM keystone.finding")
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'INSUFFICIENT_EVIDENCE', "
+            "reason = 'PG_PREPARED_TRANSACTIONS: Required evidence is not available.' "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id AND rd.rule_key = 'PG-TRAN-005'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
+        transactions = topics[topics.index("Transaction yönetimi"):]
+        transactions = transactions[:transactions.index('<div class="topic">')]
+        self.assertIn('<span class="badge b-unknown">Değerlendirilemedi</span> '
+                      '<b>Uzun bekleyen prepared transaction</b>: PG_PREPARED_TRANSACTIONS verisi yok.',
+                      transactions)
 
     def test_many_findings_show_ten_and_the_rest_on_demand(self):
         check_id = self.make_check()
