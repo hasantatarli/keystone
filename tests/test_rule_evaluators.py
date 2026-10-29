@@ -1064,6 +1064,11 @@ class UnusedIndexTests(unittest.TestCase):
         with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[index_usage_incomplete\].*pg-2"):
             self.evaluate(index_rows({}, nodes=(1, 3)))
 
+    def test_no_node_collected_is_insufficient_not_healthy(self):
+        # Lab 2026-10-29: all node connections failed; only the node list was left.
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[no_index_usage\]"):
+            self.evaluate(index_rows({}, nodes=()))
+
     def test_small_constraint_invalid_and_building_indexes_are_not_judged(self):
         self.assertEqual(self.evaluate(index_rows({}, size=9 * MB)), [])
         for extra in ({"constraint_type": "p"}, {"constraint_type": "u"}, {"is_valid": False},

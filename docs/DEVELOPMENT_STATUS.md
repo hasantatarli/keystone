@@ -226,7 +226,7 @@ Rule batches 2026-10-26:
 
 Next:
 
-1. PG-CAP-002 sequence exhaustion (V044, PG018) in progress: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege.
+1. PG-CAP-002 sequence exhaustion (V044, PG018) in progress: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege. Lab moved from `postgres` to a `pg_monitor` user `keystone_monitor` (2026-10-29); first run found PG-IDX-001 healthy with no index evidence (fixed) and long collection errors repeated in the executive part (now short there, full in the technical part).
 2. Configuration recommendation capability (PG-CONF-003): ADR-0017 approved 2026-10-29 (server profile on the target, weakest node for hardware limits, version-aware settings, ranges with WARNING and combination rules with CRITICAL, formulas in code and numbers in the Dictionary); implementation in four steps after PG-CAP-002.
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.

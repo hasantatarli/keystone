@@ -514,7 +514,7 @@ New collectors: `PG_INDEX_USAGE` (scope NODE_DATABASE, ADR-0009: every database 
 | Evidence | `PG_INDEX_USAGE`, required, 86400 s; latest snapshot per node and database plus the list of nodes the system should have |
 | Condition | scans summed over all nodes = 0; size ≥ `min_index_size` (10 MB); not backing a primary key, unique or exclusion constraint; valid and not being built; not owned by an extension (PG017) |
 | Statistics age | shortest over the nodes (`pg_stat_database.stats_reset`, server start when never reset); always stated; under `min_statistics_age` (7 days) not judged; under `full_cycle` (365 days) the finding warns about periodic use (FINDING_ALT) |
-| Missing node | a sum above 0 on the reachable nodes decides "used"; a sum of 0 with a node not collected for that database → INSUFFICIENT_EVIDENCE (`index_usage_incomplete`, names the node) |
+| Missing node | a sum above 0 on the reachable nodes decides "used"; a sum of 0 with a node not collected for that database → INSUFFICIENT_EVIDENCE (`index_usage_incomplete`, names the node); no node collected at all → INSUFFICIENT_EVIDENCE (`no_index_usage`; lab 2026-10-29 with a monitoring user blocked by pg_hba the rule wrongly said healthy) |
 | Severity | WARNING |
 | Subject | INDEX (`database.schema.index`); observed value = size |
 

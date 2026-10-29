@@ -1604,6 +1604,10 @@ def evaluate_unused_indexes(rows, rule, thresholds):
         raise InsufficientEvidence("PG_INDEX_USAGE", "no_nodes", "No node list for the target.")
     nodes = {n["target_id"]: n["name"] for n in marker["nodes"]}
     collected = {(r["target_id"], r["database_name"]): r for r in rows if r["record_type"] == "DATABASE"}
+    if not collected:
+        # Lab 2026-10-29: every node failed to connect; nothing seen is not "nothing unused".
+        raise InsufficientEvidence("PG_INDEX_USAGE", "no_index_usage",
+                                   "Index usage was not collected from any server.")
     min_size = parameter(rule, "min_index_size")
     min_age = parameter(rule, "min_statistics_age")
     full_cycle = parameter(rule, "full_cycle")

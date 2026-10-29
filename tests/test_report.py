@@ -712,6 +712,16 @@ class ReportTests(test_health_check.HealthCheckTests):
             self.conn.execute("DROP ROLE IF EXISTS seq_test_monitor")
             self.conn.autocommit = False
 
+    def test_executive_reason_leaves_the_error_text_to_the_technical_part(self):
+        # Lab 2026-10-29: a long pg_hba error repeated in every area of the executive part.
+        t = report.TEXTS["tr"]
+        data = {"collections": [{"collector_key": "PG_WAL_STATUS", "status": "CONNECTION_FAILED",
+                                 "status_message": "FATAL:  no pg_hba.conf entry for host"}]}
+        reason = "PG_WAL_STATUS: Required evidence is not available."
+        self.assertEqual(report.explain_reason(reason, data, t, short=True),
+                         "PG_WAL_STATUS toplanamadı (bağlantı hatası); ayrıntı teknik bölümde.")
+        self.assertIn("no pg_hba.conf entry", report.explain_reason(reason, data, t))
+
     def test_reason_with_values_is_explained(self):
         t = report.TEXTS["tr"]
         reason = ('PG_INDEX_USAGE: [index_usage_incomplete] 3 index(es) unused on the reachable nodes; '

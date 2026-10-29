@@ -79,6 +79,7 @@ TEXTS = {
         "databases": "Veritabanları", "database": "Veritabanı", "owner": "Sahip", "size": "Boyut",
         "not_collected_here": "Bu kontrolde toplanamadı.",
         "collection_summary": "Veri toplama: {ok} / {total} başarılı",
+        "more_errors": "(+{n} hata daha; teknik bölümde)",
         "collection_errors": "Hata",
         "findings": "Bulgular", "no_findings": "Bulgu yok.",
         "meaning": "Anlamı", "impact": "Etkisi", "recommendation": "Öneri",
@@ -117,6 +118,7 @@ TEXTS = {
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
+                         "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
                          "sequence_privilege_missing": "{count} sequence'in değeri okunamadı; izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yetki: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <kullanıcı>."},
         "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
         "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
@@ -149,6 +151,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
         "days": "gün", "hours": "saat", "minutes": "dakika",
         "reason_not_collected": "{source} bu kontrolde toplanamadı ({status}: {message}).",
+        "reason_not_collected_short": "{source} toplanamadı ({status}); ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
     },
@@ -191,6 +194,7 @@ TEXTS = {
         "databases": "Databases", "database": "Database", "owner": "Owner", "size": "Size",
         "not_collected_here": "Not collected in this check.",
         "collection_summary": "Data collection: {ok} of {total} succeeded",
+        "more_errors": "(+{n} more; see the technical part)",
         "collection_errors": "Error",
         "findings": "Findings", "no_findings": "No findings.",
         "meaning": "Meaning", "impact": "Impact", "recommendation": "Recommendation",
@@ -229,6 +233,7 @@ TEXTS = {
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
+                         "no_index_usage": "Index usage was not collected from any server.",
                          "sequence_privilege_missing": "The value of {count} sequence(s) could not be read; the monitoring user has no SELECT on them. Grant: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <user>."},
         "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
         "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
@@ -261,6 +266,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
         "days": "days", "hours": "hours", "minutes": "minutes",
         "reason_not_collected": "{source} could not be collected in this check ({status}: {message}).",
+        "reason_not_collected_short": "{source} not collected ({status}); details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
     },
@@ -564,8 +570,11 @@ REASON_PATTERN = re.compile(
 REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
-def explain_reason(reason, data, t):
-    """Engine reason in plain words; says when this check failed to collect the source."""
+def explain_reason(reason, data, t, short=False):
+    """Engine reason in plain words; says when this check failed to collect the source.
+
+    short: without the technical error message (executive part).
+    """
     coded = REASON_CODE_PATTERN.match(reason or "")
     if coded and coded.group("code") in t["reason_codes"]:
         try:
@@ -581,6 +590,9 @@ def explain_reason(reason, data, t):
               and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")]
     if failed:
         c = failed[0]
+        if short:
+            return t["reason_not_collected_short"].format(
+                source=source, status=t["collection_status"].get(c["status"], c["status"]).lower())
         return t["reason_not_collected"].format(
             source=source, status=t["collection_status"].get(c["status"], c["status"]),
             message=c["status_message"] or "-")
@@ -1043,7 +1055,7 @@ def render_topics(data, lang, t):
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
             else:
-                reason = explain_reason(r.get("reason"), data, t)
+                reason = explain_reason(r.get("reason"), data, t, short=True)
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
                               + (f": {e(reason)}" if reason else "")))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
@@ -1085,6 +1097,10 @@ def render_main_problems(data, lang, t):
         else f'<p class="note">{e(t["no_problems"])}</p>')
 
 
+def shorten(text, limit=140):
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
 def render_executive(data, lang, t):
     counts, verdict = summarize(data)
     tiles = [(counts["critical"], t["count_critical"]), (counts["warning"], t["count_warning"]),
@@ -1098,7 +1114,9 @@ def render_executive(data, lang, t):
         errors = sorted({c["status_message"] for c in collections
                          if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
         coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
-                     + (f" · {e(t['collection_errors'])}: {e('; '.join(errors[:3]))}" if errors else ""))
+                     + (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
+                        + (f" {e(t['more_errors'].format(n=len(errors) - 1))}" if len(errors) > 1 else "")
+                        if errors else ""))
     return (f'<div class="part">{e(t["part_exec"])}</div>'
             f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}</div>'
             f'<p class="note">{coverage}</p><div class="tiles">'
