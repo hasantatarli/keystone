@@ -156,7 +156,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 18 / 25 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 19 / 26 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -663,6 +663,53 @@ class ReportTests(test_health_check.HealthCheckTests):
             self.conn.execute("DROP TABLE IF EXISTS idx_test, idx_test_ext")
             self.conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
             self.conn.execute("DROP ROLE IF EXISTS idx_test_admin")
+            self.conn.autocommit = False
+
+    def test_sequence_collector_feeds_the_rule_and_needs_the_privilege(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/sequence_capacity_snapshot.sql").read_text()
+        self.conn.commit()
+        self.conn.autocommit = True
+        for statement in (
+                "CREATE TABLE seq_test (id serial PRIMARY KEY)",                   # integer column
+                "SELECT setval('seq_test_id_seq', 2000000000)",                    # 93 %
+                "CREATE TABLE seq_test_big (id bigint GENERATED ALWAYS AS IDENTITY)",
+                "CREATE ROLE seq_test_monitor IN ROLE pg_monitor"):
+            self.conn.execute(statement)
+        self.conn.autocommit = False
+        try:
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                rows = cur.execute(sql).fetchall()
+                cur.execute("SET ROLE seq_test_monitor")
+                monitor_rows = cur.execute(sql).fetchall()
+                cur.execute("RESET ROLE")
+            ours = {r["sequence_name"]: r for r in rows if r["record_type"] == "SEQUENCE"}
+            self.assertEqual((ours["seq_test_id_seq"]["column_type"], ours["seq_test_id_seq"]["last_value"]),
+                             ("integer", 2000000000))
+            self.assertEqual(ours["seq_test_big_id_seq"]["table_name"], "seq_test_big")   # identity
+            self.assertFalse(any(r["is_readable"] for r in monitor_rows if r["record_type"] == "SEQUENCE"))
+
+            task = {"target_id": self.system, "collector_key": "PG_SEQUENCE_CAPACITY"}
+            worker.save_sequence_capacity_snapshot(self.conn, task, rows)
+            self.conn.commit()
+            engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+            self.assertEqual(self.latest_outcomes()["PG-CAP-002"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+
+            # pg_monitor alone cannot read the values: not assessed, and the reason says why.
+            self.conn.execute("DELETE FROM postgresql.sequence_capacity_snapshot")
+            worker.save_sequence_capacity_snapshot(self.conn, task, monitor_rows)
+            self.conn.commit()
+            engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+            outcome, _, reason = self.latest_outcomes()["PG-CAP-002"]
+            self.assertEqual(outcome, "INSUFFICIENT_EVIDENCE")
+            self.assertIn("SELECT", report.explain_reason(reason, {"collections": []}, report.TEXTS["tr"]))
+        finally:
+            self.conn.rollback()
+            self.conn.autocommit = True
+            self.conn.execute("DROP TABLE IF EXISTS seq_test, seq_test_big")
+            self.conn.execute("DROP ROLE IF EXISTS seq_test_monitor")
             self.conn.autocommit = False
 
     def test_reason_with_values_is_explained(self):

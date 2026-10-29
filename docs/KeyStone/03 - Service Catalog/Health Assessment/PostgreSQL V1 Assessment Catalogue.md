@@ -98,7 +98,7 @@ Sources combined:
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | **PG-CAP-001** | Data disk usage | Data disk ≥ 80 / 90 % (as `df`) | Ready: host + PG-002 | — | Done |
-| PG-CAP-002 | Integer key / sequence exhaustion | `int4` key or sequence ≥ 75 % — WARNING, ≥ 90 % — CRITICAL of its maximum | Gap: PG-019 | PK or FK using numeric or integer data type | P1 |
+| **PG-CAP-002** | Integer key / sequence exhaustion | last value ≥ 75 % — WARNING, ≥ 90 % — CRITICAL of the smaller of the sequence's and the fed column's limit; without SELECT on the sequences INSUFFICIENT_EVIDENCE naming the privilege | Ready: PG_SEQUENCE_CAPACITY | PK or FK using numeric or integer data type | Done |
 | PG-CAP-003 | Separate WAL disk and tablespaces | Like PG-CAP-001 for `pg_wal` on its own mount and tablespaces | Gap: PG-013 + tablespace paths | Tablespaces Info | P2 |
 | PG-CAP-004 | Memory pressure | Swap in use on a database server above X % | Ready: host | — | P2 |
 | PG-CAP-005 | Heavy temporary file use | Temp bytes per database high | Gap: PG-024 / database statistics | — | P2 |
@@ -186,15 +186,15 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 28 | 2 | 22 | 10 |
-| of which evidence ready | 28 | 1 | 9 | 5 |
+| Checks | 29 | 1 | 22 | 10 |
+| of which evidence ready | 29 | 1 | 9 | 5 |
 
-Status 2026-10-27: 28 checks done (V031–V042). Remaining P1: PG-CAP-002 (on hold, open question 6) and PG-CONF-003, which comes last as the configuration recommendation capability (decision 2, separate ADR). Collectors for the P1 checks, in the order worked:
+Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
 3. ~~**PG-010 / PG-011 Index usage and quality** — PG-IDX-001/002.~~ Done: PG_INDEX_USAGE (V042).
-4. **PG-019 Sequence / integer key capacity** — PG-CAP-002. Decided 2026-10-29 (open question 6); next.
+4. ~~**PG-019 Sequence / integer key capacity** — PG-CAP-002.~~ Done: PG_SEQUENCE_CAPACITY (V044).
 5. ~~**PG-020 Prepared transactions** — PG-TRAN-005.~~ Done: PG_PREPARED_TRANSACTIONS (V041).
 6. ~~**PG-016 Roles**, **PG-018 schema privileges** — PG-SEC-001/004.~~ Done: PG_ROLES, PG_SCHEMA_PRIVILEGES (V042).
 7. ~~**Timeline ID** in PG-001 — PG-HA-001.~~ Done: PG_WAL_STATUS (V041).

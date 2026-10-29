@@ -1117,5 +1117,49 @@ class SecurityObjectTests(unittest.TestCase):
         self.assertEqual([f["subject_identifier"] for f in findings], ["app.public"])
 
 
+def sequence_row(last, column_type="integer", data_type="bigint", readable=True, cycle=False,
+                 increment=1, name="orders_id_seq"):
+    limits = engine.COLUMN_TYPE_LIMITS[data_type]
+    return {"record_type": "SEQUENCE", "snapshot_id": 1, "target_id": 1, "captured_at": NOW,
+            "database_name": "app", "schema_name": "public", "sequence_name": name,
+            "data_type": data_type, "min_value": Decimal(limits[0] if increment < 0 else 1),
+            "max_value": Decimal(limits[1] if increment > 0 else -1), "increment_by": increment,
+            "is_cycle": cycle, "is_readable": readable,
+            "last_value": None if last is None or not readable else Decimal(last),
+            "table_name": "orders", "column_name": "id", "column_type": column_type}
+
+
+class SequenceExhaustionTests(unittest.TestCase):
+    THRESHOLDS = [threshold("WARNING", 75, "PERCENT"), threshold("CRITICAL", 90, "PERCENT")]
+
+    def evaluate(self, *rows):
+        return engine.evaluate_sequence_exhaustion(list(rows), rule(), self.THRESHOLDS)
+
+    def test_column_type_is_the_limit_when_tighter(self):
+        # A bigint sequence feeding an integer column runs out at 2,147,483,647.
+        finding = self.evaluate(sequence_row(1_932_735_283))[0]          # 90.0 %
+        self.assertEqual(finding["severity"], "CRITICAL")
+        self.assertEqual(finding["template_values"]["limit"], 2_147_483_647)
+        self.assertEqual(finding["details"]["limit_source"], "column")
+
+    def test_boundaries(self):
+        self.assertEqual(self.evaluate(sequence_row(1_610_612_735)), [])   # just under 75 %
+        self.assertEqual([f["severity"] for f in self.evaluate(sequence_row(1_610_612_736))], ["WARNING"])
+
+    def test_bigint_column_is_far_from_its_limit(self):
+        self.assertEqual(self.evaluate(sequence_row(5_000_000_000, column_type="bigint")), [])
+
+    def test_descending_sequence_moves_towards_its_minimum(self):
+        row = sequence_row(-2_000_000_000, increment=-1)
+        self.assertEqual([f["severity"] for f in self.evaluate(row)], ["CRITICAL"])
+
+    def test_cycling_and_unused_sequences_are_not_judged(self):
+        self.assertEqual(self.evaluate(sequence_row(2_100_000_000, cycle=True), sequence_row(None)), [])
+
+    def test_unreadable_sequences_are_never_healthy(self):
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[sequence_privilege_missing\]"):
+            self.evaluate(sequence_row(10, readable=False), sequence_row(10))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 # PostgreSQL MVP Plan
 
 **Status:** Current  
-**Last Updated:** 2026-10-27
+**Last Updated:** 2026-10-29
 
 ## Purpose
 
@@ -12,8 +12,8 @@ This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMEN
 ## Where We Are (2026-10-26)
 
 - Phase 0 done. Phase 1: collector and assessment scheduling, the one-command health check and the HTML report (executive summary and technical details, Turkish and English) are done and lab-verified. Offline evidence is open.
-- 28 rules in 9 assessments from the PostgreSQL V1 Assessment Catalogue; rule texts (meaning, causes, impact, steps, finding sentences) in Turkish and English; rule parameters besides thresholds (V039).
-- Next: configuration recommendations (PG-CONF-003); sequence capacity on hold for a privilege decision.
+- 29 rules in 9 assessments from the PostgreSQL V1 Assessment Catalogue; rule texts (meaning, causes, impact, steps, finding sentences) in Turkish and English; rule parameters besides thresholds (V039).
+- Next: configuration recommendations (PG-CONF-003, ADR-0017).
 
 ### Earlier state (2026-10-05)
 

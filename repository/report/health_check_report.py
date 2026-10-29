@@ -116,7 +116,12 @@ TEXTS = {
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
-                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor."},
+                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
+                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı; izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yetki: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <kullanıcı>."},
+        "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
+        "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
+        "detail_limit_source": "Sınırı belirleyen", "limit_source_column": "kolon tipi",
+        "limit_source_sequence": "sequence tipi",
         "detail_index": "Index", "detail_index_size": "Boyut", "detail_nodes_checked": "Kontrol edilen sunucular",
         "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
@@ -223,7 +228,12 @@ TEXTS = {
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
-                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed."},
+                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
+                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read; the monitoring user has no SELECT on them. Grant: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <user>."},
+        "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
+        "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
+        "detail_limit_source": "Limit set by", "limit_source_column": "column type",
+        "limit_source_sequence": "sequence type",
         "detail_index": "Index", "detail_index_size": "Size", "detail_nodes_checked": "Servers checked",
         "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
@@ -1168,7 +1178,10 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("index", "detail_index"), ("index_size", "detail_index_size"),
                  ("nodes_checked", "detail_nodes_checked"), ("statistics_node", "detail_statistics_node"),
                  ("schema", "detail_schema"), ("schema_owner", "detail_schema_owner"),
-                 ("role", "detail_role"))
+                 ("role", "detail_role"), ("sequence", "detail_sequence"), ("column", "detail_column"),
+                 ("data_type", "detail_data_type"), ("column_type", "detail_column_type"),
+                 ("last_value", "detail_last_value"), ("limit", "detail_limit"),
+                 ("limit_source", "detail_limit_source"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1210,7 +1223,7 @@ def setting_value_text(value, unit, t):
 
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
-                "connection_count"}
+                "connection_count", "last_value", "limit"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds"}
 SIZE_VALUES = {"index_size"}
@@ -1264,6 +1277,11 @@ def render_instance(f, data, lang, t):
     for key in ("live_rows", "dead_rows", "modified_rows"):
         if isinstance(details.get(key), (int, float)):
             details[key] = f"{details[key]:,}"
+    for key in ("last_value", "limit"):
+        if isinstance(details.get(key), int):
+            details[key] = f"{details[key]:,}"
+    if details.get("limit_source"):
+        details["limit_source"] = t.get("limit_source_" + details["limit_source"], details["limit_source"])
     if details.get("index_size_bytes") is not None:
         details["index_size"] = fmt_bytes(details["index_size_bytes"])
     if details.get("wal_behind_bytes") is not None:
