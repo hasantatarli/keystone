@@ -1,6 +1,6 @@
 # ADR-0017 — Configuration Recommendations
 
-**Status:** Draft (decisions being made)  
+**Status:** Approved  
 **Date:** 2026-10-29
 
 ADR-0016 is reserved for the customer overview (DEVELOPMENT_STATUS).
@@ -70,6 +70,23 @@ Logic in code, numbers in the Dictionary, as for rules:
 - **Executive:** one main-problem card "Configuration deviates from the recommendations (N settings)", closed by default, the most important settings in plain words when opened; the configuration area says how many of the settings fit, deviate or endanger the server.
 - **Technical**, collapsible: the calculation inputs first (smallest server used, workload, storage, dedicated; every assumed default marked); the recommendation table by group (setting, current, recommended, acceptable range, status, reason with the calculation); commands for the settings outside their range, both `ALTER SYSTEM SET` and `patronictl edit-config --pg`, restart-requiring ones marked (Keystone writes them, never runs them); other settings changed from their default as context (setting, value, default, source).
 
-## Open questions
+### Versions
 
-1. Version differences (settings added or renamed across PostgreSQL 15–18).
+Recommendations follow the server's PostgreSQL version, not a fixed list: every setting in the Dictionary has the version range it exists in (first version, and a last version for removed or renamed settings), and the numbers can differ per version. A setting the server's version does not have is never recommended; settings a version adds are recommended for that version. The version is read from the primary; mixed versions across nodes are their own finding (PG-HA-004).
+
+The first version covers PostgreSQL 15–18 with, besides the 20 settings above:
+
+| From | Settings |
+| --- | --- |
+| 16 | `vacuum_buffer_usage_limit` |
+| 17 | `io_combine_limit` |
+| 18 | `io_method`, `io_workers`, `autovacuum_worker_slots`; `effective_io_concurrency` calculated for 18's asynchronous I/O |
+
+## Implementation order
+
+1. Server profile on the target (workload type, dedicated, storage type; "not given" kept apart).
+2. Dictionary table of settings: version range, factors and ranges per workload, limits.
+3. Calculation functions with unit tests; recommendations stored per health check; the memory commitment rule (CRITICAL).
+4. Report: executive card and area line, technical inputs, table, commands, other non-default settings.
+
+Each step is its own pull request and is reviewed in the lab.
