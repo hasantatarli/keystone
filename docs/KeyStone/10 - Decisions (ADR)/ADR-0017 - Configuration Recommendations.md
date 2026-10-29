@@ -65,7 +65,11 @@ Logic in code, numbers in the Dictionary, as for rules:
 - **Dictionary (new table, filled by migrations):** the tunable numbers per setting and workload type: factors, acceptable range bounds, lower and upper limits (for example `maintenance_work_mem` at most 2 GB). Tuning for a customer or sector changes data, not code.
 - **Per health check:** every recommendation is stored with the setting, current value, recommended value, range, reason and the inputs used (memory, CPUs, workload, whether a default was assumed). Reports are built from it and stay correct after the Dictionary changes, like `thresholds_used`.
 
+### Report layout (to be reviewed on the first real report)
+
+- **Executive:** one main-problem card "Configuration deviates from the recommendations (N settings)", closed by default, the most important settings in plain words when opened; the configuration area says how many of the settings fit, deviate or endanger the server.
+- **Technical**, collapsible: the calculation inputs first (smallest server used, workload, storage, dedicated; every assumed default marked); the recommendation table by group (setting, current, recommended, acceptable range, status, reason with the calculation); commands for the settings outside their range, both `ALTER SYSTEM SET` and `patronictl edit-config --pg`, restart-requiring ones marked (Keystone writes them, never runs them); other settings changed from their default as context (setting, value, default, source).
+
 ## Open questions
 
-1. Report layout: executive (how many settings deviate, the most important ones) and technical (full table: setting, current, recommended, reason; other non-default settings as context).
-2. Version differences (settings added or renamed across PostgreSQL 15–18).
+1. Version differences (settings added or renamed across PostgreSQL 15–18).
