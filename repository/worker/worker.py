@@ -2172,6 +2172,50 @@ def save_prepared_transactions_snapshot(conn, task, rows):
                   r["prepared_at"], r["owner"], r["database_name"]) for r in transactions])
 
 
+def insert_rows(conn, table, task, rows, columns, casts=None):
+    """Insert collector rows into a postgresql.* table; one captured_at per collection."""
+    if len({r["captured_at"] for r in rows}) > 1:
+        raise RuntimeError(f"{task['collector_key']} rows contain multiple captured_at values.")
+    casts = casts or {}
+    names = ("target_id", "captured_at") + columns
+    values = ", ".join(f"%({c})s{casts.get(c, '')}" for c in names)
+    with conn.cursor() as cur:
+        cur.executemany(
+            f"INSERT INTO postgresql.{table} ({', '.join(names)}) VALUES ({values})",
+            [{"target_id": task["target_id"], "captured_at": r["captured_at"],
+              **{c: r[c] for c in columns}} for r in rows])
+
+
+INDEX_USAGE_COLUMNS = ("record_type", "database_name", "in_recovery", "stats_since", "stats_since_start",
+                       "schema_name", "table_name", "index_name", "idx_scan", "index_size_bytes",
+                       "is_valid", "is_unique", "constraint_type", "being_built", "extension_owned")
+
+
+def save_index_usage_snapshot(conn, task, rows):
+    """Persist PG_INDEX_USAGE of one node: a DATABASE row per collected database, an INDEX row per index."""
+    if not any(r["record_type"] == "DATABASE" for r in rows):
+        raise RuntimeError("PG_INDEX_USAGE returned no DATABASE rows.")
+    insert_rows(conn, "index_usage_snapshot", task, rows, INDEX_USAGE_COLUMNS)
+
+
+def save_schema_privileges_snapshot(conn, task, rows):
+    """Persist PG_SCHEMA_PRIVILEGES: a DATABASE row per collected database, a SCHEMA row per schema."""
+    if not any(r["record_type"] == "DATABASE" for r in rows):
+        raise RuntimeError("PG_SCHEMA_PRIVILEGES returned no DATABASE rows.")
+    insert_rows(conn, "schema_privilege_snapshot", task, rows,
+                ("record_type", "database_name", "schema_name", "schema_owner",
+                 "public_usage", "public_create"))
+
+
+def save_roles_snapshot(conn, task, rows):
+    """Persist PG_ROLES; a cluster always has its bootstrap superuser."""
+    if not rows:
+        raise RuntimeError("PG_ROLES returned no rows.")
+    insert_rows(conn, "role_snapshot", task, rows,
+                ("role_oid", "role_name", "can_login", "is_superuser", "can_create_role",
+                 "can_create_db", "is_replication", "bypass_rls", "valid_until"))
+
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -2186,6 +2230,9 @@ COLLECTOR_HANDLERS = {
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,
     "PG_WAL_STATUS": save_wal_status_snapshot,
     "PG_PREPARED_TRANSACTIONS": save_prepared_transactions_snapshot,
+    "PG_INDEX_USAGE": save_index_usage_snapshot,
+    "PG_SCHEMA_PRIVILEGES": save_schema_privileges_snapshot,
+    "PG_ROLES": save_roles_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):
@@ -2307,7 +2354,7 @@ def process_task(task):
                 if task["execution_type"] == "SSH":
                     rows = execute_ssh_collector(task)
 
-                elif task["execution_scope"] == "DATABASE":
+                elif task["execution_scope"] in ("DATABASE", "NODE_DATABASE"):
                     rows, execution_info = execute_database_scoped_collector(task)
 
                 else:

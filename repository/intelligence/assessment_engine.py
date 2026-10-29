@@ -2,6 +2,7 @@
 # Imports
 # -----------------------------------------------------------------------------
 import argparse
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -608,6 +609,67 @@ def load_latest_prepared_transactions(conn, target_id):
         ORDER BY prepared_at
         """, (target_id, system["captured_at"])).fetchall()
     return [system] + transactions
+
+
+def load_latest_index_usage(conn, target_id):
+    """Latest PG_INDEX_USAGE per node and database, plus a NODES row naming every node expected."""
+    nodes = conn.execute(
+        "SELECT target_id, name FROM keystone.target WHERE target_id = ANY(%s) ORDER BY target_id",
+        (node_target_ids(conn, target_id),)).fetchall()
+    rows = conn.execute(
+        """
+        SELECT u.snapshot_id, u.target_id, t.name AS node_name, u.captured_at, u.record_type,
+               u.database_name, u.in_recovery, u.stats_since, u.stats_since_start, u.schema_name,
+               u.table_name, u.index_name, u.idx_scan, u.index_size_bytes, u.is_valid, u.is_unique,
+               u.constraint_type, u.being_built, u.extension_owned
+        FROM postgresql.index_usage_snapshot u
+        JOIN keystone.target t ON t.target_id = u.target_id
+        JOIN (
+            SELECT target_id, database_name, max(captured_at) AS captured_at
+            FROM postgresql.index_usage_snapshot
+            WHERE target_id = ANY(%s) AND record_type = 'DATABASE'
+            GROUP BY target_id, database_name
+        ) latest ON latest.target_id = u.target_id AND latest.database_name = u.database_name
+                AND latest.captured_at = u.captured_at
+        ORDER BY u.target_id, u.database_name, u.record_type, u.schema_name, u.index_name
+        """, ([n["target_id"] for n in nodes],)).fetchall()
+    if not rows:
+        return []
+    # Expected nodes; its time is the newest collection so it is as fresh as the data.
+    marker = {"record_type": "NODES", "target_id": target_id,
+              "captured_at": max(r["captured_at"] for r in rows),
+              "nodes": [{"target_id": n["target_id"], "name": n["name"]} for n in nodes]}
+    return [marker] + rows
+
+
+def load_latest_schema_privileges(conn, target_id):
+    """Latest PG_SCHEMA_PRIVILEGES per database of the target."""
+    return conn.execute(
+        """
+        SELECT s.snapshot_id, s.target_id, s.captured_at, s.record_type, s.database_name,
+               s.schema_name, s.schema_owner, s.public_usage, s.public_create
+        FROM postgresql.schema_privilege_snapshot s
+        JOIN (
+            SELECT database_name, max(captured_at) AS captured_at
+            FROM postgresql.schema_privilege_snapshot
+            WHERE target_id = %s AND record_type = 'DATABASE' GROUP BY database_name
+        ) latest ON latest.database_name = s.database_name AND latest.captured_at = s.captured_at
+        WHERE s.target_id = %s
+        ORDER BY s.database_name, s.record_type, s.schema_name
+        """, (target_id, target_id)).fetchall()
+
+
+def load_latest_roles(conn, target_id):
+    """Latest PG_ROLES snapshot of the target."""
+    return conn.execute(
+        """
+        SELECT snapshot_id, target_id, captured_at, role_oid, role_name, can_login, is_superuser,
+               can_create_role, can_create_db, is_replication, bypass_rls, valid_until
+        FROM postgresql.role_snapshot
+        WHERE target_id = %s
+          AND captured_at = (SELECT max(captured_at) FROM postgresql.role_snapshot WHERE target_id = %s)
+        ORDER BY role_name
+        """, (target_id, target_id)).fetchall()
 
 
 # -----------------------------------------------------------------------------
@@ -1402,10 +1464,14 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
 
 
 class InsufficientEvidence(Exception):
-    """Raised by an evaluator when the evidence it got cannot answer the rule."""
+    """Raised by an evaluator when the evidence it got cannot answer the rule.
 
-    def __init__(self, source, code, message):
-        super().__init__(f"{source}: [{code}] {message}")
+    Reason: "SOURCE: [code] English message {values as JSON}"; reports explain the code.
+    """
+
+    def __init__(self, source, code, message, **values):
+        suffix = f" {json.dumps(values, ensure_ascii=False)}" if values else ""
+        super().__init__(f"{source}: [{code}] {message}{suffix}")
 
 
 def clock(value):
@@ -1500,6 +1566,144 @@ def evaluate_recent_failover(rows, rule, thresholds):
                     "captured_at": iso(primary["captured_at"])}}]
 
 
+# Indexes enforcing a primary key, unique or exclusion constraint are needed without scans.
+CONSTRAINT_INDEX_TYPES = {"p", "u", "x"}
+
+
+def index_name(row):
+    return f"{row['database_name']}.{row['schema_name']}.{row['index_name']}"
+
+
+def evaluate_unused_indexes(rows, rule, thresholds):
+    """PG-IDX-001: indexes with no scans summed over all nodes.
+
+    A sum above 0 on the reachable nodes decides "used"; a sum of 0 with a node
+    not collected cannot be decided. The statistics age is the shortest over the nodes.
+    """
+    marker = next((r for r in rows if r["record_type"] == "NODES"), None)
+    if marker is None:
+        raise InsufficientEvidence("PG_INDEX_USAGE", "no_nodes", "No node list for the target.")
+    nodes = {n["target_id"]: n["name"] for n in marker["nodes"]}
+    collected = {(r["target_id"], r["database_name"]): r for r in rows if r["record_type"] == "DATABASE"}
+    min_size = parameter(rule, "min_index_size")
+    min_age = parameter(rule, "min_statistics_age")
+    full_cycle = parameter(rule, "full_cycle")
+
+    indexes = {}
+    for r in rows:
+        if (r["record_type"] != "INDEX" or r["constraint_type"] in CONSTRAINT_INDEX_TYPES
+                or r["extension_owned"]):
+            continue                                   # extension objects are not the DBA's to drop
+        if not r["is_valid"] or r["being_built"]:
+            continue                                   # invalid indexes are PG-IDX-002
+        entry = indexes.setdefault(index_name(r), {"row": r, "scans": 0, "size": 0})
+        entry["scans"] += r["idx_scan"] or 0
+        entry["size"] = max(entry["size"], r["index_size_bytes"] or 0)
+
+    findings, undecided, missing_nodes, too_recent = [], [], set(), set()
+    for name, entry in indexes.items():
+        if entry["scans"] > 0 or entry["size"] < min_size:
+            continue
+        database = entry["row"]["database_name"]
+        missing = [nodes[t] for t in nodes if (t, database) not in collected]
+        if missing:
+            undecided.append(name)
+            missing_nodes.update(missing)
+            continue
+        stats = [collected[(t, database)] for t in nodes]
+        age = min((s["captured_at"] - s["stats_since"]).total_seconds() for s in stats)
+        if age < min_age:
+            too_recent.add(database)
+            continue
+        since = min(stats, key=lambda s: s["captured_at"] - s["stats_since"])
+        row = entry["row"]
+        values = {"index": name, "table": f"{row['schema_name']}.{row['table_name']}",
+                  "nodes": ", ".join(nodes.values()), "statistics_seconds": round(age),
+                  "index_size": entry["size"]}
+        if age < full_cycle:
+            values["_alt"] = True
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": values, "observed_value": entry["size"], "observed_unit": "BYTE",
+            "subject_type": "INDEX", "subject_identifier": name,
+            "details": {"database": database, "table": values["table"], "index": name,
+                        "index_size_bytes": entry["size"], "nodes_checked": values["nodes"],
+                        "statistics_since": iso(since["stats_since"]),
+                        "statistics_node": since["node_name"],
+                        "statistics_since_start": since["stats_since_start"],
+                        "captured_at": iso(row["captured_at"])}})
+    if undecided:
+        raise InsufficientEvidence(
+            "PG_INDEX_USAGE", "index_usage_incomplete",
+            f"{len(undecided)} index(es) unused on the reachable nodes; not collected on "
+            f"{', '.join(sorted(missing_nodes))}.",
+            count=len(undecided), nodes=", ".join(sorted(missing_nodes)))
+    if not findings and too_recent:
+        raise InsufficientEvidence(
+            "PG_INDEX_USAGE", "statistics_too_recent",
+            f"Index statistics of {', '.join(sorted(too_recent))} are younger than {round(min_age / 86400)} days.",
+            databases=", ".join(sorted(too_recent)), minimum_days=round(min_age / 86400))
+    return sorted(findings, key=lambda f: -f["observed_value"])
+
+
+def evaluate_invalid_indexes(rows, rule, thresholds):
+    """PG-IDX-002: invalid indexes on the primary; a unique one does not enforce uniqueness.
+
+    Read from the primary only: an index still being built shows as invalid on replicas too.
+    """
+    primaries = [r for r in rows if r["record_type"] == "DATABASE" and r["in_recovery"] is False]
+    if not primaries:
+        raise InsufficientEvidence("PG_INDEX_USAGE", "no_primary", "No primary among the collected nodes.")
+    primary = max(primaries, key=lambda r: r["captured_at"])["target_id"]
+    findings = []
+    for r in rows:
+        if (r["record_type"] != "INDEX" or r["target_id"] != primary or r["is_valid"]
+                or r["being_built"] or r["extension_owned"]):
+            continue
+        name = index_name(r)
+        values = {"index": name, "table": f"{r['schema_name']}.{r['table_name']}"}
+        if r["is_unique"]:
+            values["_alt"] = True
+        findings.append({
+            "severity": "CRITICAL" if r["is_unique"] else rule["default_severity"],
+            "snapshot_id": r["snapshot_id"], "template_values": values,
+            "observed_value": None, "observed_unit": None,
+            "subject_type": "INDEX", "subject_identifier": name,
+            "details": {"database": r["database_name"], "table": values["table"], "index": name,
+                        "unique": r["is_unique"], "index_size_bytes": r["index_size_bytes"],
+                        "node": r["node_name"], "captured_at": iso(r["captured_at"])}})
+    return findings
+
+
+def evaluate_public_create(rows, rule, thresholds):
+    """PG-SEC-004: user schemas where PUBLIC has CREATE."""
+    return [{
+        "severity": rule["default_severity"], "snapshot_id": r["snapshot_id"],
+        "template_values": {"database": r["database_name"], "schema": r["schema_name"]},
+        "observed_value": None, "observed_unit": None,
+        "subject_type": "SCHEMA", "subject_identifier": f"{r['database_name']}.{r['schema_name']}",
+        "details": {"database": r["database_name"], "schema": r["schema_name"],
+                    "schema_owner": r["schema_owner"], "captured_at": iso(r["captured_at"])}}
+        for r in rows if r["record_type"] == "SCHEMA" and r["public_create"]]
+
+
+# The bootstrap superuser created by initdb always has OID 10.
+BOOTSTRAP_SUPERUSER_OID = 10
+
+
+def evaluate_login_superusers(rows, rule, thresholds):
+    """PG-SEC-001: login superusers other than the bootstrap superuser."""
+    return [{
+        "severity": rule["default_severity"], "snapshot_id": r["snapshot_id"],
+        "template_values": {"role": r["role_name"]},
+        "observed_value": None, "observed_unit": None,
+        "subject_type": "ROLE", "subject_identifier": r["role_name"],
+        "details": {"role": r["role_name"], "valid_until": iso(r["valid_until"]),
+                    "captured_at": iso(r["captured_at"])}}
+        for r in rows if r["is_superuser"] and r["can_login"]
+        and int(r["role_oid"]) != BOOTSTRAP_SUPERUSER_OID]
+
+
 # -----------------------------------------------------------------------------
 # Evaluation Registry
 # -----------------------------------------------------------------------------
@@ -1518,6 +1722,9 @@ EVIDENCE_LOADERS = {
     "PG_VACUUM_ANALYZE": load_latest_vacuum_analyze_snapshot,
     "PG_WAL_STATUS": load_latest_wal_status,
     "PG_PREPARED_TRANSACTIONS": load_latest_prepared_transactions,
+    "PG_INDEX_USAGE": load_latest_index_usage,
+    "PG_SCHEMA_PRIVILEGES": load_latest_schema_privileges,
+    "PG_ROLES": load_latest_roles,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -1550,6 +1757,10 @@ RULE_EVALUATORS = {
     "PG-BKP-001": evaluate_archive_failures,
     "PG-TRAN-005": evaluate_long_prepared_transaction,
     "PG-HA-001": evaluate_recent_failover,
+    "PG-IDX-001": evaluate_unused_indexes,
+    "PG-IDX-002": evaluate_invalid_indexes,
+    "PG-SEC-001": evaluate_login_superusers,
+    "PG-SEC-004": evaluate_public_create,
 }
 
 

@@ -17,6 +17,7 @@ can be e-mailed, opened offline and printed.
 import argparse
 from datetime import datetime, timedelta, timezone
 import html
+import json
 from pathlib import Path
 import re
 
@@ -65,8 +66,9 @@ TEXTS = {
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
         "topic_unknown": "Değerlendirilemedi",
-        "topic_unknown_text": "Yeterli veri toplanamadığı için değerlendirilemedi.",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
+        "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
+        "collected_count": "{ok} / {total} başarılı",
         "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "what_happens": "Ne oluyor", "causes": "Olası sebepler",
         "system": "Sistem Bilgisi",
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
@@ -111,7 +113,14 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
         "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
-                         "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı."},
+                         "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
+                         "no_nodes": "Sistemin sunucu listesi bulunamadı.",
+                         "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
+                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor."},
+        "detail_index": "Index", "detail_index_size": "Boyut", "detail_nodes_checked": "Kontrol edilen sunucular",
+        "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
+        "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
+        "detail_valid_until": "Geçerlilik sonu",
         "inv_failover": "Son failover", "inv_failover_ago": "{ago} önce",
         "inv_failover_never": "Hiç olmamış", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
@@ -165,8 +174,9 @@ TEXTS = {
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
         "topic_unknown": "Not assessed",
-        "topic_unknown_text": "Could not be assessed; not enough data was collected.",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
+        "open_hint": "Click a problem for likely causes and what to do.",
+        "collected_count": "{ok} of {total} succeeded",
         "why_it_matters": "Why it matters", "what_to_do": "What to do", "what_happens": "What is happening", "causes": "Likely causes",
         "system": "System Overview",
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
@@ -210,7 +220,14 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
         "reason_codes": {"no_primary": "There is no primary among the collected servers.",
-                         "no_timeline_history": "The history file of the current timeline is not in pg_wal."},
+                         "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
+                         "no_nodes": "The server list of the system was not found.",
+                         "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
+                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed."},
+        "detail_index": "Index", "detail_index_size": "Size", "detail_nodes_checked": "Servers checked",
+        "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
+        "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
+        "detail_valid_until": "Valid until",
         "inv_failover": "Last failover", "inv_failover_ago": "{ago} ago",
         "inv_failover_never": "Never", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
@@ -476,6 +493,8 @@ def fmt_quantity(value, unit, t):
     value = float(value)
     if unit == "SECOND":
         return fmt_duration(value, t)
+    if unit == "BYTE":
+        return fmt_bytes(value)
     if unit == "PERCENT":
         return t["percent"].format(n=f"{value:g}")
     if unit in ("TRANSACTION", "MULTIXACT") and value >= 1e9:
@@ -531,15 +550,19 @@ REASON_PATTERN = re.compile(
     r"|(?P<missing>Required evidence is not available\.))$")
 
 
-# Reasons an evaluator gives itself: "SOURCE: [code] English message".
-REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] ")
+# Reasons an evaluator gives itself: "SOURCE: [code] English message {values}".
+REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
 def explain_reason(reason, data, t):
     """Engine reason in plain words; says when this check failed to collect the source."""
     coded = REASON_CODE_PATTERN.match(reason or "")
     if coded and coded.group("code") in t["reason_codes"]:
-        return t["reason_codes"][coded.group("code")]
+        try:
+            values = json.loads(coded.group("values") or "{}")
+            return t["reason_codes"][coded.group("code")].format(**values)
+        except (ValueError, KeyError):
+            return reason
     match = REASON_PATTERN.match(reason or "")
     if not match:
         return reason or ""
@@ -719,9 +742,24 @@ h3{font-size:15px;margin:20px 0 8px}
 .impact .name{font-weight:600}
 .impact .val{font-size:14px;display:flex;flex-wrap:wrap;gap:6px 16px}
 .problem .badge{margin-right:6px}
-.topic{display:grid;grid-template-columns:minmax(160px,220px) auto 1fr;gap:6px 14px;align-items:baseline;
+.topic{display:grid;grid-template-columns:200px 130px 1fr;gap:6px 14px;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line)}
 .topic .name{font-weight:600}
+.topic>.badge{justify-self:start}
+.rules{list-style:none;margin:0;padding:0}
+.rules li{position:relative;padding:1px 0 1px 18px}
+.rules li::before{content:"";position:absolute;left:2px;top:.6em;width:8px;height:8px;border-radius:50%;
+background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.rules li.r-critical::before{background:var(--crit-bar)}
+.rules li.r-warning::before{background:var(--warn-bar)}
+.rules li.r-unknown::before{background:var(--na)}
+details.card>summary,details.section>summary{cursor:pointer;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details.card>summary h3::before,details.section>summary h2::before{content:"▸";color:var(--muted);width:12px}
+details.card[open]>summary h3::before,details.section[open]>summary h2::before{content:"▾"}
+details.card:not([open]) h3{margin:0}
+details.section>summary h2{display:flex;gap:10px;align-items:baseline}
+.card .lead{font-size:14px;margin:4px 0 0 22px}
 table{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0 10px}
 th{text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;background:var(--soft)}
 td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
@@ -758,9 +796,11 @@ box-shadow:inset 0 3px 0 var(--accent)}
 .tabs .part{display:none}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
-table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .text{grid-column:1/-1}
+table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .rules{grid-column:1/-1}
 .impact{grid-template-columns:1fr}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
+details::details-content{content-visibility:visible;display:block}
+details.card>summary h3::before,details.section>summary h2::before{content:none}
 .tabs>label{display:none}.tabs>.panel{display:block!important;border-top:none}.tabs .part{display:block}
 .panel-tech{break-before:page}body{font-size:12px}
 .meter i,.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
@@ -971,41 +1011,43 @@ def render_impact_chart(data, lang, t):
 
 
 def render_topics(data, lang, t):
+    """Per topic one item per rule: problems first, then rules not assessed, then what was fine."""
+    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2}
     rows = []
     for key, topic in topic_summary(data):
         entry = data["topics"].get(key)
         name = localized(entry, lang, "name") if entry else key
         status = topic["status"]
-        if status == "ok":
-            # Built from the rules' own scoped statements: no claim beyond what was checked.
-            text = " ".join(healthy_text(data, r, lang, t) for r in topic["results"]
-                            if r["outcome"] == "HEALTHY")
-        elif status == "unknown":
-            text = t["topic_unknown_text"]
-        else:
-            # Problems first (name: what is happening, how many), then what was fine in this area.
-            problems = []
-            for r in topic["results"]:
-                if r["outcome"] != "ATTENTION_REQUIRED":
-                    continue
+        items = []
+        for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
+            rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+            # (bullet colour, text): severity shows in the bullet and in words, texts stay aligned.
+            if r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
-                problems.append(
-                    f"{rule_text(data, r['rule_id'], lang, 'NAME', r['rule_name'])} "
-                    f"({count} {t['findings_word']}): "
-                    + first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
-            fine = [healthy_text(data, r, lang, t) for r in topic["results"] if r["outcome"] == "HEALTHY"]
-            text = " ".join(problems + fine)
+                severity = r["max_severity"] or "WARNING"
+                label = t["severity"].get(severity, severity).lower()
+                items.append((severity.lower(),
+                              f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))))
+            elif r["outcome"] == "HEALTHY":
+                # The rule's own scoped statement: no claim beyond what was checked.
+                items.append(("ok", e(healthy_text(data, r, lang, t))))
+            else:
+                reason = explain_reason(r.get("reason"), data, t)
+                items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
+                              + (f": {e(reason)}" if reason else "")))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
-                    f'{badge(status, t["topic_" + status])}<span class="text">{e(text)}</span></div>')
+                    f'{badge(status, t["topic_" + status])}<ul class="rules">'
+                    + "".join(f'<li class="r-{cls}">{text}</li>' for cls, text in items) + "</ul></div>")
     return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
             + f'<p class="note">{e(t["scope_note"])}</p>')
 
 
-def problem_rows(data, rule_id, lang, t, findings, short):
+def problem_rows(data, rule_id, lang, t, findings, short, meaning=True):
     """What is happening, likely causes, why it matters, what to do: shared by both parts."""
     causes = rule_text(data, rule_id, lang, "CAUSES")
     rows = [(t["what_happens"] if short else t["meaning"],
-             render_text(rule_text(data, rule_id, lang, "MEANING"), short)),
+             render_text(rule_text(data, rule_id, lang, "MEANING"), short) if meaning else ""),
             (t["causes"], render_text(causes) if causes else ""),
             (t["why_it_matters"] if short else t["impact"],
              render_text(rule_text(data, rule_id, lang, "IMPACT"), short)),
@@ -1020,13 +1062,17 @@ def render_main_problems(data, lang, t):
     for result, findings in findings_by_rule(data):
         worst = min((f["severity"] for f in findings), key=lambda s: SEVERITY_ORDER.get(s, 9))
         name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
+        meaning = first_sentence(rule_text(data, result["rule_id"], lang, "MEANING"))
+        # Closed by default: name, severity and one sentence; causes and steps on demand.
         cards.append(
-            f'<div class="card {e(worst)}"><h3>{badge(worst, t["severity"].get(worst, worst))}'
-            f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3><dl>"
-            + problem_rows(data, result["rule_id"], lang, t, findings, short=True)
-            + "</dl></div>")
+            f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
+            f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3>"
+            f'<div class="lead">{e(meaning)}</div></summary><dl>'
+            + problem_rows(data, result["rule_id"], lang, t, findings, short=True, meaning=False)
+            + "</dl></details>")
     return f"<h2>{e(t['problems_title'])}</h2>" + (
-        "".join(cards) or f'<p class="note">{e(t["no_problems"])}</p>')
+        f'<p class="note">{e(t["open_hint"])}</p>' + "".join(cards) if cards
+        else f'<p class="note">{e(t["no_problems"])}</p>')
 
 
 def render_executive(data, lang, t):
@@ -1118,7 +1164,11 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("failed_count", "detail_failed_count"), ("last_failed_wal", "detail_last_failed_wal"),
                  ("archived_count", "detail_archived_count"),
                  ("last_archived_wal", "detail_last_archived_wal"), ("timeline_id", "detail_timeline"),
-                 ("timeline_history_file", "detail_timeline_history_file"))
+                 ("timeline_history_file", "detail_timeline_history_file"),
+                 ("index", "detail_index"), ("index_size", "detail_index_size"),
+                 ("nodes_checked", "detail_nodes_checked"), ("statistics_node", "detail_statistics_node"),
+                 ("schema", "detail_schema"), ("schema_owner", "detail_schema_owner"),
+                 ("role", "detail_role"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1128,6 +1178,7 @@ TIME_LABELS = (("transaction_start", "detail_transaction_start"),
                ("prepared_at", "detail_prepared_at"), ("last_failed_time", "detail_last_failed_time"),
                ("last_archived_time", "detail_last_archived_time"), ("stats_reset", "detail_stats_reset"),
                ("timeline_started_at", "detail_timeline_started_at"),
+               ("statistics_since", "detail_statistics_since"), ("valid_until", "detail_valid_until"),
                ("captured_at", "detail_captured_at"))
 
 
@@ -1161,7 +1212,8 @@ def setting_value_text(value, unit, t):
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
                 "connection_count"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
-DURATION_VALUES = {"age_seconds", "since_seconds"}
+DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds"}
+SIZE_VALUES = {"index_size"}
 
 
 def template_value_text(key, value, t=None):
@@ -1169,6 +1221,8 @@ def template_value_text(key, value, t=None):
         return f"{value:,}"
     if key in DURATION_VALUES and t is not None and isinstance(value, (int, float)):
         return fmt_duration(value, t)
+    if key in SIZE_VALUES and isinstance(value, (int, float)):
+        return fmt_bytes(value)
     return value
 
 
@@ -1210,6 +1264,8 @@ def render_instance(f, data, lang, t):
     for key in ("live_rows", "dead_rows", "modified_rows"):
         if isinstance(details.get(key), (int, float)):
             details[key] = f"{details[key]:,}"
+    if details.get("index_size_bytes") is not None:
+        details["index_size"] = fmt_bytes(details["index_size_bytes"])
     if details.get("wal_behind_bytes") is not None:
         details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
     if details.get("total_bytes"):
@@ -1256,12 +1312,14 @@ def render_findings_detail(data, lang, t):
                 + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
         facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
         cards.append(
-            f'<div class="card {e(worst)}"><h3>{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
-            f'<span class="rule">{e(result["rule_key"])}</span></h3>'
+            f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
+            f'{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
+            f'<span class="note">{len(findings)} {e(t["findings_word"])}</span>'
+            f'<span class="rule">{e(result["rule_key"])}</span></h3></summary>'
             + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</div>")
+            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</details>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 
@@ -1288,12 +1346,15 @@ def render_results(data, lang, t):
 
 def render_collections(data, t):
     purpose = {"EVIDENCE": t["purpose_evidence"], "CONTEXT": t["purpose_context"]}
-    return f"<h2>{e(t['collection'])}</h2>" + table(
+    ok = sum(1 for c in data["collections"] if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
+    summary = t["collected_count"].format(ok=ok, total=len(data["collections"]))
+    return (f'<details class="section"><summary><h2>{e(t["collection"])}'
+            f'<span class="note">{e(summary)}</span></h2></summary>' + table(
         [t["collector"], t["node"], t["purpose"], t["status"]],
         [[e(c["collector_key"]), e(c["target_name"]), e(purpose.get(c["purpose"], c["purpose"])),
           badge(c["status"], t["collection_status"].get(c["status"], c["status"])) + (
               f'<div class="facts">{e(c["status_message"])}</div>' if c["status_message"] else "")]
-         for c in data["collections"]])
+         for c in data["collections"]]) + "</details>")
 
 
 def render_technical(data, lang, t):

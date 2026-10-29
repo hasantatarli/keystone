@@ -156,7 +156,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 14 / 20 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 18 / 25 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_reasons_are_explained_in_plain_words(self):
@@ -374,13 +374,18 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         card = executive[executive.index("Öne çıkan sorunlar"):executive.index("Sistem envanteri")
                          if "Sistem envanteri" in executive else None]
-        self.assertIn("<dt>Ne oluyor</dt>", card)
+        # Closed by default: name, severity and what is happening in one line; the rest on demand.
+        self.assertIn('<details class="card WARNING"><summary><h3>', card)
+        self.assertIn('<div class="lead">Bazı session', card)
+        self.assertNotIn("<dt>Ne oluyor</dt>", card)
         self.assertIn("<dt>Olası sebepler</dt><dd><ul class=\"items\"><li>", card)
         self.assertIn("<li>Connection pool session&#x27;ı bırakmıyor</li>", card)
         self.assertIn("<dt>Ne yapılmalı</dt><dd><ul class=\"items\">", card)
         technical = page[page.index(TECH_PANEL):]
         self.assertIn("<dt>Olası sebepler</dt>", technical)
         self.assertIn("idle_in_transaction_session_timeout", technical)
+        self.assertIn('<details class="card WARNING"><summary><h3>', technical)
+        self.assertIn('<details class="section"><summary><h2>Toplanan Veriler', technical)
 
     def test_list_items(self):
         self.assertEqual(report.list_items("- a\n- b"), ["a", "b"])
@@ -446,10 +451,33 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
         topics = executive[executive.index("Alanlara göre durum"):]
-        self.assertIn("Uzun süre boşta bekleyen transaction (1 bulgu): Bazı session", topics)
-        self.assertIn("Açık kalma süresi", topics)        # the healthy rule of the same topic
+        # One item per rule: the problem with its severity first, then what was fine.
+        # One bullet per rule; severity in the bullet colour and in words, all texts aligned.
+        self.assertIn('<li class="r-warning"><b>Uzun süre boşta bekleyen transaction</b> '
+                      '(1 bulgu, uyarı): Bazı session', topics)
+        self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+
+    def test_topic_lists_a_rule_that_could_not_be_assessed(self):
+        # A topic must not read "no problems" while one of its rules was not assessed.
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'HEALTHY', max_severity = NULL, "
+            "finding_count = 0, reason = NULL FROM keystone.rule_definition rd "
+            "WHERE rd.rule_id = res.rule_id AND rd.rule_key IN ('PG-TRAN-001', 'PG-TRAN-003', 'PG-TRAN-005')")
+        self.conn.execute("DELETE FROM keystone.finding")
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'INSUFFICIENT_EVIDENCE', "
+            "reason = 'PG_PREPARED_TRANSACTIONS: Required evidence is not available.' "
+            "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id AND rd.rule_key = 'PG-TRAN-005'")
+        self.conn.commit()
+        page = self.render(check_id, "tr")
+        topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
+        transactions = topics[topics.index("Transaction yönetimi"):]
+        transactions = transactions[:transactions.index('<div class="topic">')]
+        self.assertIn('<li class="r-unknown"><b>Uzun bekleyen prepared transaction</b> '
+                      '(değerlendirilemedi): PG_PREPARED_TRANSACTIONS verisi yok.</li>', transactions)
 
     def test_many_findings_show_ten_and_the_rest_on_demand(self):
         check_id = self.make_check()
@@ -560,6 +588,90 @@ class ReportTests(test_health_check.HealthCheckTests):
         t = report.TEXTS["tr"]
         self.assertEqual(report.explain_reason(reason, {"collections": []}, t),
                          t["reason_codes"]["no_timeline_history"])
+
+    def test_index_schema_and_role_collectors_feed_the_rules(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        collectors = Path("providers/postgresql/telemetry/collectors")
+        self.conn.commit()
+        self.conn.autocommit = True
+        for statement in (
+                "CREATE TABLE idx_test (id int, code text)",
+                "INSERT INTO idx_test SELECT g, 'c' || (g % 10) FROM generate_series(1, 2000) g",
+                "CREATE INDEX idx_test_unused ON idx_test (code)",
+                "CREATE TABLE idx_test_ext (id int)",
+                "CREATE INDEX idx_test_ext_id ON idx_test_ext (id)",
+                "ALTER EXTENSION plpgsql ADD TABLE idx_test_ext",     # an extension's own table
+                "GRANT CREATE ON SCHEMA public TO PUBLIC",
+                "CREATE ROLE idx_test_admin LOGIN SUPERUSER"):
+            self.conn.execute(statement)
+        with self.assertRaises(Exception):          # duplicates: leaves an invalid unique index
+            self.conn.execute("CREATE UNIQUE INDEX CONCURRENTLY idx_test_code_uq ON idx_test (code)")
+        self.conn.autocommit = False
+        try:
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                index_rows = cur.execute((collectors / "index_usage_snapshot.sql").read_text()).fetchall()
+                schema_rows = cur.execute((collectors / "schema_privileges_snapshot.sql").read_text()).fetchall()
+                role_rows = cur.execute((collectors / "roles_snapshot.sql").read_text()).fetchall()
+            invalid = [r for r in index_rows if r["index_name"] == "idx_test_code_uq"]
+            self.assertEqual([(r["is_valid"], r["is_unique"]) for r in invalid], [(False, True)])
+            # The same server stands in for every node; the primary is node-1.
+            for node in (self.node1, self.node2, self.node3):
+                rows = [dict(r, in_recovery=(node != self.node1) if r["record_type"] == "DATABASE"
+                             else None) for r in index_rows]
+                worker.save_index_usage_snapshot(self.conn, {"target_id": node,
+                                                             "collector_key": "PG_INDEX_USAGE"}, rows)
+            worker.save_schema_privileges_snapshot(
+                self.conn, {"target_id": self.system, "collector_key": "PG_SCHEMA_PRIVILEGES"}, schema_rows)
+            worker.save_roles_snapshot(self.conn, {"target_id": self.system, "collector_key": "PG_ROLES"},
+                                       role_rows)
+            self.conn.execute("UPDATE keystone.rule_parameter SET parameter_value = 0 "
+                              "WHERE parameter_key = 'min_index_size'")
+            self.conn.commit()
+
+            # Statistics just started: unused indexes are not judged yet.
+            engine.run_assessment(self.conn, "PG_INDEX_HEALTH", self.system)
+            outcomes = self.latest_outcomes()
+            self.assertEqual(outcomes["PG-IDX-001"][0], "INSUFFICIENT_EVIDENCE")
+            self.assertIn("[statistics_too_recent]", outcomes["PG-IDX-001"][2])
+            self.assertEqual(outcomes["PG-IDX-002"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+
+            self.conn.execute("UPDATE postgresql.index_usage_snapshot SET stats_since = captured_at - "
+                              "interval '30 days' WHERE record_type = 'DATABASE'")
+            self.conn.commit()
+            engine.run_assessment(self.conn, "PG_INDEX_HEALTH", self.system)
+            self.assertEqual(self.latest_outcomes()["PG-IDX-001"][:2], ("ATTENTION_REQUIRED", "WARNING"))
+            unused = {r["subject_identifier"] for r in self.conn.execute(
+                "SELECT subject_identifier FROM keystone.finding WHERE assessment_run_id = "
+                "(SELECT max(assessment_run_id) FROM keystone.assessment_run) AND title = 'Unused Index'")}
+            self.assertIn(f"{self.conn.info.dbname}.public.idx_test_unused", unused)
+            self.assertNotIn(f"{self.conn.info.dbname}.public.idx_test_ext_id", unused)
+
+            engine.run_assessment(self.conn, "PG_SECURITY_HEALTH", self.system)
+            outcomes = self.latest_outcomes()
+            self.assertEqual(outcomes["PG-SEC-001"][:2], ("ATTENTION_REQUIRED", "WARNING"))
+            self.assertEqual(outcomes["PG-SEC-004"][:2], ("ATTENTION_REQUIRED", "WARNING"))
+            subjects = {r["subject_identifier"] for r in self.conn.execute(
+                "SELECT subject_identifier FROM keystone.finding WHERE assessment_run_id = "
+                "(SELECT max(assessment_run_id) FROM keystone.assessment_run)")}
+            self.assertEqual(subjects, {"idx_test_admin", f"{self.conn.info.dbname}.public"})
+        finally:
+            self.conn.rollback()
+            self.conn.autocommit = True
+            self.conn.execute("ALTER EXTENSION plpgsql DROP TABLE idx_test_ext")
+            self.conn.execute("DROP TABLE IF EXISTS idx_test, idx_test_ext")
+            self.conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+            self.conn.execute("DROP ROLE IF EXISTS idx_test_admin")
+            self.conn.autocommit = False
+
+    def test_reason_with_values_is_explained(self):
+        t = report.TEXTS["tr"]
+        reason = ('PG_INDEX_USAGE: [index_usage_incomplete] 3 index(es) unused on the reachable nodes; '
+                  'not collected on postgre-2. {"count": 3, "nodes": "postgre-2"}')
+        self.assertEqual(report.explain_reason(reason, {"collections": []}, t),
+                         "3 index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama postgre-2 "
+                         "sunucusundan index kullanımı toplanamadığı için kesin değil.")
 
     def test_last_failover_in_the_inventory_and_findings_in_turkish(self):
         check_id = self.make_check()
