@@ -227,7 +227,7 @@ Rule batches 2026-10-26:
 Next:
 
 1. Lab verification of PG-IDX-001/002, PG-SEC-001/004. PG-CAP-002 (sequences) decided 2026-10-29: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege (Assessment Catalogue, open question 6).
-2. Configuration recommendation capability (PG-CONF-003): ADR first, then implementation.
+2. Configuration recommendation capability (PG-CONF-003): ADR-0017 in progress (server profile on the target, weakest node for hardware limits, 20 settings decided 2026-10-29), then implementation.
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.
 
