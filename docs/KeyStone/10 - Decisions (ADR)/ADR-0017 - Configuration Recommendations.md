@@ -45,9 +45,20 @@ Sources: the PostgreSQL documentation and widely used rules (the logic of PGTune
 
 Without host evidence (no SSH) memory and CPU are unknown: those settings are not assessed and the report says why.
 
+### When a deviation is a finding
+
+A recommendation is a value and an acceptable range around it (for example `shared_buffers` 25 % of memory, acceptable 15–40 %); several values can be right, and a conscious choice by an experienced DBA must not be flagged.
+
+| Current value | Result |
+| --- | --- |
+| Inside the acceptable range | No finding; the table shows "fits" with the recommended value as information |
+| Outside the range | WARNING with the recommendation and its reason |
+| Endangers the server | CRITICAL, from rules on combinations of settings, not single values: first, memory commitment (`shared_buffers` + `max_connections` × `work_mem` above memory: risk of the OOM killer) |
+
+The range of every setting is written down with its reason.
+
 ## Open questions
 
-1. When does a deviation become a finding (and with which severity), and when is it only shown in the recommendation table?
-2. Where the formulas live: Dictionary data (per setting: formula inputs, factors per workload) or evaluator code with documented constants.
-3. Report layout: executive (how many settings deviate, the most important ones) and technical (full table: setting, current, recommended, reason; other non-default settings as context).
-4. Version differences (settings added or renamed across PostgreSQL 15–18).
+1. Where the formulas live: Dictionary data (per setting: formula inputs, factors per workload) or evaluator code with documented constants.
+2. Report layout: executive (how many settings deviate, the most important ones) and technical (full table: setting, current, recommended, reason; other non-default settings as context).
+3. Version differences (settings added or renamed across PostgreSQL 15–18).
