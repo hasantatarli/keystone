@@ -57,8 +57,15 @@ A recommendation is a value and an acceptable range around it (for example `shar
 
 The range of every setting is written down with its reason.
 
+### Where the formulas live
+
+Logic in code, numbers in the Dictionary, as for rules:
+
+- **Code:** one calculation function per setting (for example `work_mem` from memory left after `shared_buffers`, connections and a factor; less memory when the server is not dedicated), unit-tested directly. No formula language (the rule DSL stays rejected).
+- **Dictionary (new table, filled by migrations):** the tunable numbers per setting and workload type: factors, acceptable range bounds, lower and upper limits (for example `maintenance_work_mem` at most 2 GB). Tuning for a customer or sector changes data, not code.
+- **Per health check:** every recommendation is stored with the setting, current value, recommended value, range, reason and the inputs used (memory, CPUs, workload, whether a default was assumed). Reports are built from it and stay correct after the Dictionary changes, like `thresholds_used`.
+
 ## Open questions
 
-1. Where the formulas live: Dictionary data (per setting: formula inputs, factors per workload) or evaluator code with documented constants.
-2. Report layout: executive (how many settings deviate, the most important ones) and technical (full table: setting, current, recommended, reason; other non-default settings as context).
-3. Version differences (settings added or renamed across PostgreSQL 15–18).
+1. Report layout: executive (how many settings deviate, the most important ones) and technical (full table: setting, current, recommended, reason; other non-default settings as context).
+2. Version differences (settings added or renamed across PostgreSQL 15–18).
