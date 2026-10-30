@@ -1059,6 +1059,9 @@ def evaluate_replication_lag(evidence, rule, thresholds):
     """
     rows = evidence["PG_REPLICATION_STATUS"] if isinstance(evidence, dict) else evidence
     delays = intended_apply_delays(evidence) if isinstance(evidence, dict) else {}
+    inventory = (evidence.get("PG_INSTANCE_INVENTORY") or []) if isinstance(evidence, dict) else []
+    if no_replicas(rows, inventory):
+        raise NotApplicable("PG_REPLICATION_STATUS", "no_replicas", "The system has no replicas.")
     findings = []
     for row in rows:
         if row["record_type"] != "REPLICA":
@@ -1107,6 +1110,8 @@ def evaluate_replica_not_streaming(evidence, rule, thresholds):
     status = evidence["PG_REPLICATION_STATUS"]
     replicas = [r for r in status if r["record_type"] == "REPLICA"]
     expected = [n for n in evidence["PG_INSTANCE_INVENTORY"] if n["in_recovery"]]
+    if no_replicas(status, evidence["PG_INSTANCE_INVENTORY"]):
+        raise NotApplicable("PG_REPLICATION_STATUS", "no_replicas", "The system has no replicas.")
     findings = []
 
     def finding(severity, subject, values, details):
@@ -1478,6 +1483,23 @@ class InsufficientEvidence(Exception):
     def __init__(self, source, code, message, **values):
         suffix = f" {json.dumps(values, ensure_ascii=False)}" if values else ""
         super().__init__(f"{source}: [{code}] {message}{suffix}")
+
+
+class NotApplicable(Exception):
+    """Raised by an evaluator when the rule's premise does not exist on this system (no replicas, say).
+
+    Same reason format as InsufficientEvidence; the outcome is NOT_APPLICABLE, not a gap in the data.
+    """
+
+    def __init__(self, source, code, message, **values):
+        suffix = f" {json.dumps(values, ensure_ascii=False)}" if values else ""
+        super().__init__(f"{source}: [{code}] {message}{suffix}")
+
+
+def no_replicas(status_rows, inventory_rows=()):
+    """No replica connected to the primary and none known in recovery: a standalone system."""
+    return (not any(r["record_type"] == "REPLICA" for r in status_rows)
+            and not any(n["in_recovery"] for n in inventory_rows))
 
 
 def clock(value):
@@ -1886,6 +1908,7 @@ OUTCOME_HEALTHY = "HEALTHY"
 OUTCOME_ATTENTION_REQUIRED = "ATTENTION_REQUIRED"
 OUTCOME_INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 OUTCOME_ERROR = "ERROR"
+OUTCOME_NOT_APPLICABLE = "NOT_APPLICABLE"     # the rule's premise does not exist here (ADR-0014)
 
 
 def highest_severity(findings):
@@ -1990,6 +2013,8 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
         findings = evaluator(evidence, rule, thresholds)
     except InsufficientEvidence as exc:
         return OUTCOME_INSUFFICIENT_EVIDENCE, [], str(exc)
+    except NotApplicable as exc:
+        return OUTCOME_NOT_APPLICABLE, [], str(exc)
 
     if findings:
         return OUTCOME_ATTENTION_REQUIRED, findings, None

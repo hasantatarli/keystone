@@ -389,6 +389,50 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(outcomes["PG-REP-004"], ("ATTENTION_REQUIRED", "CRITICAL"))   # node-2 missing
         self.assertEqual(outcomes["PG-REP-006"], ("ATTENTION_REQUIRED", "CRITICAL"))
 
+    def test_standalone_system_replica_rules_do_not_apply(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/replication_status_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(sql).fetchall()          # the test server has no replicas
+        worker.save_replication_status_snapshot(self.conn, {"target_id": self.system}, rows)
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        self.conn.execute(
+            "INSERT INTO postgresql.instance_inventory (target_id, server_address, in_recovery, "
+            "last_collected_at) VALUES (%s, '10.0.0.1', false, %s) ON CONFLICT (target_id) DO UPDATE "
+            "SET in_recovery = false, last_collected_at = EXCLUDED.last_collected_at", (self.node1, now))
+        self.conn.execute("DELETE FROM postgresql.instance_inventory WHERE target_id <> %s", (self.node1,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcomes = self.latest_outcomes()
+        for rule in ("PG-REP-003", "PG-REP-004"):
+            self.assertEqual(outcomes[rule][0], "NOT_APPLICABLE", rule)
+            self.assertIn("[no_replicas]", outcomes[rule][2])
+        self.assertEqual(outcomes["PG-REP-006"][0], "HEALTHY")       # still meaningful alone
+
+    def test_rules_that_do_not_apply_are_noted_not_counted(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'NOT_APPLICABLE', "
+            "reason = 'PG_REPLICATION_STATUS: [no_replicas] The system has no replicas.' "
+            "FROM keystone.assessment_run ar, keystone.rule_definition rd "
+            "WHERE ar.assessment_run_id = res.assessment_run_id AND ar.health_check_id = %s "
+            "AND rd.rule_id = res.rule_id AND rd.rule_key IN ('PG-REP-003', 'PG-REP-004')", (check_id,))
+        self.conn.commit()
+        data = report.load_report_data(self.conn, check_id)
+        counts, _ = report.summarize(data)
+        self.assertEqual(counts["not_applicable"], 2)
+        self.assertEqual(counts["total"], len(data["results"]) - 2)
+        page = report.render_html(data, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("2 kontrol bu sisteme uygulanmaz.", executive)
+        self.assertIn('<li class="r-na">Replikasyon gecikmesi (uygulanmaz): Sistemde replica yok.</li>',
+                      executive)
+        card = executive[executive.index("Değerlendirilemeyen kontroller"):]
+        self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</details>")])
+        self.assertIn('<span class="badge b-NOT_APPLICABLE">Uygulanmaz</span>', page)
+
     def test_problem_cards_list_causes_and_steps(self):
         page = self.render(self.make_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]

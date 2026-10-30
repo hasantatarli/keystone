@@ -240,7 +240,11 @@ Multi-system lab, first run (2026-10-30, `feat/multi-system-lab`): Docker host `
 - A system without slots had no PG_REPLICATION_SLOTS evidence, so PG-REP-001/002/005 were not assessed. The collector always returns a SYSTEM row (PG019 `replication_slot_status_snapshot`); no slots is healthy.
 - PG-CONN-001 counted Keystone's own failed session: a sibling collector's connection is "idle in transaction (aborted)" for a moment before it closes. Target connections set `application_name = keystone`; the activity collectors leave those sessions out.
 - Report: collection errors show their first line (PostgreSQL's LINE/caret lines stay in Collected Data); no "not collected (not collected)"; missing OS/CPU/memory reads "Unknown"; the address is the registered connection address, the server's own (Docker, NAT, proxy) as a tooltip.
-Next on the branch: a NOT_APPLICABLE outcome for PG-REP-003/004 on a system without replicas (no registered replica and empty `pg_stat_replication`; slot rules, PG-REP-006 and PG-HA-001 stay), then SSH tests (sshd in the PG 17 containers; the Docker host as a negative test), then concurrent health checks.
+Second run (hc55-58): every collector succeeds except PG_HOST_SNAPSHOT (no SSH); the only check not assessed is PG-CAP-001.
+
+NOT_APPLICABLE outcome (V045, ADR-0014 addendum 2): PG-REP-003/004 on a system with no replica connected and none known in recovery; slot rules, PG-REP-006 and PG-HA-001 stay. Not counted among the checks done; noted next to the totals.
+
+Next on the branch: SSH tests (sshd in the PG 17 containers; the Docker host as a negative test), then concurrent health checks.
 
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 

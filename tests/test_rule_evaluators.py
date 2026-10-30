@@ -623,9 +623,14 @@ class ReplicationLagTests(unittest.TestCase):
         self.assertEqual(engine.setting_seconds({"setting_value": "5", "unit": "min"}), 300)
         self.assertIsNone(engine.setting_seconds({"setting_value": "on", "unit": None}))
 
-    def test_system_row_is_not_a_replica(self):
-        self.assertEqual(engine.evaluate_replication_lag(status_rows([]), rule(),
-                                                         REPLICATION_LAG_THRESHOLDS), [])
+    def test_system_without_replicas_is_not_applicable(self):
+        with self.assertRaisesRegex(engine.NotApplicable, r"\[no_replicas\]"):
+            engine.evaluate_replication_lag(status_rows([]), rule(), REPLICATION_LAG_THRESHOLDS)
+
+    def test_known_replica_not_connected_is_left_to_rep_004(self):
+        evidence = {"PG_REPLICATION_STATUS": status_rows([]), "PG_CONFIGURATION_SNAPSHOT": [],
+                    "PG_INSTANCE_INVENTORY": inventory(("node-a", "10.0.0.0", True))}
+        self.assertEqual(engine.evaluate_replication_lag(evidence, rule(), REPLICATION_LAG_THRESHOLDS), [])
 
 
 class ReplicaNotStreamingTests(unittest.TestCase):
@@ -655,8 +660,15 @@ class ReplicaNotStreamingTests(unittest.TestCase):
         self.assertEqual([(f["subject_identifier"], f["template_values"]["state"]) for f in findings],
                          [("pg-1", "catchup")])
 
-    def test_standalone_server_expects_no_replica(self):
-        self.assertEqual(self.evaluate([], inventory(("solo", "10.0.0.9", False))), [])
+    def test_standalone_server_is_not_applicable(self):
+        with self.assertRaisesRegex(engine.NotApplicable, r"\[no_replicas\]"):
+            self.evaluate([], inventory(("solo", "10.0.0.9", False)))
+
+    def test_unregistered_replica_on_a_single_node_is_checked(self):
+        # A replica the customer did not register in Keystone still streams from the primary.
+        self.assertEqual(self.evaluate([{}], inventory(("solo", "10.0.0.9", False))), [])
+        findings = self.evaluate([{"state": "catchup"}], inventory(("solo", "10.0.0.9", False)))
+        self.assertEqual([f["template_values"]["state"] for f in findings], ["catchup"])
 
     def test_addresses_with_prefix_length_match(self):
         self.assertEqual(self.evaluate([{"client_addr": "10.0.0.0/32"}, {}], self.NODES), [])

@@ -58,6 +58,7 @@ TEXTS = {
         "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
+        "not_applicable_note": "{count} kontrol bu sisteme uygulanmaz.",
         "count_critical": "Kritik", "count_warning": "Uyarı",
         "count_healthy": "Sağlıklı", "count_not_assessed": "Değerlendirilemedi",
         "inventory_title": "Sistem envanteri",
@@ -74,6 +75,7 @@ TEXTS = {
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
+        "topic_na": "Uygulanmaz",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -123,6 +125,7 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
         "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
+                         "no_replicas": "Sistemde replica yok.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
@@ -152,7 +155,8 @@ TEXTS = {
                         "sebep için teknik detaylardaki bağlam bilgileri incelenmelidir."),
         "generated": "Rapor oluşturma zamanı",
         "outcome": {"HEALTHY": "Sağlıklı", "ATTENTION_REQUIRED": "Dikkat",
-                    "INSUFFICIENT_EVIDENCE": "Veri yetersiz", "ERROR": "Hata"},
+                    "INSUFFICIENT_EVIDENCE": "Veri yetersiz", "ERROR": "Hata",
+                    "NOT_APPLICABLE": "Uygulanmaz"},
         "severity": {"CRITICAL": "Kritik", "WARNING": "Uyarı", "INFO": "Bilgi"},
         "collection_status": {"SUCCESS": "Başarılı", "PARTIAL_SUCCESS": "Kısmen başarılı",
                               "FAILED": "Başarısız", "CONNECTION_FAILED": "Bağlantı hatası",
@@ -183,6 +187,7 @@ TEXTS = {
         "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
+        "not_applicable_note": "{count} check(s) do not apply to this system.",
         "count_critical": "Critical", "count_warning": "Warning",
         "count_healthy": "Healthy", "count_not_assessed": "Not assessed",
         "inventory_title": "System inventory",
@@ -199,6 +204,7 @@ TEXTS = {
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
+        "topic_na": "Not applicable",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -247,6 +253,7 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
         "reason_codes": {"no_primary": "There is no primary among the collected servers.",
+                         "no_replicas": "The system has no replicas.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
@@ -276,7 +283,8 @@ TEXTS = {
                         "see the context in the technical details."),
         "generated": "Report generated",
         "outcome": {"HEALTHY": "Healthy", "ATTENTION_REQUIRED": "Attention",
-                    "INSUFFICIENT_EVIDENCE": "Insufficient data", "ERROR": "Error"},
+                    "INSUFFICIENT_EVIDENCE": "Insufficient data", "ERROR": "Error",
+                    "NOT_APPLICABLE": "Not applicable"},
         "severity": {"CRITICAL": "Critical", "WARNING": "Warning", "INFO": "Info"},
         "collection_status": {"SUCCESS": "Success", "PARTIAL_SUCCESS": "Partial",
                               "FAILED": "Failed", "CONNECTION_FAILED": "Connection failed",
@@ -667,9 +675,11 @@ def localized(entry, lang, field):
 
 
 def summarize(data):
-    results = data["results"]
+    # A rule that does not apply here (no replicas, say) is not a check done; it is noted apart.
+    results = [r for r in data["results"] if r["outcome"] != "NOT_APPLICABLE"]
     counts = {"total": len(results), "healthy": 0, "attention": 0, "not_assessed": 0,
-              "critical": 0, "warning": 0}
+              "critical": 0, "warning": 0,
+              "not_applicable": len(data["results"]) - len(results)}
     for r in results:
         if r["outcome"] == "HEALTHY":
             counts["healthy"] += 1
@@ -722,9 +732,11 @@ def topic_summary(data):
         topic = topics.setdefault(key, {"results": [], "status": "ok"})
         topic["results"].append(r)
     for topic in topics.values():
-        outcomes = [r["outcome"] for r in topic["results"]]
+        outcomes = [r["outcome"] for r in topic["results"] if r["outcome"] != "NOT_APPLICABLE"]
         severities = [r["max_severity"] for r in topic["results"] if r["max_severity"]]
-        if "CRITICAL" in severities:
+        if not outcomes:
+            topic["status"] = "na"
+        elif "CRITICAL" in severities:
             topic["status"] = "critical"
         elif "ATTENTION_REQUIRED" in outcomes:
             topic["status"] = "attention"
@@ -801,6 +813,8 @@ background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exa
 .rules li.r-critical::before{background:var(--crit-bar)}
 .rules li.r-warning::before{background:var(--warn-bar)}
 .rules li.r-unknown::before{background:var(--na)}
+.rules li.r-na{color:var(--muted)}
+.rules li.r-na::before{background:none;border:1.5px solid var(--na);box-sizing:border-box}
 details.card>summary,details.section>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
 details.card>summary h3::before,details.section>summary h2::before{content:"▸";color:var(--muted);width:12px}
@@ -815,7 +829,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .badge{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-CRITICAL,.b-ERROR,.b-critical{background:var(--crit-bg);color:var(--crit)}
 .b-WARNING,.b-ATTENTION_REQUIRED,.b-attention{background:var(--warn-bg);color:var(--warn)}
-.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial{background:var(--na-bg);color:var(--na)}
+.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial,.b-NOT_APPLICABLE,.b-na{background:var(--na-bg);color:var(--na)}
 .b-HEALTHY,.b-SUCCESS,.b-ok{background:var(--ok-bg);color:var(--ok)}
 .b-FAILED,.b-CONNECTION_FAILED,.b-TIMEOUT,.b-STALE{background:var(--crit-bg);color:var(--crit)}
 .b-PARTIAL_SUCCESS,.b-WAIT_LIMIT{background:var(--warn-bg);color:var(--warn)}
@@ -1079,7 +1093,8 @@ def render_impact_chart(data, lang, t):
 
 def render_topics(data, lang, t):
     """Per topic one item per rule: problems first, then rules not assessed, then what was fine."""
-    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2}
+    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2,
+             "NOT_APPLICABLE": 3}
     rows = []
     for key, topic in topic_summary(data):
         entry = data["topics"].get(key)
@@ -1099,6 +1114,10 @@ def render_topics(data, lang, t):
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
+            elif r["outcome"] == "NOT_APPLICABLE":
+                reason = explain_reason(r.get("reason"), data, t, short=True)
+                items.append(("na", f"{e(rule_name)} ({e(t['outcome']['NOT_APPLICABLE'].lower())})"
+                              + (f": {e(reason)}" if reason else "")))
             else:
                 reason = explain_reason(r.get("reason"), data, t, short=True)
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
@@ -1149,7 +1168,7 @@ def unassessed_groups(data, lang, t):
     """
     groups = {}
     for r in data["results"]:
-        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED"):
+        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED", "NOT_APPLICABLE"):
             continue
         name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
         match = REASON_PATTERN.match(r.get("reason") or "")
@@ -1214,7 +1233,9 @@ def render_executive(data, lang, t):
              (counts["healthy"], t["count_healthy"]), (counts["not_assessed"], t["count_not_assessed"])]
     coverage = e(t["coverage"].format(**counts)) + (
         f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
-        if counts["not_assessed"] else "")
+        if counts["not_assessed"] else "") + (
+        f" · {e(t['not_applicable_note'].format(count=counts['not_applicable']))}"
+        if counts["not_applicable"] else "")
     collections = data["collections"]
     ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
     if collections and ok < len(collections):

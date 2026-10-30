@@ -237,7 +237,7 @@ Detect replicas that apply the primary's changes late.
 Lab 2026-10-21: with `recovery_min_apply_delay = 5min` on a replica, `replay_lag` grew 37 s → 84 s → 143 s and WAL behind 174 → 321 MB, so the time metric follows a stuck replay. Such a deliberately delayed replica (protection against accidental deletes) is judged only on the lag beyond its delay. The finding still reports the measured lag as the observed value and shows the intended delay and the part beyond it separately (V035): "6 minutes behind, 1 minute beyond its intended delay of 5 minutes", never just "1 minute behind". `pg_wal_replay_pause()` cannot create lag under Patroni: Patroni resumes replay within seconds.
 
 **Known limitations**  
-Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. Replicas are matched to their node configuration by address. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004.
+Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. Replicas are matched to their node configuration by address. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004. On a system with no replica connected and none known in recovery the rule is NOT_APPLICABLE (ADR-0014 addendum 2).
 
 ## PG-REP-004 — Replica Not Streaming
 
@@ -252,7 +252,7 @@ Detect servers known as replicas that do not receive changes from the primary.
 | Subject | REPLICA (node name or application_name) |
 
 **Design notes**  
-Known replicas come from the instance inventory, so no expected topology has to be declared (2026-09-21 decision). Addresses are matched without prefix length; when a node's address is unknown the rule compares counts.
+Known replicas come from the instance inventory, so no expected topology has to be declared (2026-09-21 decision). Addresses are matched without prefix length; when a node's address is unknown the rule compares counts. A system with no replica connected and none known in recovery is NOT_APPLICABLE; a replica connected to a single registered node is still checked (ADR-0014 addendum 2).
 
 **Known limitations**  
 Cascading replicas connected to another replica are reported as not connected. After a failover, inventory older than the freshness limit can name the wrong node; the health check always collects it fresh.
