@@ -233,6 +233,8 @@ Next:
 
 Small gaps noted: `collector_assignment` has no creation time / creator (needed when the web interface edits assignments).
 
+Multi-system lab (Hasan, 2026-10-30): everything so far was verified on one system (one Patroni cluster). Before real engagements, build more systems with Docker (or more VMs) and run the same work across them: a standalone server, a second cluster, PostgreSQL 15, 16 and 18 next to 17, a database with many objects. Questions to answer: several health checks at once (worker pool, per-target limits), targets with the same database or node names, version differences in collectors and the configuration recommendations, the customer overview (ADR-0016), report and repository size with many targets.
+
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
 Hardening backlog:
