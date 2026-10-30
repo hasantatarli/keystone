@@ -1778,10 +1778,12 @@ def evaluate_sequence_exhaustion(rows, rule, thresholds):
                         "last_value": last, "limit": limit, "limit_source": source,
                         "captured_at": iso(r["captured_at"])}})
     if unreadable and not findings:
+        # Named, so the DBA knows where to grant (the grant is per database and schema).
+        names = ", ".join(unreadable[:5]) + (f" (+{len(unreadable) - 5})" if len(unreadable) > 5 else "")
         raise InsufficientEvidence(
             "PG_SEQUENCE_CAPACITY", "sequence_privilege_missing",
             f"{len(unreadable)} sequence(s) could not be read; the collecting role needs SELECT on them.",
-            count=len(unreadable))
+            count=len(unreadable), names=names)
     return findings
 
 

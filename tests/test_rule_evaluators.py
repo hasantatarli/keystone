@@ -1162,8 +1162,9 @@ class SequenceExhaustionTests(unittest.TestCase):
         self.assertEqual(self.evaluate(sequence_row(2_100_000_000, cycle=True), sequence_row(None)), [])
 
     def test_unreadable_sequences_are_never_healthy(self):
-        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[sequence_privilege_missing\]"):
-            self.evaluate(sequence_row(10, readable=False), sequence_row(10))
+        with self.assertRaisesRegex(engine.InsufficientEvidence,
+                                    r"\[sequence_privilege_missing\].*app\.public\.orders_id_seq"):
+            self.evaluate(sequence_row(10, readable=False), sequence_row(10, name="other_seq"))
 
 
 if __name__ == "__main__":
