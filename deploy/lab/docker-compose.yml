@@ -1,6 +1,8 @@
 # Multi-system lab for Keystone (DEVELOPMENT_STATUS, 2026-10-30).
 # Several PostgreSQL systems on one Docker host; Keystone connects as keystone_monitor (pg_monitor).
-# Passwords come from .env (not committed): copy .env.example to .env first.
+# Passwords and addresses come from .env (not committed): copy .env.example to .env first.
+# Each server listens on 5432 of its own address; the addresses are extra IPs of the Docker host
+# (netplan), not macvlan: Wi-Fi bridging drops frames from extra MAC addresses.
 
 x-postgres: &postgres
   restart: unless-stopped
@@ -18,7 +20,7 @@ services:
     <<: *postgres
     image: postgres:15
     container_name: pg15-standalone
-    ports: ["5415:5432"]
+    ports: ["${PG15_IP}:5432:5432"]
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
       - pg15:/var/lib/postgresql/data
@@ -27,7 +29,7 @@ services:
     <<: *postgres
     image: postgres:16
     container_name: pg16-standalone
-    ports: ["5416:5432"]
+    ports: ["${PG16_IP}:5432:5432"]
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
       - pg16:/var/lib/postgresql/data
@@ -36,7 +38,7 @@ services:
     <<: *postgres
     image: postgres:18
     container_name: pg18-standalone
-    ports: ["5418:5432"]
+    ports: ["${PG18_IP}:5432:5432"]
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
       - pg18:/var/lib/postgresql               # PostgreSQL 18 images keep data in /var/lib/postgresql/18/docker
@@ -45,7 +47,7 @@ services:
     <<: *postgres
     image: postgres:17
     container_name: pg17-primary
-    ports: ["5417:5432"]
+    ports: ["${PG17_PRIMARY_IP}:5432:5432"]
     command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=50",
               "-c", "wal_level=replica", "-c", "max_wal_senders=5"]
     volumes:
@@ -57,7 +59,7 @@ services:
     container_name: pg17-replica
     restart: unless-stopped
     depends_on: [pg17-primary]
-    ports: ["5427:5432"]
+    ports: ["${PG17_REPLICA_IP}:5432:5432"]
     environment:
       REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
       PRIMARY_HOST: pg17-primary
