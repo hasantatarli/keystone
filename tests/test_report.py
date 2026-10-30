@@ -476,6 +476,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
         transactions = topics[topics.index("Transaction yönetimi"):]
         transactions = transactions[:transactions.index('<div class="topic">')]
+        self.assertIn('<span class="badge b-partial">Kısmen değerlendirildi</span>', transactions)
         self.assertIn('<li class="r-unknown"><b>Uzun bekleyen prepared transaction</b> '
                       '(değerlendirilemedi): PG_PREPARED_TRANSACTIONS verisi yok.</li>', transactions)
 

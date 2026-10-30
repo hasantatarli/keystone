@@ -65,7 +65,7 @@ TEXTS = {
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
-        "topic_unknown": "Değerlendirilemedi",
+        "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
         "collected_count": "{ok} / {total} başarılı",
@@ -181,7 +181,7 @@ TEXTS = {
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
-        "topic_unknown": "Not assessed",
+        "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
         "collected_count": "{ok} of {total} succeeded",
@@ -706,6 +706,8 @@ def topic_summary(data):
             topic["status"] = "attention"
         elif "HEALTHY" not in outcomes:
             topic["status"] = "unknown"
+        elif any(o != "HEALTHY" for o in outcomes):
+            topic["status"] = "partial"          # never "no problems" while a rule was not assessed
     order = lambda key: data["topics"].get(key, {}).get("order", 999)   # noqa: E731
     return sorted(topics.items(), key=lambda item: order(item[0]))
 
@@ -789,7 +791,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .badge{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-CRITICAL,.b-ERROR,.b-critical{background:var(--crit-bg);color:var(--crit)}
 .b-WARNING,.b-ATTENTION_REQUIRED,.b-attention{background:var(--warn-bg);color:var(--warn)}
-.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown{background:var(--na-bg);color:var(--na)}
+.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial{background:var(--na-bg);color:var(--na)}
 .b-HEALTHY,.b-SUCCESS,.b-ok{background:var(--ok-bg);color:var(--ok)}
 .b-FAILED,.b-CONNECTION_FAILED,.b-TIMEOUT,.b-STALE{background:var(--crit-bg);color:var(--crit)}
 .b-PARTIAL_SUCCESS,.b-WAIT_LIMIT{background:var(--warn-bg);color:var(--warn)}
