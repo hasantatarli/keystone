@@ -156,8 +156,28 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 18 / 25 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 19 / 26 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
+
+    def test_checks_not_assessed_get_attention_without_being_findings(self):
+        # Hasan 2026-10-30: unknown is worth attention, but it is not a problem found.
+        self.failing = {"PG_REPLICATION_SLOTS"}
+        page = self.render(self.run_check(), "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        card = executive[executive.index('<details class="card unknown">'):]
+        card = card[:card.index("</details>")]
+        self.assertIn("Değerlendirilemeyen kontroller", card)
+        # One cause listed once with every check it stopped, and what to do about it.
+        self.assertIn("cluster: PG_REPLICATION_SLOTS toplanamadı (bağlantı hatası)", card)
+        self.assertIn("Etkilenen kontroller: ", card)
+        self.assertIn("Yapılması gereken: Keystone&#x27;un bu sunuculara bağlanabildiğini", card)
+        self.assertEqual(card.count("PG_REPLICATION_SLOTS toplanamadı"), 1)
+        self.assertIn("Hiçbir kontrol değerlendirilemedi", executive)       # nothing assessed at all
+        # With some checks assessed, the verdict also says how many could not be done.
+        page = self.render(self.make_check(), "tr")
+        verdict = page[page.index('<div class="verdict'):page.index('<p class="note">')]
+        self.assertIn('<span class="sub">', verdict)
+        self.assertIn("kontrol yapılamadı.", verdict)
 
     def test_reasons_are_explained_in_plain_words(self):
         t = report.TEXTS["tr"]
@@ -458,6 +478,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+        # Same words as the rest of the report: the severity, not "attention".
+        self.assertIn('<span class="badge b-WARNING">Uyarı</span></td><td>1 bulgu', results)
+        self.assertNotIn(">Dikkat<", page)
 
     def test_topic_lists_a_rule_that_could_not_be_assessed(self):
         # A topic must not read "no problems" while one of its rules was not assessed.
@@ -476,6 +499,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
         transactions = topics[topics.index("Transaction yönetimi"):]
         transactions = transactions[:transactions.index('<div class="topic">')]
+        self.assertIn('<span class="badge b-partial">Kısmen değerlendirildi</span>', transactions)
         self.assertIn('<li class="r-unknown"><b>Uzun bekleyen prepared transaction</b> '
                       '(değerlendirilemedi): PG_PREPARED_TRANSACTIONS verisi yok.</li>', transactions)
 
@@ -664,6 +688,63 @@ class ReportTests(test_health_check.HealthCheckTests):
             self.conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
             self.conn.execute("DROP ROLE IF EXISTS idx_test_admin")
             self.conn.autocommit = False
+
+    def test_sequence_collector_feeds_the_rule_and_needs_the_privilege(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/sequence_capacity_snapshot.sql").read_text()
+        self.conn.commit()
+        self.conn.autocommit = True
+        for statement in (
+                "CREATE TABLE seq_test (id serial PRIMARY KEY)",                   # integer column
+                "SELECT setval('seq_test_id_seq', 2000000000)",                    # 93 %
+                "CREATE TABLE seq_test_big (id bigint GENERATED ALWAYS AS IDENTITY)",
+                "CREATE ROLE seq_test_monitor IN ROLE pg_monitor"):
+            self.conn.execute(statement)
+        self.conn.autocommit = False
+        try:
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                rows = cur.execute(sql).fetchall()
+                cur.execute("SET ROLE seq_test_monitor")
+                monitor_rows = cur.execute(sql).fetchall()
+                cur.execute("RESET ROLE")
+            ours = {r["sequence_name"]: r for r in rows if r["record_type"] == "SEQUENCE"}
+            self.assertEqual((ours["seq_test_id_seq"]["column_type"], ours["seq_test_id_seq"]["last_value"]),
+                             ("integer", 2000000000))
+            self.assertEqual(ours["seq_test_big_id_seq"]["table_name"], "seq_test_big")   # identity
+            self.assertFalse(any(r["is_readable"] for r in monitor_rows if r["record_type"] == "SEQUENCE"))
+
+            task = {"target_id": self.system, "collector_key": "PG_SEQUENCE_CAPACITY"}
+            worker.save_sequence_capacity_snapshot(self.conn, task, rows)
+            self.conn.commit()
+            engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+            self.assertEqual(self.latest_outcomes()["PG-CAP-002"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+
+            # pg_monitor alone cannot read the values: not assessed, and the reason says why.
+            self.conn.execute("DELETE FROM postgresql.sequence_capacity_snapshot")
+            worker.save_sequence_capacity_snapshot(self.conn, task, monitor_rows)
+            self.conn.commit()
+            engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+            outcome, _, reason = self.latest_outcomes()["PG-CAP-002"]
+            self.assertEqual(outcome, "INSUFFICIENT_EVIDENCE")
+            self.assertIn("SELECT", report.explain_reason(reason, {"collections": []}, report.TEXTS["tr"]))
+        finally:
+            self.conn.rollback()
+            self.conn.autocommit = True
+            self.conn.execute("DROP TABLE IF EXISTS seq_test, seq_test_big")
+            self.conn.execute("DROP ROLE IF EXISTS seq_test_monitor")
+            self.conn.autocommit = False
+
+    def test_executive_reason_leaves_the_error_text_to_the_technical_part(self):
+        # Lab 2026-10-29: a long pg_hba error repeated in every area of the executive part.
+        t = report.TEXTS["tr"]
+        data = {"collections": [{"collector_key": "PG_WAL_STATUS", "status": "CONNECTION_FAILED",
+                                 "status_message": "FATAL:  no pg_hba.conf entry for host"}]}
+        reason = "PG_WAL_STATUS: Required evidence is not available."
+        self.assertEqual(report.explain_reason(reason, data, t, short=True),
+                         "PG_WAL_STATUS toplanamadı (bağlantı hatası); ayrıntı teknik bölümde.")
+        self.assertIn("no pg_hba.conf entry", report.explain_reason(reason, data, t))
 
     def test_reason_with_values_is_explained(self):
         t = report.TEXTS["tr"]

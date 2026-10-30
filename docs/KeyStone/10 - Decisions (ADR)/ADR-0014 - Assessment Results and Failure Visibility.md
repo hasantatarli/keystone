@@ -53,3 +53,7 @@ Repository logging uses a **separate autocommit connection**, so an event is not
 - Lost runs are no longer possible; every run ends RUNNING → SUCCESS, PARTIAL or FAILED with its results.
 - Errors that happen while nobody is watching remain available afterwards, including repository outages.
 - `event_log` needs a retention policy once continuous operation produces volume; deferred until then.
+
+## Addendum (2026-10-30, Hasan)
+
+An INSUFFICIENT_EVIDENCE result stays an outcome, never a finding: a finding says a problem was found, an unassessed check says nothing could be seen, and a severity for the unknown would be invented. Reports draw attention to it instead: the executive part has a "Checks not assessed" card that groups the checks by cause (a failed collection or missing source is listed once with every check it stopped) and says what to do, and the verdict states how many checks could not be done. An area with a check not assessed is "partly assessed", never "no problems".

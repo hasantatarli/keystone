@@ -259,6 +259,15 @@ EXPECTED_RULES = {
         "thresholds": {},
         "evidence": {"PG_SCHEMA_PRIVILEGES": (True, 86400)},
     },
+    "PG-CAP-002": {
+        "assessment": "PG_CAPACITY_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("75"), "PERCENT"),
+            "CRITICAL": (Decimal("90"), "PERCENT"),
+        },
+        "evidence": {"PG_SEQUENCE_CAPACITY": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

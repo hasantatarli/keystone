@@ -2216,6 +2216,16 @@ def save_roles_snapshot(conn, task, rows):
                  "can_create_db", "is_replication", "bypass_rls", "valid_until"))
 
 
+def save_sequence_capacity_snapshot(conn, task, rows):
+    """Persist PG_SEQUENCE_CAPACITY: a DATABASE row per collected database, a SEQUENCE row per sequence."""
+    if not any(r["record_type"] == "DATABASE" for r in rows):
+        raise RuntimeError("PG_SEQUENCE_CAPACITY returned no DATABASE rows.")
+    insert_rows(conn, "sequence_capacity_snapshot", task, rows,
+                ("record_type", "database_name", "schema_name", "sequence_name", "data_type",
+                 "min_value", "max_value", "increment_by", "is_cycle", "is_readable", "last_value",
+                 "table_name", "column_name", "column_type"))
+
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -2233,6 +2243,7 @@ COLLECTOR_HANDLERS = {
     "PG_INDEX_USAGE": save_index_usage_snapshot,
     "PG_SCHEMA_PRIVILEGES": save_schema_privileges_snapshot,
     "PG_ROLES": save_roles_snapshot,
+    "PG_SEQUENCE_CAPACITY": save_sequence_capacity_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):

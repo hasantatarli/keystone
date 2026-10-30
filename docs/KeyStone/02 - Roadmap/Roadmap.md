@@ -22,7 +22,7 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 | PG-016 | Roles & Security | SYSTEM / DATABASE | SNAPSHOT | Very High | **Partial** — `PG_ROLES` (role attributes); grants open |
 | PG-017 | SSL / HBA / Access Security | NODE | SNAPSHOT | Very High | **Partial** — `ssl`, `password_encryption` from the configuration snapshot; `pg_hba` open |
 | PG-018 | Schema / Object Inventory | DATABASE | SNAPSHOT | Medium | **Partial** — `PG_SCHEMA_PRIVILEGES` (PUBLIC usage / create per schema) |
-| PG-019 | Sequence Capacity | DATABASE | SNAPSHOT | Very High | Planned |
+| PG-019 | Sequence Capacity | DATABASE | SNAPSHOT | Very High | **Done** — `PG_SEQUENCE_CAPACITY` (needs SELECT on sequences for values) |
 | PG-020 | Prepared Transactions | SYSTEM | SNAPSHOT | High | **Done** — `PG_PREPARED_TRANSACTIONS` |
 | PG-021 | Partition Inventory | DATABASE | SNAPSHOT | Medium | Planned |
 | PG-022 | FK / Constraint Health | DATABASE | SNAPSHOT | High | Planned |
@@ -39,7 +39,7 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 
 ## Current Development Focus
 
-Implemented (2026-10-27): PG-001 to PG-008, PG-010, PG-020, PG-029, PG-032, parts of PG-009, PG-011, PG-016, PG-017 and PG-018, plus Linux host evidence (`PG_HOST_SNAPSHOT`) and per-session activity (`PG_ACTIVITY_SNAPSHOT`). PG-019 sequences is on hold (needs a privilege beyond `pg_monitor`).
+Implemented (2026-10-29): PG-001 to PG-008, PG-010, PG-019, PG-020, PG-029, PG-032, parts of PG-009, PG-011, PG-016, PG-017 and PG-018, plus Linux host evidence (`PG_HOST_SNAPSHOT`) and per-session activity (`PG_ACTIVITY_SNAPSHOT`). PG-019 sequences done; reading their values needs SELECT on the sequences.
 
 Since 2026-10-05, new collector work is prioritised by the MVP Plan and by evidence needs of new rules rather than by this sequence.
 

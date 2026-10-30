@@ -197,6 +197,14 @@ Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.cre
 python -m repository.tools.encrypt_credential
 ```
 
+Generate a master key (Fernet) once per Keystone installation and keep it in a password manager; without it the stored credentials cannot be decrypted:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Changing the key (for example after it was exposed): set the new key, encrypt every target password again with the credential tool, update `keystone.target_connection.credential_data` for every connection in one transaction, then run a health check. A connection left with the old encryption fails with "Credential decryption failed". A rotation tool is in the backlog.
+
 ---
 
 ## 8. Tests

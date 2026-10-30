@@ -1,6 +1,6 @@
 # Keystone Development Status
 
-Last updated: 2026-10-27
+Last updated: 2026-10-29
 
 This document is the working checkpoint for the PostgreSQL MVP. It records what is implemented and verified, what is currently being worked on, and what comes next. It is intentionally narrower than a long-term product roadmap.
 
@@ -28,14 +28,14 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 
 ## Engineering Intelligence Implemented
 
-28 PostgreSQL rules in 9 assessments (2026-10-27, V016–V042). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
+29 PostgreSQL rules in 9 assessments (2026-10-29, V016–V044). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
 
 | Assessment | Rules |
 | --- | --- |
 | PG_TRANSACTION_HEALTH | PG-TRAN-001 long idle transaction, PG-TRAN-002 XID wraparound, PG-TRAN-003 long-running transaction, PG-TRAN-004 MultiXact wraparound, PG-TRAN-005 long prepared transaction |
 | PG_REPLICATION_HEALTH | PG-REP-001 slot WAL retention, PG-REP-002 slot WAL lost, PG-REP-003 replication lag, PG-REP-004 replica not streaming, PG-REP-005 inactive slot, PG-REP-006 sync replication without sync standby, PG-HA-001 recent failover |
 | PG_CONNECTION_HEALTH | PG-CONN-001 aborted idle transactions, PG-CONN-002 connection capacity |
-| PG_CAPACITY_HEALTH | PG-CAP-001 data disk usage |
+| PG_CAPACITY_HEALTH | PG-CAP-001 data disk usage, PG-CAP-002 sequence exhaustion |
 | PG_CONFIGURATION_HEALTH | PG-CONF-001 pending restart, PG-CONF-002 unsafe durability settings, PG-CONF-004 autovacuum disabled |
 | PG_BACKUP_HEALTH | PG-BKP-001 WAL archive failures, PG-BKP-002 WAL archiving |
 | PG_SECURITY_HEALTH | PG-SEC-001 login superuser, PG-SEC-002 md5 password encryption, PG-SEC-003 SSL disabled, PG-SEC-004 PUBLIC can create in schema |
@@ -179,7 +179,7 @@ Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through 
 
 ## Active Work
 
-Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (28 checks done; P1 remaining: sequence capacity on hold, then configuration recommendations). Open in Phase 1: offline evidence bundle.
+Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (29 checks done; P1 remaining: configuration recommendations, ADR-0017). Open in Phase 1: offline evidence bundle.
 
 Done:
 
@@ -222,16 +222,18 @@ Rule batches 2026-10-26:
 - PR #21 merged: PG_MAINTENANCE_HEALTH, PG-MAINT-001/002 with rule parameters (V039).
 - PR #22 merged: finding sentences per language (FINDING / FINDING_ALT, V040), readable setting values. The pending new value of PG-CONF-001 stays out: `pg_file_settings` is superuser-only.
 - PR #23 merged: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
-- In progress (2026-10-27): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016). Report: "status by area" lists one bullet per rule, coloured by severity and with the severity in words (problems, rules not assessed with the reason, then healthy statements); before, rules not assessed were missing from that section. Main problems (executive), findings and collected data (technical) are collapsible: one line each, details on demand, closed by default; printing opens them where the browser supports it (no script, by design). Extension-owned indexes are left out of the index rules (PG017).
+- PR #24 merged (2026-10-29): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016). Report: "status by area" lists one bullet per rule, coloured by severity and with the severity in words (problems, rules not assessed with the reason, then healthy statements); before, rules not assessed were missing from that section. Main problems (executive), findings and collected data (technical) are collapsible: one line each, details on demand, closed by default; printing opens them where the browser supports it (no script, by design). Extension-owned indexes are left out of the index rules (PG017).
 
 Next:
 
-1. Lab verification of PG-IDX-001/002, PG-SEC-001/004. PG-CAP-002 (sequences) decided 2026-10-29: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege (Assessment Catalogue, open question 6).
+1. PG-CAP-002 sequence exhaustion (V044, PG018) in progress: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege. Lab moved from `postgres` to a `pg_monitor` user `keystone_monitor` (2026-10-29); first run found PG-IDX-001 healthy with no index evidence (fixed) and long collection errors repeated in the executive part (now short there, full in the technical part). With pg_hba opened for `keystone_monitor`, all 26 collections succeed with `pg_monitor` only; results match the superuser runs, PG-CAP-002 is INSUFFICIENT_EVIDENCE naming the grant. An area with a rule not assessed is labelled "partly assessed", never "no problems". Report wording: a rule or area with findings shows the severity (Critical / Warning) everywhere; the separate "Attention" label is gone. Checks not assessed are not findings (Hasan, 2026-10-30) but get attention: an executive card "Checks not assessed" groups them by cause (one failed collection or missing source listed once with every check it stopped) with what to do, and the verdict says how many checks could not be done.
 2. Configuration recommendation capability (PG-CONF-003): ADR-0017 approved 2026-10-29 (server profile on the target, weakest node for hardware limits, version-aware settings, ranges with WARNING and combination rules with CRITICAL, formulas in code and numbers in the Dictionary); implementation in four steps after PG-CAP-002.
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.
 
 Small gaps noted: `collector_assignment` has no creation time / creator (needed when the web interface edits assignments).
+
+Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
 Hardening backlog:
 

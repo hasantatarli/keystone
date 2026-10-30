@@ -47,6 +47,15 @@ TEXTS = {
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
         "verdict_healthy": "Değerlendirilen alanlarda sorun bulunmadı.",
         "verdict_none": "Hiçbir kontrol değerlendirilemedi; veri toplanamadı.",
+        "verdict_unassessed": "{n} kontrol yapılamadı.",
+        "unassessed_title": "Değerlendirilemeyen kontroller",
+        "unassessed_lead": "Bu kontroller yapılamadı; sistemde sorun olup olmadığı bilinmiyor.",
+        "unassessed_collect": "{targets}: {source} toplanamadı ({status})",
+        "unassessed_affects": "Etkilenen kontroller",
+        "unassessed_action": "Yapılması gereken",
+        "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
+        "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
+        "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "count_critical": "Kritik", "count_warning": "Uyarı",
@@ -64,8 +73,8 @@ TEXTS = {
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
-        "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
-        "topic_unknown": "Değerlendirilemedi",
+        "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
+        "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
         "collected_count": "{ok} / {total} başarılı",
@@ -79,6 +88,7 @@ TEXTS = {
         "databases": "Veritabanları", "database": "Veritabanı", "owner": "Sahip", "size": "Boyut",
         "not_collected_here": "Bu kontrolde toplanamadı.",
         "collection_summary": "Veri toplama: {ok} / {total} başarılı",
+        "more_errors": "(+{n} hata daha; teknik bölümde)",
         "collection_errors": "Hata",
         "findings": "Bulgular", "no_findings": "Bulgu yok.",
         "meaning": "Anlamı", "impact": "Etkisi", "recommendation": "Öneri",
@@ -116,7 +126,13 @@ TEXTS = {
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
-                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor."},
+                         "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
+                         "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
+                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yetki, ilgili veritabanında: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <kullanıcı>."},
+        "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
+        "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
+        "detail_limit_source": "Sınırı belirleyen", "limit_source_column": "kolon tipi",
+        "limit_source_sequence": "sequence tipi",
         "detail_index": "Index", "detail_index_size": "Boyut", "detail_nodes_checked": "Kontrol edilen sunucular",
         "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
@@ -144,6 +160,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
         "days": "gün", "hours": "saat", "minutes": "dakika",
         "reason_not_collected": "{source} bu kontrolde toplanamadı ({status}: {message}).",
+        "reason_not_collected_short": "{source} toplanamadı ({status}); ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
     },
@@ -155,6 +172,15 @@ TEXTS = {
         "verdict_warning": "There are problems that need attention.",
         "verdict_healthy": "No problems were found in the assessed areas.",
         "verdict_none": "No check could be evaluated; data could not be collected.",
+        "verdict_unassessed": "{n} check(s) could not be done.",
+        "unassessed_title": "Checks not assessed",
+        "unassessed_lead": "These checks could not be done; whether there is a problem is unknown.",
+        "unassessed_collect": "{targets}: {source} not collected ({status})",
+        "unassessed_affects": "Checks affected",
+        "unassessed_action": "What to do",
+        "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
+        "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
+        "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "count_critical": "Critical", "count_warning": "Warning",
@@ -172,8 +198,8 @@ TEXTS = {
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
-        "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
-        "topic_unknown": "Not assessed",
+        "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
+        "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
         "collected_count": "{ok} of {total} succeeded",
@@ -186,6 +212,7 @@ TEXTS = {
         "databases": "Databases", "database": "Database", "owner": "Owner", "size": "Size",
         "not_collected_here": "Not collected in this check.",
         "collection_summary": "Data collection: {ok} of {total} succeeded",
+        "more_errors": "(+{n} more; see the technical part)",
         "collection_errors": "Error",
         "findings": "Findings", "no_findings": "No findings.",
         "meaning": "Meaning", "impact": "Impact", "recommendation": "Recommendation",
@@ -223,7 +250,13 @@ TEXTS = {
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
-                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed."},
+                         "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
+                         "no_index_usage": "Index usage was not collected from any server.",
+                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant, in that database: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <user>."},
+        "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
+        "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
+        "detail_limit_source": "Limit set by", "limit_source_column": "column type",
+        "limit_source_sequence": "sequence type",
         "detail_index": "Index", "detail_index_size": "Size", "detail_nodes_checked": "Servers checked",
         "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
@@ -251,6 +284,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
         "days": "days", "hours": "hours", "minutes": "minutes",
         "reason_not_collected": "{source} could not be collected in this check ({status}: {message}).",
+        "reason_not_collected_short": "{source} not collected ({status}); details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
     },
@@ -554,8 +588,11 @@ REASON_PATTERN = re.compile(
 REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
-def explain_reason(reason, data, t):
-    """Engine reason in plain words; says when this check failed to collect the source."""
+def explain_reason(reason, data, t, short=False):
+    """Engine reason in plain words; says when this check failed to collect the source.
+
+    short: without the technical error message (executive part).
+    """
     coded = REASON_CODE_PATTERN.match(reason or "")
     if coded and coded.group("code") in t["reason_codes"]:
         try:
@@ -571,6 +608,9 @@ def explain_reason(reason, data, t):
               and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")]
     if failed:
         c = failed[0]
+        if short:
+            return t["reason_not_collected_short"].format(
+                source=source, status=t["collection_status"].get(c["status"], c["status"]).lower())
         return t["reason_not_collected"].format(
             source=source, status=t["collection_status"].get(c["status"], c["status"]),
             message=c["status_message"] or "-")
@@ -684,6 +724,8 @@ def topic_summary(data):
             topic["status"] = "attention"
         elif "HEALTHY" not in outcomes:
             topic["status"] = "unknown"
+        elif any(o != "HEALTHY" for o in outcomes):
+            topic["status"] = "partial"          # never "no problems" while a rule was not assessed
     order = lambda key: data["topics"].get(key, {}).get("order", 999)   # noqa: E731
     return sorted(topics.items(), key=lambda item: order(item[0]))
 
@@ -767,13 +809,15 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .badge{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-CRITICAL,.b-ERROR,.b-critical{background:var(--crit-bg);color:var(--crit)}
 .b-WARNING,.b-ATTENTION_REQUIRED,.b-attention{background:var(--warn-bg);color:var(--warn)}
-.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown{background:var(--na-bg);color:var(--na)}
+.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial{background:var(--na-bg);color:var(--na)}
 .b-HEALTHY,.b-SUCCESS,.b-ok{background:var(--ok-bg);color:var(--ok)}
 .b-FAILED,.b-CONNECTION_FAILED,.b-TIMEOUT,.b-STALE{background:var(--crit-bg);color:var(--crit)}
 .b-PARTIAL_SUCCESS,.b-WAIT_LIMIT{background:var(--warn-bg);color:var(--warn)}
 .b-NOT_COLLECTED{background:var(--na-bg);color:var(--na)}
 .card{border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:6px;padding:12px 16px;margin:10px 0}
 .card.CRITICAL{border-left-color:var(--crit)}
+.card.unknown{border-left-color:var(--na)}
+.verdict .sub{font-size:14px;font-weight:400;margin-left:8px}
 .card h3{margin:0 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .card dl{margin:6px 0 0;display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:4px 12px}
 .card dt{color:var(--muted);font-size:13px;font-weight:600}
@@ -1033,7 +1077,7 @@ def render_topics(data, lang, t):
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
             else:
-                reason = explain_reason(r.get("reason"), data, t)
+                reason = explain_reason(r.get("reason"), data, t, short=True)
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
                               + (f": {e(reason)}" if reason else "")))
         rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
@@ -1075,6 +1119,61 @@ def render_main_problems(data, lang, t):
         else f'<p class="note">{e(t["no_problems"])}</p>')
 
 
+def unassessed_groups(data, lang, t):
+    """[(cause, action, [rule names])]: checks not assessed, grouped by their cause.
+
+    One collection failing (a node, a privilege) often stops many checks; it is listed once.
+    """
+    groups = {}
+    for r in data["results"]:
+        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED"):
+            continue
+        name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+        match = REASON_PATTERN.match(r.get("reason") or "")
+        failed = [c for c in data["collections"] if match and c["collector_key"] == match.group("source")
+                  and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")] if match else []
+        if failed:
+            status = failed[0]["status"]
+            targets = ", ".join(sorted({c["target_name"] for c in failed}))
+            cause = t["unassessed_collect"].format(
+                targets=targets, source=match.group("source"),
+                status=t["collection_status"].get(status, status).lower())
+            key = (targets, status)
+            action = t.get("action_" + status, t["action_other"])
+        else:
+            cause = explain_reason(r.get("reason"), data, t) or name
+            key = ("cause", cause)                 # the same missing source is one item
+            action = ""
+        group = groups.setdefault(key, {"cause": cause, "action": action, "rules": []})
+        group["rules"].append(name)
+    return list(groups.values())
+
+
+def render_unassessed(data, lang, t):
+    """Executive card for checks not done: draws attention without being a finding."""
+    groups = unassessed_groups(data, lang, t)
+    count = sum(len(g["rules"]) for g in groups)
+    if not count:
+        return ""
+    items = []
+    for g in groups:
+        affected = ", ".join(g["rules"])
+        item = f"<b>{e(g['cause'])}</b>"
+        if g["rules"] != [g["cause"]]:
+            item += f'<div class="facts">{e(t["unassessed_affects"])}: {e(affected)}</div>'
+        if g["action"]:
+            item += f'<div class="facts">{e(t["unassessed_action"])}: {e(g["action"])}</div>'
+        items.append(f"<li>{item}</li>")
+    return (f'<details class="card unknown"><summary><h3>{badge("unknown", t["topic_unknown"])}'
+            f'{e(t["unassessed_title"])}<span class="note">{count}</span></h3>'
+            f'<div class="lead">{e(t["unassessed_lead"])}</div></summary>'
+            f'<ul class="items">{"".join(items)}</ul></details>')
+
+
+def shorten(text, limit=140):
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
 def render_executive(data, lang, t):
     counts, verdict = summarize(data)
     tiles = [(counts["critical"], t["count_critical"]), (counts["warning"], t["count_warning"]),
@@ -1088,13 +1187,18 @@ def render_executive(data, lang, t):
         errors = sorted({c["status_message"] for c in collections
                          if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
         coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
-                     + (f" · {e(t['collection_errors'])}: {e('; '.join(errors[:3]))}" if errors else ""))
+                     + (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
+                        + (f" {e(t['more_errors'].format(n=len(errors) - 1))}" if len(errors) > 1 else "")
+                        if errors else ""))
     return (f'<div class="part">{e(t["part_exec"])}</div>'
-            f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}</div>'
-            f'<p class="note">{coverage}</p><div class="tiles">'
+            f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}'
+            + (f' <span class="sub">{e(t["verdict_unassessed"].format(n=counts["not_assessed"]))}</span>'
+               if counts["not_assessed"] and verdict != "none" else "") + "</div>"
+            + f'<p class="note">{coverage}</p><div class="tiles">'
             + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
                       for n, label in tiles)
-            + "</div>" + render_main_problems(data, lang, t) + render_inventory(data, t)
+            + "</div>" + render_main_problems(data, lang, t) + render_unassessed(data, lang, t)
+            + render_inventory(data, t)
             + render_impact_chart(data, lang, t) + render_topics(data, lang, t))
 
 
@@ -1168,7 +1272,10 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("index", "detail_index"), ("index_size", "detail_index_size"),
                  ("nodes_checked", "detail_nodes_checked"), ("statistics_node", "detail_statistics_node"),
                  ("schema", "detail_schema"), ("schema_owner", "detail_schema_owner"),
-                 ("role", "detail_role"))
+                 ("role", "detail_role"), ("sequence", "detail_sequence"), ("column", "detail_column"),
+                 ("data_type", "detail_data_type"), ("column_type", "detail_column_type"),
+                 ("last_value", "detail_last_value"), ("limit", "detail_limit"),
+                 ("limit_source", "detail_limit_source"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1210,7 +1317,7 @@ def setting_value_text(value, unit, t):
 
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
-                "connection_count"}
+                "connection_count", "last_value", "limit"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds"}
 SIZE_VALUES = {"index_size"}
@@ -1264,6 +1371,11 @@ def render_instance(f, data, lang, t):
     for key in ("live_rows", "dead_rows", "modified_rows"):
         if isinstance(details.get(key), (int, float)):
             details[key] = f"{details[key]:,}"
+    for key in ("last_value", "limit"):
+        if isinstance(details.get(key), int):
+            details[key] = f"{details[key]:,}"
+    if details.get("limit_source"):
+        details["limit_source"] = t.get("limit_source_" + details["limit_source"], details["limit_source"])
     if details.get("index_size_bytes") is not None:
         details["index_size"] = fmt_bytes(details["index_size_bytes"])
     if details.get("wal_behind_bytes") is not None:
@@ -1338,8 +1450,13 @@ def render_results(data, lang, t):
                 note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
+            # A rule with findings shows their severity, the word used everywhere else in the report.
+            if r["outcome"] == "ATTENTION_REQUIRED" and r["max_severity"]:
+                status = badge(r["max_severity"], t["severity"].get(r["max_severity"], r["max_severity"]))
+            else:
+                status = badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"]))
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',
-                         badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"])), e(note)])
+                         status, e(note)])
     return f"<h2>{e(t['results'])}</h2>" + table(
         [t["area"], t["rule"], t["status"], ""], rows)
 

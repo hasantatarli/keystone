@@ -672,6 +672,25 @@ def load_latest_roles(conn, target_id):
         """, (target_id, target_id)).fetchall()
 
 
+def load_latest_sequence_capacity(conn, target_id):
+    """Latest PG_SEQUENCE_CAPACITY per database of the target."""
+    return conn.execute(
+        """
+        SELECT s.snapshot_id, s.target_id, s.captured_at, s.record_type, s.database_name,
+               s.schema_name, s.sequence_name, s.data_type, s.min_value, s.max_value,
+               s.increment_by, s.is_cycle, s.is_readable, s.last_value, s.table_name,
+               s.column_name, s.column_type
+        FROM postgresql.sequence_capacity_snapshot s
+        JOIN (
+            SELECT database_name, max(captured_at) AS captured_at
+            FROM postgresql.sequence_capacity_snapshot
+            WHERE target_id = %s AND record_type = 'DATABASE' GROUP BY database_name
+        ) latest ON latest.database_name = s.database_name AND latest.captured_at = s.captured_at
+        WHERE s.target_id = %s
+        ORDER BY s.database_name, s.record_type, s.schema_name, s.sequence_name
+        """, (target_id, target_id)).fetchall()
+
+
 # -----------------------------------------------------------------------------
 # Rule Evaluation
 # -----------------------------------------------------------------------------
@@ -1585,6 +1604,10 @@ def evaluate_unused_indexes(rows, rule, thresholds):
         raise InsufficientEvidence("PG_INDEX_USAGE", "no_nodes", "No node list for the target.")
     nodes = {n["target_id"]: n["name"] for n in marker["nodes"]}
     collected = {(r["target_id"], r["database_name"]): r for r in rows if r["record_type"] == "DATABASE"}
+    if not collected:
+        # Lab 2026-10-29: every node failed to connect; nothing seen is not "nothing unused".
+        raise InsufficientEvidence("PG_INDEX_USAGE", "no_index_usage",
+                                   "Index usage was not collected from any server.")
     min_size = parameter(rule, "min_index_size")
     min_age = parameter(rule, "min_statistics_age")
     full_cycle = parameter(rule, "full_cycle")
@@ -1704,6 +1727,66 @@ def evaluate_login_superusers(rows, rule, thresholds):
         and int(r["role_oid"]) != BOOTSTRAP_SUPERUSER_OID]
 
 
+# Largest value per integer column type; other types are limited by the sequence only.
+COLUMN_TYPE_LIMITS = {"smallint": (-32768, 32767), "integer": (-2147483648, 2147483647),
+                      "bigint": (-9223372036854775808, 9223372036854775807)}
+
+
+def sequence_limit(row):
+    """(limit, source): the bound the sequence moves towards; the column type wins when it is tighter."""
+    ascending = (row["increment_by"] or 1) > 0
+    limit, source = (row["max_value"], "sequence") if ascending else (row["min_value"], "sequence")
+    column = COLUMN_TYPE_LIMITS.get(row["column_type"] or "")
+    if column:
+        bound = column[1] if ascending else column[0]
+        if abs(bound) < abs(limit):
+            limit, source = bound, "column"
+    return int(limit), source
+
+
+def evaluate_sequence_exhaustion(rows, rule, thresholds):
+    """PG-CAP-002: used share of a sequence's limit (its own type or the column it feeds).
+
+    Unreadable sequences (no SELECT/USAGE) are never treated as healthy.
+    """
+    findings, unreadable = [], []
+    for r in rows:
+        if r["record_type"] != "SEQUENCE" or r["is_cycle"]:
+            continue                                   # cycling sequences wrap on purpose
+        name = f"{r['database_name']}.{r['schema_name']}.{r['sequence_name']}"
+        if not r["is_readable"]:
+            unreadable.append(name)
+            continue
+        if r["last_value"] is None:
+            continue                                   # never used
+        limit, source = sequence_limit(r)
+        last = int(r["last_value"])
+        ratio = 100 * last / limit if limit else 0.0  # judged unrounded; shown rounded
+        matched = match_threshold(ratio, thresholds, "PERCENT")
+        if matched is None:
+            continue
+        percent = round(ratio, 1)
+        column = f"{r['schema_name']}.{r['table_name']}.{r['column_name']}" if r["table_name"] else "-"
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": r["snapshot_id"],
+            "template_values": {"sequence": name, "column": column, "percent": f"{percent:g}",
+                                "last_value": last, "limit": limit},
+            "observed_value": percent, "observed_unit": "PERCENT",
+            "subject_type": "SEQUENCE", "subject_identifier": name,
+            "details": {"database": r["database_name"], "sequence": name, "column": column,
+                        "data_type": r["data_type"], "column_type": r["column_type"],
+                        "last_value": last, "limit": limit, "limit_source": source,
+                        "captured_at": iso(r["captured_at"])}})
+    if unreadable and not findings:
+        # Named, so the DBA knows where to grant (the grant is per database and schema).
+        names = ", ".join(unreadable[:5]) + (f" (+{len(unreadable) - 5})" if len(unreadable) > 5 else "")
+        raise InsufficientEvidence(
+            "PG_SEQUENCE_CAPACITY", "sequence_privilege_missing",
+            f"{len(unreadable)} sequence(s) could not be read; the collecting role needs SELECT on them.",
+            count=len(unreadable), names=names)
+    return findings
+
+
 # -----------------------------------------------------------------------------
 # Evaluation Registry
 # -----------------------------------------------------------------------------
@@ -1725,6 +1808,7 @@ EVIDENCE_LOADERS = {
     "PG_INDEX_USAGE": load_latest_index_usage,
     "PG_SCHEMA_PRIVILEGES": load_latest_schema_privileges,
     "PG_ROLES": load_latest_roles,
+    "PG_SEQUENCE_CAPACITY": load_latest_sequence_capacity,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -1761,6 +1845,7 @@ RULE_EVALUATORS = {
     "PG-IDX-002": evaluate_invalid_indexes,
     "PG-SEC-001": evaluate_login_superusers,
     "PG-SEC-004": evaluate_public_create,
+    "PG-CAP-002": evaluate_sequence_exhaustion,
 }
 
 

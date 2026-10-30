@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG017).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG018).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -18,10 +18,22 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_PREPARED_TRANSACTIONS | SYSTEM | `prepared_transaction_status_snapshot`, `prepared_transaction_snapshot` | PG-TRAN-005 |
 | PG_TRANSACTION_WRAPAROUND | DATABASE | `transaction_wraparound_snapshot` | PG-TRAN-002/004 |
 | PG_VACUUM_ANALYZE | DATABASE | `vacuum_analyze_snapshot` | PG-MAINT-001/002 |
+| PG_SEQUENCE_CAPACITY | DATABASE | `sequence_capacity_snapshot` | PG-CAP-002 |
 | PG_SCHEMA_PRIVILEGES | DATABASE | `schema_privilege_snapshot` | PG-SEC-004 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |
 
 Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`).
+
+## Privileges
+
+`pg_monitor` is enough for every collector, with one exception: the value of a sequence (`PG_SEQUENCE_CAPACITY`) needs SELECT or USAGE on it. SELECT on a sequence exposes only its counter, not table data. Without it PG-CAP-002 ends INSUFFICIENT_EVIDENCE and names the privilege. Recommended grant, per schema:
+
+```sql
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA app TO keystone;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON SEQUENCES TO keystone;   -- sequences created later
+```
+
+`pg_read_all_data` (PostgreSQL 14+) also works but grants reading all table data.
 
 Files ending in `.aql` (`database_stats_snapshot`, `query_stats_snapshot`, `replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
 
