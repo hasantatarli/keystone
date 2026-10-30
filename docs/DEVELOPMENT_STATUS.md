@@ -233,6 +233,8 @@ Next:
 
 Small gaps noted: `collector_assignment` has no creation time / creator (needed when the web interface edits assignments).
 
+Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
+
 Hardening backlog:
 
 - Later (Engineering Intelligence): known activity windows, for example a weekend backup, as context so that long runs inside them are not reported. Related to the deferred time windows in ADR-0015.
