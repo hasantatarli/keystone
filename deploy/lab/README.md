@@ -31,4 +31,13 @@ psql -h 192.168.1.108 -U keystone_monitor -d postgres -c "select pg_is_in_recove
 psql -h 192.168.1.107 -U keystone_monitor -d postgres -c "select client_addr, state from pg_stat_replication"
 ```
 
+## SSH (host data)
+
+`pg17-primary` and `pg17-replica` run from a small image (`ssh/`, PostgreSQL 17 plus `openssh-server`) and accept SSH on port 2222 of their address as user `keystone` with `HOST_SSH_PASSWORD`, like two VMs. Keystone's HOST connection for each node uses that port; `PG_HOST_SNAPSHOT` then reads the container's CPU, memory and filesystems, and the data directory is the Docker volume mounted at `/var/lib/postgresql/data`. Port 22 stays the Docker host's own SSH.
+
+```bash
+docker compose up -d --build pg17-primary pg17-replica   # data volumes are kept
+ssh -p 2222 keystone@192.168.1.107 df -h /var/lib/postgresql/data
+```
+
 The lab is for testing only: every server accepts password connections from anywhere (official image default).

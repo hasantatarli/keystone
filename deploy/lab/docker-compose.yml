@@ -3,6 +3,8 @@
 # Passwords and addresses come from .env (not committed): copy .env.example to .env first.
 # Each server listens on 5432 of its own address; the addresses are extra IPs of the Docker host
 # (netplan), not macvlan: Wi-Fi bridging drops frames from extra MAC addresses.
+# pg17-primary and pg17-replica also run sshd on port 2222 of their address (user keystone),
+# like VMs, for PG_HOST_SNAPSHOT; 22 stays the Docker host's own SSH.
 
 x-postgres: &postgres
   restart: unless-stopped
@@ -45,9 +47,16 @@ services:
 
   pg17-primary:
     <<: *postgres
-    image: postgres:17
+    build: ./ssh
+    image: keystone-lab/postgres-ssh:17
     container_name: pg17-primary
-    ports: ["${PG17_PRIMARY_IP}:5432:5432"]
+    ports: ["${PG17_PRIMARY_IP}:5432:5432", "${PG17_PRIMARY_IP}:2222:22"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYSTONE_MONITOR_PASSWORD: ${KEYSTONE_MONITOR_PASSWORD}
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
+      HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD}
+    entrypoint: ["/usr/local/bin/with-sshd.sh", "docker-entrypoint.sh"]
     command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=50",
               "-c", "wal_level=replica", "-c", "max_wal_senders=5"]
     volumes:
@@ -55,15 +64,17 @@ services:
       - pg17-primary:/var/lib/postgresql/data
 
   pg17-replica:
-    image: postgres:17
+    image: keystone-lab/postgres-ssh:17       # built by pg17-primary
+    pull_policy: never
     container_name: pg17-replica
     restart: unless-stopped
     depends_on: [pg17-primary]
-    ports: ["${PG17_REPLICA_IP}:5432:5432"]
+    ports: ["${PG17_REPLICA_IP}:5432:5432", "${PG17_REPLICA_IP}:2222:22"]
     environment:
       REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
+      HOST_SSH_PASSWORD: ${HOST_SSH_PASSWORD}
       PRIMARY_HOST: pg17-primary
-    entrypoint: ["/bin/bash", "/replica/start.sh"]
+    entrypoint: ["/usr/local/bin/with-sshd.sh", "/bin/bash", "/replica/start.sh"]
     volumes:
       - ./replica:/replica:ro
       - pg17-replica:/var/lib/postgresql/data
