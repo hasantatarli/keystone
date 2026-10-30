@@ -1,2 +1,4 @@
 # Keep text documentation line endings consistent across platforms.
 *.md text eol=lf
+# Shell scripts run inside Linux containers: always LF, also on Windows checkouts.
+*.sh text eol=lf
