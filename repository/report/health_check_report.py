@@ -47,6 +47,15 @@ TEXTS = {
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
         "verdict_healthy": "Değerlendirilen alanlarda sorun bulunmadı.",
         "verdict_none": "Hiçbir kontrol değerlendirilemedi; veri toplanamadı.",
+        "verdict_unassessed": "{n} kontrol yapılamadı.",
+        "unassessed_title": "Değerlendirilemeyen kontroller",
+        "unassessed_lead": "Bu kontroller yapılamadı; sistemde sorun olup olmadığı bilinmiyor.",
+        "unassessed_collect": "{targets}: {source} toplanamadı ({status})",
+        "unassessed_affects": "Etkilenen kontroller",
+        "unassessed_action": "Yapılması gereken",
+        "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
+        "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
+        "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "count_critical": "Kritik", "count_warning": "Uyarı",
@@ -163,6 +172,15 @@ TEXTS = {
         "verdict_warning": "There are problems that need attention.",
         "verdict_healthy": "No problems were found in the assessed areas.",
         "verdict_none": "No check could be evaluated; data could not be collected.",
+        "verdict_unassessed": "{n} check(s) could not be done.",
+        "unassessed_title": "Checks not assessed",
+        "unassessed_lead": "These checks could not be done; whether there is a problem is unknown.",
+        "unassessed_collect": "{targets}: {source} not collected ({status})",
+        "unassessed_affects": "Checks affected",
+        "unassessed_action": "What to do",
+        "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
+        "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
+        "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "count_critical": "Critical", "count_warning": "Warning",
@@ -798,6 +816,8 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .b-NOT_COLLECTED{background:var(--na-bg);color:var(--na)}
 .card{border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:6px;padding:12px 16px;margin:10px 0}
 .card.CRITICAL{border-left-color:var(--crit)}
+.card.unknown{border-left-color:var(--na)}
+.verdict .sub{font-size:14px;font-weight:400;margin-left:8px}
 .card h3{margin:0 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .card dl{margin:6px 0 0;display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:4px 12px}
 .card dt{color:var(--muted);font-size:13px;font-weight:600}
@@ -1099,6 +1119,57 @@ def render_main_problems(data, lang, t):
         else f'<p class="note">{e(t["no_problems"])}</p>')
 
 
+def unassessed_groups(data, lang, t):
+    """[(cause, action, [rule names])]: checks not assessed, grouped by their cause.
+
+    One collection failing (a node, a privilege) often stops many checks; it is listed once.
+    """
+    groups = {}
+    for r in data["results"]:
+        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED"):
+            continue
+        name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+        match = REASON_PATTERN.match(r.get("reason") or "")
+        failed = [c for c in data["collections"] if match and c["collector_key"] == match.group("source")
+                  and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")] if match else []
+        if failed:
+            status = failed[0]["status"]
+            targets = ", ".join(sorted({c["target_name"] for c in failed}))
+            cause = t["unassessed_collect"].format(
+                targets=targets, source=match.group("source"),
+                status=t["collection_status"].get(status, status).lower())
+            key = (targets, status)
+            action = t.get("action_" + status, t["action_other"])
+        else:
+            cause = explain_reason(r.get("reason"), data, t) or name
+            key = ("cause", cause)                 # the same missing source is one item
+            action = ""
+        group = groups.setdefault(key, {"cause": cause, "action": action, "rules": []})
+        group["rules"].append(name)
+    return list(groups.values())
+
+
+def render_unassessed(data, lang, t):
+    """Executive card for checks not done: draws attention without being a finding."""
+    groups = unassessed_groups(data, lang, t)
+    count = sum(len(g["rules"]) for g in groups)
+    if not count:
+        return ""
+    items = []
+    for g in groups:
+        affected = ", ".join(g["rules"])
+        item = f"<b>{e(g['cause'])}</b>"
+        if g["rules"] != [g["cause"]]:
+            item += f'<div class="facts">{e(t["unassessed_affects"])}: {e(affected)}</div>'
+        if g["action"]:
+            item += f'<div class="facts">{e(t["unassessed_action"])}: {e(g["action"])}</div>'
+        items.append(f"<li>{item}</li>")
+    return (f'<details class="card unknown"><summary><h3>{badge("unknown", t["topic_unknown"])}'
+            f'{e(t["unassessed_title"])}<span class="note">{count}</span></h3>'
+            f'<div class="lead">{e(t["unassessed_lead"])}</div></summary>'
+            f'<ul class="items">{"".join(items)}</ul></details>')
+
+
 def shorten(text, limit=140):
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
@@ -1120,11 +1191,14 @@ def render_executive(data, lang, t):
                         + (f" {e(t['more_errors'].format(n=len(errors) - 1))}" if len(errors) > 1 else "")
                         if errors else ""))
     return (f'<div class="part">{e(t["part_exec"])}</div>'
-            f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}</div>'
-            f'<p class="note">{coverage}</p><div class="tiles">'
+            f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}'
+            + (f' <span class="sub">{e(t["verdict_unassessed"].format(n=counts["not_assessed"]))}</span>'
+               if counts["not_assessed"] and verdict != "none" else "") + "</div>"
+            + f'<p class="note">{coverage}</p><div class="tiles">'
             + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
                       for n, label in tiles)
-            + "</div>" + render_main_problems(data, lang, t) + render_inventory(data, t)
+            + "</div>" + render_main_problems(data, lang, t) + render_unassessed(data, lang, t)
+            + render_inventory(data, t)
             + render_impact_chart(data, lang, t) + render_topics(data, lang, t))
 
 

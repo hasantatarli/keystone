@@ -159,6 +159,26 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Veri toplama: 19 / 26 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
+    def test_checks_not_assessed_get_attention_without_being_findings(self):
+        # Hasan 2026-10-30: unknown is worth attention, but it is not a problem found.
+        self.failing = {"PG_REPLICATION_SLOTS"}
+        page = self.render(self.run_check(), "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        card = executive[executive.index('<details class="card unknown">'):]
+        card = card[:card.index("</details>")]
+        self.assertIn("Değerlendirilemeyen kontroller", card)
+        # One cause listed once with every check it stopped, and what to do about it.
+        self.assertIn("cluster: PG_REPLICATION_SLOTS toplanamadı (bağlantı hatası)", card)
+        self.assertIn("Etkilenen kontroller: ", card)
+        self.assertIn("Yapılması gereken: Keystone&#x27;un bu sunuculara bağlanabildiğini", card)
+        self.assertEqual(card.count("PG_REPLICATION_SLOTS toplanamadı"), 1)
+        self.assertIn("Hiçbir kontrol değerlendirilemedi", executive)       # nothing assessed at all
+        # With some checks assessed, the verdict also says how many could not be done.
+        page = self.render(self.make_check(), "tr")
+        verdict = page[page.index('<div class="verdict'):page.index('<p class="note">')]
+        self.assertIn('<span class="sub">', verdict)
+        self.assertIn("kontrol yapılamadı.", verdict)
+
     def test_reasons_are_explained_in_plain_words(self):
         t = report.TEXTS["tr"]
         data = {"collections": [{"collector_key": "PG_ACTIVITY_SNAPSHOT",
