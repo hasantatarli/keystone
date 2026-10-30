@@ -458,6 +458,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         results = page[page.index("Kontrol sonuçları"):]
         self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+        # Same words as the rest of the report: the severity, not "attention".
+        self.assertIn('<span class="badge b-WARNING">Uyarı</span></td><td>1 bulgu', results)
+        self.assertNotIn(">Dikkat<", page)
 
     def test_topic_lists_a_rule_that_could_not_be_assessed(self):
         # A topic must not read "no problems" while one of its rules was not assessed.

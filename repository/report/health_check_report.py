@@ -64,7 +64,7 @@ TEXTS = {
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
-        "topic_ok": "Sorun bulunmadı", "topic_attention": "Dikkat", "topic_critical": "Kritik",
+        "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -180,7 +180,7 @@ TEXTS = {
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
-        "topic_ok": "No problems found", "topic_attention": "Attention", "topic_critical": "Critical",
+        "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -1376,8 +1376,13 @@ def render_results(data, lang, t):
                 note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
+            # A rule with findings shows their severity, the word used everywhere else in the report.
+            if r["outcome"] == "ATTENTION_REQUIRED" and r["max_severity"]:
+                status = badge(r["max_severity"], t["severity"].get(r["max_severity"], r["max_severity"]))
+            else:
+                status = badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"]))
             rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',
-                         badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"])), e(note)])
+                         status, e(note)])
     return f"<h2>{e(t['results'])}</h2>" + table(
         [t["area"], t["rule"], t["status"], ""], rows)
 
