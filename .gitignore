@@ -16,3 +16,6 @@ logs/
 
 # Generated health check reports (may contain customer data)
 reports/
+
+# lab passwords
+deploy/lab/.env

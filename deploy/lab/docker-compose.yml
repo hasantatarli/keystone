@@ -1,0 +1,74 @@
+# Multi-system lab for Keystone (DEVELOPMENT_STATUS, 2026-10-30).
+# Several PostgreSQL systems on one Docker host; Keystone connects as keystone_monitor (pg_monitor).
+# Passwords come from .env (not committed): copy .env.example to .env first.
+
+x-postgres: &postgres
+  restart: unless-stopped
+  environment:
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    KEYSTONE_MONITOR_PASSWORD: ${KEYSTONE_MONITOR_PASSWORD}
+    REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
+  # Small memory so five servers fit in a 3 GB VM.
+  command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=50"]
+  volumes:
+    - ./init:/docker-entrypoint-initdb.d:ro
+
+services:
+  pg15:
+    <<: *postgres
+    image: postgres:15
+    container_name: pg15-standalone
+    ports: ["5415:5432"]
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - pg15:/var/lib/postgresql/data
+
+  pg16:
+    <<: *postgres
+    image: postgres:16
+    container_name: pg16-standalone
+    ports: ["5416:5432"]
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - pg16:/var/lib/postgresql/data
+
+  pg18:
+    <<: *postgres
+    image: postgres:18
+    container_name: pg18-standalone
+    ports: ["5418:5432"]
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - pg18:/var/lib/postgresql               # PostgreSQL 18 images keep data in /var/lib/postgresql/18/docker
+
+  pg17-primary:
+    <<: *postgres
+    image: postgres:17
+    container_name: pg17-primary
+    ports: ["5417:5432"]
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=50",
+              "-c", "wal_level=replica", "-c", "max_wal_senders=5"]
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - pg17-primary:/var/lib/postgresql/data
+
+  pg17-replica:
+    image: postgres:17
+    container_name: pg17-replica
+    restart: unless-stopped
+    depends_on: [pg17-primary]
+    ports: ["5427:5432"]
+    environment:
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
+      PRIMARY_HOST: pg17-primary
+    entrypoint: ["/bin/bash", "/replica/start.sh"]
+    volumes:
+      - ./replica:/replica:ro
+      - pg17-replica:/var/lib/postgresql/data
+
+volumes:
+  pg15:
+  pg16:
+  pg18:
+  pg17-primary:
+  pg17-replica:
