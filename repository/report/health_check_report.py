@@ -50,7 +50,7 @@ TEXTS = {
         "verdict_unassessed": "{n} kontrol yapılamadı.",
         "unassessed_title": "Değerlendirilemeyen kontroller",
         "unassessed_lead": "Bu kontroller yapılamadı; sistemde sorun olup olmadığı bilinmiyor.",
-        "unassessed_collect": "{targets}: {source} toplanamadı ({status})",
+        "unassessed_collect": "{targets}: {source} toplanamadı{status}",
         "unassessed_affects": "Etkilenen kontroller",
         "unassessed_action": "Yapılması gereken",
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
@@ -159,8 +159,8 @@ TEXTS = {
                               "TIMEOUT": "Zaman aşımı", "STALE": "Yarıda kaldı",
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
         "days": "gün", "hours": "saat", "minutes": "dakika",
-        "reason_not_collected": "{source} bu kontrolde toplanamadı ({status}: {message}).",
-        "reason_not_collected_short": "{source} toplanamadı ({status}); ayrıntı teknik bölümde.",
+        "reason_not_collected": "{source} bu kontrolde toplanamadı ({detail}).",
+        "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
     },
@@ -175,7 +175,7 @@ TEXTS = {
         "verdict_unassessed": "{n} check(s) could not be done.",
         "unassessed_title": "Checks not assessed",
         "unassessed_lead": "These checks could not be done; whether there is a problem is unknown.",
-        "unassessed_collect": "{targets}: {source} not collected ({status})",
+        "unassessed_collect": "{targets}: {source} not collected{status}",
         "unassessed_affects": "Checks affected",
         "unassessed_action": "What to do",
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
@@ -283,8 +283,8 @@ TEXTS = {
                               "TIMEOUT": "Timed out", "STALE": "Interrupted",
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
         "days": "days", "hours": "hours", "minutes": "minutes",
-        "reason_not_collected": "{source} could not be collected in this check ({status}: {message}).",
-        "reason_not_collected_short": "{source} not collected ({status}); details in the technical part.",
+        "reason_not_collected": "{source} could not be collected in this check ({detail}).",
+        "reason_not_collected_short": "{source} not collected{status}; details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
     },
@@ -393,6 +393,7 @@ def load_report_data(conn, health_check_id):
     nodes = conn.execute(
         """
         SELECT t.target_id, t.name, ii.server_address, ii.server_port, ii.server_version,
+               tc.host AS connection_host, tc.port AS connection_port,
                ii.in_recovery, ii.postmaster_start_time,
                hs.hostname, hs.os_name, hs.os_version, hs.logical_cpu_count,
                hs.memory_total_bytes, hs.captured_at AS host_captured_at,
@@ -400,6 +401,11 @@ def load_report_data(conn, health_check_id):
         FROM keystone.target t
         LEFT JOIN postgresql.instance_inventory ii
             ON ii.target_id = t.target_id AND ii.last_collected_at BETWEEN %s AND %s
+        LEFT JOIN LATERAL (
+            SELECT c.host, c.port FROM keystone.target_connection c
+            WHERE c.target_id = t.target_id AND c.is_active AND c.connection_purpose <> 'HOST'
+            ORDER BY c.connection_id LIMIT 1
+        ) tc ON TRUE
         LEFT JOIN LATERAL (
             SELECT * FROM postgresql.host_snapshot h
             WHERE h.target_id = t.target_id AND h.captured_at BETWEEN %s AND %s
@@ -609,11 +615,11 @@ def explain_reason(reason, data, t, short=False):
     if failed:
         c = failed[0]
         if short:
-            return t["reason_not_collected_short"].format(
-                source=source, status=t["collection_status"].get(c["status"], c["status"]).lower())
-        return t["reason_not_collected"].format(
-            source=source, status=t["collection_status"].get(c["status"], c["status"]),
-            message=c["status_message"] or "-")
+            return t["reason_not_collected_short"].format(source=source, status=status_suffix(c["status"], t))
+        message = first_line(c["status_message"]) or "-"
+        detail = message if c["status"] == "NOT_COLLECTED" else (
+            f'{t["collection_status"].get(c["status"], c["status"])}: {message}')
+        return t["reason_not_collected"].format(source=source, detail=detail)
     if match.group("missing"):
         return t["reason_missing"].format(source=source)
     return t["reason_stale"].format(source=source, age=fmt_duration(float(match.group("age")), t),
@@ -925,6 +931,23 @@ def os_text(node):
     return text
 
 
+def or_unknown(value, t):
+    """A cell value, or a muted 'unknown' when it was not collected (no SSH, say)."""
+    if value in (None, ""):
+        return f'<span class="note">{e(t["inv_disk_unknown"])}</span>'
+    return e(value)
+
+
+def address_cell(node):
+    """The address Keystone connects to; the server's own (NAT, Docker, proxy) as a tooltip if different."""
+    registered = (f"{node['connection_host']}:{node['connection_port'] or 5432}"
+                  if node.get("connection_host") else "")
+    reported = f"{node['server_address']}:{node['server_port']}" if node.get("server_address") else ""
+    if registered and reported and registered != reported:
+        return f'<span title="{e(reported)}">{e(registered)}</span>'
+    return e(registered or reported)
+
+
 def version_cell(version):
     """'17.10' shown; the package build ('Ubuntu 17.10-1.pgdg24.04+1') only on hover."""
     if not version:
@@ -1018,9 +1041,9 @@ def render_inventory(data, t):
     shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
              or n in hosts]
     if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
-        rows = [[e(n["name"]), e(role_of(n, t)), e(os_text(n)),
-                 e(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else ""),
-                 e(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else ""),
+        rows = [[e(n["name"]), e(role_of(n, t)), or_unknown(os_text(n), t),
+                 or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else "", t),
+                 or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t),
                  disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
         parts.append(table([t["inv_servers"], t["inv_role"], t["os"], t["inv_cpu"], t["inv_memory"],
                             t["inv_data_disk"]], rows, numeric=(3, 4)))
@@ -1136,8 +1159,7 @@ def unassessed_groups(data, lang, t):
             status = failed[0]["status"]
             targets = ", ".join(sorted({c["target_name"] for c in failed}))
             cause = t["unassessed_collect"].format(
-                targets=targets, source=match.group("source"),
-                status=t["collection_status"].get(status, status).lower())
+                targets=targets, source=match.group("source"), status=status_suffix(status, t))
             key = (targets, status)
             action = t.get("action_" + status, t["action_other"])
         else:
@@ -1170,6 +1192,18 @@ def render_unassessed(data, lang, t):
             f'<ul class="items">{"".join(items)}</ul></details>')
 
 
+def first_line(text):
+    """First line of a collector error; PostgreSQL adds LINE/caret lines that belong in the details."""
+    return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+
+
+def status_suffix(status, t):
+    """' (failed)' after 'not collected'; nothing for NOT_COLLECTED, which would repeat the verb."""
+    if status == "NOT_COLLECTED":
+        return ""
+    return f' ({t["collection_status"].get(status, status).lower()})'
+
+
 def shorten(text, limit=140):
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
@@ -1184,7 +1218,7 @@ def render_executive(data, lang, t):
     collections = data["collections"]
     ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
     if collections and ok < len(collections):
-        errors = sorted({c["status_message"] for c in collections
+        errors = sorted({first_line(c["status_message"]) for c in collections
                          if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
         coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
                      + (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
@@ -1214,11 +1248,12 @@ def render_system(data, t):
                 continue
             role = "" if n["in_recovery"] is None else (
                 t["role_replica"] if n["in_recovery"] else t["role_primary"])
-            rows.append([e(n["name"]),
-                         e(f"{n['server_address']}:{n['server_port']}" if n["server_address"] else ""),
+            rows.append([e(n["name"]), address_cell(n),
                          e(role), version_cell(n["server_version"]),
                          e(fmt_uptime(n["postmaster_start_time"], data["as_of"], t)),
-                         e(os_text(n)), e(n["logical_cpu_count"]), e(fmt_bytes(n["memory_total_bytes"]))])
+                         or_unknown(os_text(n), t),
+                         or_unknown(n["logical_cpu_count"], t),
+                         or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t)])
         parts.append(f"<h3>{e(t['nodes'])}</h3>" + table(
             [t["node"], t["address"], t["role"], t["version"], t["up_since"], t["os"], t["cpu"],
              t["memory"]], rows, numeric=(6, 7)))

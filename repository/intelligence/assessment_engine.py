@@ -397,44 +397,26 @@ def load_latest_transaction_wraparound_snapshot(conn, target_id):
 
 
 def load_latest_replication_slot_snapshot(conn, target_id):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                snapshot_id,
-                target_id,
-                captured_at,
-                slot_name,
-                plugin,
-                slot_type,
-                database_name,
-                temporary,
-                active,
-                active_pid,
-                slot_xmin,
-                catalog_xmin,
-                restart_lsn,
-                confirmed_flush_lsn,
-                wal_status,
-                safe_wal_size,
-                two_phase,
-                conflicting,
-                invalidation_reason,
-                failover
-            FROM postgresql.replication_slot_snapshot
-            WHERE target_id = %s
-              AND captured_at =
-              (
-                  SELECT MAX(captured_at)
-                  FROM postgresql.replication_slot_snapshot
-                  WHERE target_id = %s
-              )
-            ORDER BY slot_name
-            """,
-            (target_id, target_id),
-        )
-
-        return cur.fetchall()
+    """Latest PG_REPLICATION_SLOTS: the SYSTEM row (slot count) and the slots captured with it."""
+    system = conn.execute(
+        """
+        SELECT 'SYSTEM' AS record_type, snapshot_id, target_id, captured_at, slot_count
+        FROM postgresql.replication_slot_status_snapshot
+        WHERE target_id = %s ORDER BY captured_at DESC LIMIT 1
+        """, (target_id,)).fetchone()
+    if system is None:
+        return []
+    slots = conn.execute(
+        """
+        SELECT 'SLOT' AS record_type, snapshot_id, target_id, captured_at, slot_name, plugin,
+               slot_type, database_name, temporary, active, active_pid, slot_xmin, catalog_xmin,
+               restart_lsn, confirmed_flush_lsn, wal_status, safe_wal_size, two_phase,
+               conflicting, invalidation_reason, failover
+        FROM postgresql.replication_slot_snapshot
+        WHERE target_id = %s AND captured_at = %s
+        ORDER BY slot_name
+        """, (target_id, system["captured_at"])).fetchall()
+    return [system] + slots
 
 
 def load_latest_connection_activity_snapshot(conn, target_id):
@@ -917,6 +899,11 @@ def evaluate_database_xid_wraparound(rows, rule, thresholds):
     return findings
 
 
+def slot_rows(rows):
+    """Slot rows of PG_REPLICATION_SLOTS; the SYSTEM row only proves the collection ran."""
+    return [r for r in rows if r.get("record_type", "SLOT") == "SLOT"]
+
+
 def evaluate_replication_slot_wal_retention_pressure(
     rows,
     rule,
@@ -925,7 +912,7 @@ def evaluate_replication_slot_wal_retention_pressure(
     """PG-REP-001: slots with wal_status extended; severity from the rule."""
     findings = []
 
-    for row in rows:
+    for row in slot_rows(rows):
         if row["wal_status"] != "extended":
             continue
 
@@ -957,7 +944,7 @@ def evaluate_replication_slot_wal_unavailable(
     """PG-REP-002: slots with wal_status unreserved/lost; severity from the rule."""
     findings = []
 
-    for row in rows:
+    for row in slot_rows(rows):
         if row["wal_status"] not in ("unreserved", "lost"):
             continue
 
@@ -1158,7 +1145,7 @@ def evaluate_replica_not_streaming(evidence, rule, thresholds):
 def evaluate_inactive_replication_slot(rows, rule, thresholds):
     """PG-REP-005: permanent slots nobody is using; they retain WAL and may hold xmin."""
     findings = []
-    for row in rows:
+    for row in slot_rows(rows):
         if row["active"] or row["temporary"]:
             continue
         findings.append(

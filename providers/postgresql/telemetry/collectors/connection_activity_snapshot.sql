@@ -10,6 +10,8 @@ Description
 -----------
 Collects cumulative PostgreSQL session statistics and current connection
 activity for capacity, pooling, and connection behavior analysis.
+Keystone's own sessions (application_name keystone) are left out: a sibling
+collector's session must not look like the customer's workload.
 ===============================================================================
 */
 
@@ -28,6 +30,7 @@ client_activity AS
     CROSS JOIN collection_context AS c
     WHERE a.backend_type = 'client backend'
       AND a.pid <> c.collector_pid
+      AND a.application_name IS DISTINCT FROM 'keystone'   -- Keystone's other collectors
 ),
 
 system_activity AS

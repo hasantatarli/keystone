@@ -11,6 +11,8 @@ Description
 Collects backend/session-level PostgreSQL activity evidence from
 pg_stat_activity for health assessment, transaction analysis, query analysis,
 wait analysis, and future performance engineering.
+Keystone's own sessions (application_name keystone) are left out: a sibling
+collector's session must not look like the customer's workload.
 ===============================================================================
 */
 
@@ -59,6 +61,7 @@ FROM pg_catalog.pg_stat_activity AS a
 CROSS JOIN collection_context AS c
 
 WHERE a.pid <> c.collector_pid
+  AND a.application_name IS DISTINCT FROM 'keystone'     -- Keystone's other collectors
 
 ORDER BY
     a.pid;

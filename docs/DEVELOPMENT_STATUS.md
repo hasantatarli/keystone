@@ -235,6 +235,13 @@ Small gaps noted: `collector_assignment` has no creation time / creator (needed 
 
 Multi-system lab (Hasan, 2026-10-30): everything so far was verified on one system (one Patroni cluster). Before real engagements, build more systems with Docker (or more VMs) and run the same work across them: a standalone server, a second cluster, PostgreSQL 15, 16 and 18 next to 17, a database with many objects. Questions to answer: several health checks at once (worker pool, per-target limits), targets with the same database or node names, version differences in collectors and the configuration recommendations, the customer overview (ADR-0016), report and repository size with many targets.
 
+Multi-system lab, first run (2026-10-30, `feat/multi-system-lab`): Docker host `pg-lab-docker` with PostgreSQL 15, 16 and 18 standalone and 17 primary + replica, one address per server. Every collector except one worked on every version with `keystone_monitor`. Found and fixed on the branch:
+- PG_REPLICATION_SLOTS read columns newer than PG 15 (`conflicting` 16+, `invalidation_reason` and `failover` 17+) and failed on 15 and 16. Version-specific columns are now read through `to_jsonb`, one script for every version.
+- A system without slots had no PG_REPLICATION_SLOTS evidence, so PG-REP-001/002/005 were not assessed. The collector always returns a SYSTEM row (PG019 `replication_slot_status_snapshot`); no slots is healthy.
+- PG-CONN-001 counted Keystone's own failed session: a sibling collector's connection is "idle in transaction (aborted)" for a moment before it closes. Target connections set `application_name = keystone`; the activity collectors leave those sessions out.
+- Report: collection errors show their first line (PostgreSQL's LINE/caret lines stay in Collected Data); no "not collected (not collected)"; missing OS/CPU/memory reads "Unknown"; the address is the registered connection address, the server's own (Docker, NAT, proxy) as a tooltip.
+Next on the branch: a NOT_APPLICABLE outcome for PG-REP-003/004 on a system without replicas (no registered replica and empty `pg_stat_replication`; slot rules, PG-REP-006 and PG-HA-001 stay), then SSH tests (sshd in the PG 17 containers; the Docker host as a negative test), then concurrent health checks.
+
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
 Hardening backlog:

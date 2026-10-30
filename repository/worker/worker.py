@@ -29,6 +29,10 @@ class TaskOwnershipLost(RuntimeError):
 MAX_RETRY_COUNT = 3
 
 # Probe an idle target socket after 60 s, every 10 s, 6 probes (Windows uses its own count).
+# Keystone's own sessions on a target carry this name; activity collectors leave them out
+# and the customer's DBA can recognise them in pg_stat_activity.
+KEYSTONE_APPLICATION_NAME = "keystone"
+
 TARGET_KEEPALIVE = {
     "keepalives": 1,
     "keepalives_idle": 60,
@@ -117,6 +121,7 @@ def connect_target(task, database_name=None):
         user=task["username"],
         password=password,
         connect_timeout=10,
+        application_name=KEYSTONE_APPLICATION_NAME,
         # A silently lost target fails in about 2-3 min instead of hanging forever;
         # short network blips are not noticed.
         **TARGET_KEEPALIVE,
@@ -1607,19 +1612,19 @@ def save_replication_status_snapshot(conn, task, rows):
             )
 
 def save_replication_slot_snapshot(conn, task, rows):
-    """Persist PG_REPLICATION_SLOTS rows."""
+    """Persist PG_REPLICATION_SLOTS: the SYSTEM row (slot count) and one row per slot."""
+    system = [r for r in rows if r["record_type"] == "SYSTEM"]
+    if len(system) != 1:
+        raise RuntimeError(f"PG_REPLICATION_SLOTS returned {len(system)} SYSTEM rows; expected 1.")
+    if len({r["captured_at"] for r in rows}) != 1:
+        raise RuntimeError("PG_REPLICATION_SLOTS rows contain multiple captured_at values.")
+    conn.execute(
+        "INSERT INTO postgresql.replication_slot_status_snapshot (target_id, captured_at, slot_count) "
+        "VALUES (%s, %s, %s)",
+        (task["target_id"], system[0]["captured_at"], system[0]["slot_count"]))
+    rows = [r for r in rows if r["record_type"] == "SLOT"]
     if not rows:
         return
-
-    captured_at_values = {
-        row["captured_at"]
-        for row in rows
-    }
-
-    if len(captured_at_values) != 1:
-        raise RuntimeError(
-            "PG_REPLICATION_SLOTS rows contain multiple captured_at values."
-        )
 
     sql = """
         INSERT INTO postgresql.replication_slot_snapshot
