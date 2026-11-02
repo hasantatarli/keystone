@@ -246,7 +246,9 @@ NOT_APPLICABLE outcome (V045, ADR-0014 addendum 2): PG-REP-003/004 on a system w
 
 SSH test (hc63, 2026-10-31): sshd in the PG 17 containers (port 2222, lab image `deploy/lab/ssh`); 21/21 collections, all 29 checks assessed, PG-CAP-001 healthy at 70 %. Found: plain `df` hid the data volume's own mount behind `/` (same device); the host collector now runs `df -a` and the report shows one row per device. Known limitation recorded: the executive inventory adds CPU, memory and disk over nodes, so containers on one host are counted twice. The negative test (SSH to the Docker host) was skipped: the volume lives on that host's root disk, so the numbers would be right and it teaches nothing new.
 
-Next on the branch: concurrent health checks.
+Concurrent health checks (hc65-68, 2026-11-02): pg15, pg16, pg18 and pg17 started at the same moment, each with its own worker pool; all COMPLETED in 16-17 s, collections exactly as in single runs (15/16 with host data not collected where there is no SSH, 21/21 on pg17), no cross-check mix-up.
+
+Multi-system lab done (`feat/multi-system-lab`). Open from it: the customer overview (ADR-0016), report and repository size with many targets, a database with many objects.
 
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
