@@ -729,6 +729,9 @@ def parse_host_snapshot_output(output):
 
         device, total, used, available, _, mount_point = parts
 
+        if not total.isdigit() or int(total) == 0:
+            continue                  # proc, sysfs, cgroup...: listed by df -a, no capacity
+
         rows.append(
             {
                 "record_type": "STORAGE",

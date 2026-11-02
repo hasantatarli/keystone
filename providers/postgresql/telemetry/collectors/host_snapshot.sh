@@ -13,6 +13,9 @@
 # Collects minimum Linux host evidence required for PostgreSQL health
 # assessment, including operating system identity, uptime, CPU, memory,
 # swap and persistent filesystem capacity.
+# df -a lists every mount: without it df keeps one mount per device, so the
+# data directory's own mount can be hidden behind "/" (bind mounts, containers).
+# Pseudo filesystems (size 0) are skipped by the parser.
 # =============================================================================
 
 echo "===HOSTNAME==="
@@ -31,4 +34,4 @@ echo "===MEMORY==="
 cat /proc/meminfo
 
 echo "===FILESYSTEMS==="
-df -B1 -P -x tmpfs -x devtmpfs
+df -a -B1 -P -x tmpfs -x devtmpfs

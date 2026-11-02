@@ -244,7 +244,9 @@ Second run (hc55-58): every collector succeeds except PG_HOST_SNAPSHOT (no SSH);
 
 NOT_APPLICABLE outcome (V045, ADR-0014 addendum 2): PG-REP-003/004 on a system with no replica connected and none known in recovery; slot rules, PG-REP-006 and PG-HA-001 stay. Not counted among the checks done; noted next to the totals.
 
-Next on the branch: SSH tests (sshd in the PG 17 containers; the Docker host as a negative test), then concurrent health checks.
+SSH test (hc63, 2026-10-31): sshd in the PG 17 containers (port 2222, lab image `deploy/lab/ssh`); 21/21 collections, all 29 checks assessed, PG-CAP-001 healthy at 70 %. Found: plain `df` hid the data volume's own mount behind `/` (same device); the host collector now runs `df -a` and the report shows one row per device. Known limitation recorded: the executive inventory adds CPU, memory and disk over nodes, so containers on one host are counted twice. The negative test (SSH to the Docker host) was skipped: the volume lives on that host's root disk, so the numbers would be right and it teaches nothing new.
+
+Next on the branch: concurrent health checks.
 
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 

@@ -433,7 +433,7 @@ def load_report_data(conn, health_check_id):
 
     storage = conn.execute(
         """
-        SELECT t.target_id, t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes,
+        SELECT t.target_id, t.name AS node_name, s.device, s.mount_point, s.used_bytes, s.total_bytes,
                s.available_bytes
         FROM keystone.target t
         JOIN LATERAL (
@@ -916,6 +916,21 @@ def data_disk(node, storage):
     return data_mount(node.get("data_directory"), mounts)
 
 
+def shown_mounts(storage, data_mounts):
+    """One row per node and device: the data mount if it is there, else the shortest mount point.
+
+    df -a also lists bind mounts of the same filesystem (/etc/hosts in a container, say).
+    """
+    chosen = {}
+    for s_ in storage:
+        key = (s_["target_id"], s_.get("device") or s_["mount_point"])
+        current = chosen.get(key)
+        if (current is None or id(s_) in data_mounts
+                or (id(current) not in data_mounts and len(s_["mount_point"]) < len(current["mount_point"]))):
+            chosen[key] = s_
+    return [s_ for s_ in storage if chosen.get((s_["target_id"], s_.get("device") or s_["mount_point"])) is s_]
+
+
 def disk_limits(data):
     """Meter colours follow the data disk rule's thresholds used in this check."""
     limits = dict(DEFAULT_DISK_LIMITS)
@@ -1288,7 +1303,7 @@ def render_system(data, t):
               e(fmt_bytes(s["used_bytes"])),
               e(fmt_bytes(s["total_bytes"])),
               e(t["percent"].format(n=disk_percent(s)) if s["total_bytes"] else "")]
-             for s in data["storage"]], numeric=(2, 3, 4)))
+             for s in shown_mounts(data["storage"], data_mounts)], numeric=(2, 3, 4)))
     parts.append(f"<h3>{e(t['databases'])}</h3>")
     if data["databases"]:
         parts.append(table(

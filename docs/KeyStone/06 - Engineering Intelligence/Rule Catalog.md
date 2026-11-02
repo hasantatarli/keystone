@@ -346,6 +346,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 - First rule on NODE-scoped evidence and first rule with two evidence sources. Loaders read the target itself if it is a NODE, otherwise its active NODE children. Evaluators of multi-source rules receive `{evidence_source: rows}`; single-source evaluators are unchanged.
 - The data disk is the mount with the longest mount point that contains `data_directory` as a whole directory (`/var/lib/pg` does not contain `/var/lib/pgsql`). The report inventory uses the same function, so the table and the rule always agree.
 - Other mounts (`/`, `/boot`, backup disks) are not judged by this rule.
+- The host collector runs `df -a`: plain `df` keeps one mount per device, so a data directory bind-mounted from the root filesystem (containers, lab 2026-10-31) was matched to `/` instead of its own mount. Pseudo filesystems (size 0) are skipped; the report shows one row per device (the data mount, else the shortest mount point).
 - Root-reserved blocks (ext4: 5 %) are not available to the postgres user, so they count as used. Lab 2026-10-20: used / size gave 77 % while `df` showed 82 % and PostgreSQL would fail at 100 % of the available space; used / (used + available) matches `df`.
 - Introduced 2026-10-20 because the report showed disk usage as an inventory remark while the Capacity summary said "no problems found". Judgements are rules; the inventory only displays.
 
@@ -354,6 +355,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 - Tablespaces outside `data_directory` and a separately mounted `pg_wal` are not evaluated.
 - Nodes without host evidence (no SSH connection) are skipped while other nodes are evaluated; the HEALTHY text then covers only the evaluated nodes. The report inventory shows such nodes as unknown. If no node has host evidence the rule ends INSUFFICIENT_EVIDENCE.
 - Freshness is checked on the newest row across nodes; a node whose host snapshot is older than the others is still evaluated on its latest data.
+- The executive inventory adds CPU, memory and data disk over the nodes. Nodes that share a machine or a disk (containers on one host, shared storage) are counted once per node; Keystone cannot tell from host evidence alone (lab 2026-10-31: two containers on one VM shown as 2 cores, 3.8 GB).
 - Usage percent only; growth rate and time-to-full need history (Capacity Forecasting, Phase 3).
 - Linux host evidence only.
 
