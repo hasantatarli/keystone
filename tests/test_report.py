@@ -156,7 +156,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 19 / 26 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 20 / 27 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):
@@ -584,6 +584,34 @@ class ReportTests(test_health_check.HealthCheckTests):
                                  "ORDER BY finding_id DESC LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "On node-2 shared_buffers (128MB) plus max_connections × work_mem "
                                "(100 × 100MB) is 10128MB, more than its memory (8GB).")
+
+    def test_checkpoint_collector_runs_on_this_version_and_feeds_max_wal_size(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/checkpoint_stats_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(sql).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNotNone(rows[0]["checkpoints_requested"])
+        worker.save_checkpoint_stats_snapshot(self.conn, {"target_id": self.system}, rows)
+        self.prepare_configuration_evidence()
+        # 54 of 120 checkpoints requested over a month: WAL fills up before checkpoint_timeout.
+        self.conn.execute("UPDATE postgresql.checkpoint_stats_snapshot SET checkpoints_timed = 66, "
+                          "checkpoints_requested = 54, stats_reset = captured_at - interval '30 days'")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
+        row = self.conn.execute(
+            "SELECT status, recommended_value, calculation FROM keystone.config_recommendation "
+            "WHERE setting_key = 'max_wal_size' ORDER BY config_recommendation_id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["status"], "DEVIATES")
+        self.assertEqual(row["calculation"]["method"], "checkpoint_evidence")
+        self.assertEqual(float(row["recommended_value"]), 2 * 1024 ** 3)       # 1GB default × 2
+        t = report.TEXTS["tr"]
+        text = report.calc_text({"calculation": row["calculation"], "value_type": "BYTE",
+                                 "recommended_value": row["recommended_value"]}, t, {})
+        self.assertEqual(text, "Son sıfırlamadan beri 120 checkpoint'ten 54 tanesi (%45) WAL dolduğu için "
+                               "yapıldı; mevcut değer 1GB × 2 = 2GB")
 
     def test_configuration_section_of_the_report(self):
         from repository.intelligence import assessment_engine as engine

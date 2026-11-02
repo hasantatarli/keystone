@@ -593,7 +593,7 @@ Daily. Recommendations are for the whole system and computed from the smallest n
 
 | | |
 | --- | --- |
-| Evidence | `PG_CONFIGURATION_SNAPSHOT` (86400 s), `PG_INSTANCE_INVENTORY` (3600 s), required; `PG_HOST_SNAPSHOT` optional (86400 s) |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT` (86400 s), `PG_INSTANCE_INVENTORY` (3600 s), required; `PG_HOST_SNAPSHOT`, `PG_CHECKPOINT_STATS` optional (86400 s) |
 | Condition | The primary's value outside the acceptable range of the recommendation for this server (18 settings, 17 on PostgreSQL 18) |
 | Severity | INFO: a recommendation, not a problem; stays out of the executive cards and tiles |
 | Subject | SETTING |
@@ -602,7 +602,7 @@ Daily. Recommendations are for the whole system and computed from the smallest n
 Values are compared in bytes, seconds, numbers or words; `pg_settings` units (8kB, kB, MB, ms, s, min) are converted first, -1 (disabled) is kept. Recommended values are written in PostgreSQL syntax (`2GB`, `15min`). Another node with a different value is noted on the setting, not judged on its own. Without host data the 10 settings that need memory, CPUs or the data disk are NOT_ASSESSED (`no_memory`, `no_cpus`, `no_disk`); with fewer CPUs than `parallel_min_cpus` the parallelism settings are NOT_APPLICABLE (`few_cpus`). The rule is INSUFFICIENT_EVIDENCE only when no setting could be assessed.
 
 **Known limitations**  
-`max_wal_size` from the workload only; checkpoint evidence (requested checkpoints) comes in step 3b.
+Checkpoint evidence (V050, PG_CHECKPOINT_STATS optional): with at least 20 checkpoints over at least a day since the statistics reset and more than 20 % of them requested, `max_wal_size` is recommended at twice its current value (still at most 10 % of the data disk) and the setting is outside its recommendation whatever the range says. Statistics since the last reset can cover a long, mixed period; the report states the counts and the reset.
 
 ## PG-CONF-007 — Memory Overcommitment
 

@@ -96,6 +96,7 @@ TEXTS = {
         "config_calc_min": "en az", "config_calc_max": "en fazla",
         "config_calc_cap": "veri diskinin %{share} sınırına indirildi",
         "config_not_assessed": "{n} ayar değerlendirilemedi",
+        "config_calc_checkpoints": "Son sıfırlamadan beri {total} checkpoint'ten {requested} tanesi (%{share}) WAL dolduğu için yapıldı; mevcut değer {current} × {factor} = {result}",
         "config_reason": {"no_host": "Sunucunun belleği, CPU sayısı ve diski bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_memory": "Sunucunun belleği bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_cpus": "CPU sayısı bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
@@ -259,6 +260,7 @@ TEXTS = {
         "config_calc_min": "at least", "config_calc_max": "at most",
         "config_calc_cap": "capped at {share}% of the data disk",
         "config_not_assessed": "{n} setting(s) not assessed",
+        "config_calc_checkpoints": "{requested} of {total} checkpoints since the statistics reset ({share}%) were requested because WAL filled up; current value {current} × {factor} = {result}",
         "config_reason": {"no_host": "The server's memory, CPUs and disk are unknown (no server data over SSH).",
                           "no_memory": "The server's memory is unknown (no server data over SSH).",
                           "no_cpus": "The number of CPUs is unknown (no server data over SSH).",
@@ -1760,6 +1762,14 @@ def calc_text(row, t, profile):
         if c.get("capped"):
             cap = t["config_calc_cap"].format(share=f"{c['disk_share'] * 100:g}")
             text += f"; {cap} ({pg(c['disk'])}) = {result}"
+        return text
+    if method == "checkpoint_evidence":
+        text = t["config_calc_checkpoints"].format(
+            total=c["total"], requested=c["requested"], share=f"{c['share'] * 100:.0f}",
+            current=pg(c["current"]), factor=f"{c['factor']:g}", result=result)
+        if c.get("capped"):
+            cap = t["config_calc_cap"].format(share=f"{c['disk_share'] * 100:g}")
+            text += f"; {cap} ({pg(c['disk'])})"
         return text
     if method == "share_of":
         return f"{c['of']} {pg(c['base'])} × {c['share']:g} = {result}"

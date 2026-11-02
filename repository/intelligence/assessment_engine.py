@@ -578,6 +578,17 @@ def load_latest_vacuum_analyze_snapshot(conn, target_id):
         """, (target_id, target_id)).fetchall()
 
 
+def load_latest_checkpoint_stats(conn, target_id):
+    """Latest PG_CHECKPOINT_STATS of the target (read on the primary)."""
+    return conn.execute(
+        """
+        SELECT snapshot_id, target_id, captured_at, in_recovery, checkpoints_timed,
+               checkpoints_requested, stats_reset
+        FROM postgresql.checkpoint_stats_snapshot
+        WHERE target_id = %s ORDER BY captured_at DESC LIMIT 1
+        """, (target_id,)).fetchall()
+
+
 def load_latest_host_snapshot(conn, target_id):
     """Latest PG_HOST_SNAPSHOT per node: a HOST row (CPUs, memory) and STORAGE rows (filesystems)."""
     hosts = conn.execute(
@@ -1898,6 +1909,7 @@ EVIDENCE_LOADERS = {
     "PG_SCHEMA_PRIVILEGES": load_latest_schema_privileges,
     "PG_ROLES": load_latest_roles,
     "PG_SEQUENCE_CAPACITY": load_latest_sequence_capacity,
+    "PG_CHECKPOINT_STATS": load_latest_checkpoint_stats,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All

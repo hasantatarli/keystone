@@ -123,6 +123,7 @@ def server_facts(evidence):
         "cpus": min((h["logical_cpu_count"] for h in with_cpus), default=None),
         "disk": min(disks.values(), default=None),
         "nodes_without_host": sorted(names[t] for t in settings if t not in hosts),
+        "checkpoints": next((c for c in evidence.get("PG_CHECKPOINT_STATS") or [] if not c["in_recovery"]), None),
     }
 
 
@@ -163,8 +164,10 @@ def recommend(dictionary, facts, profile):
             recommended, calculation = CALCULATIONS.get(key, fixed_value)(p, facts, dedicated, recommended_so_far)
             recommended_so_far[key] = recommended
             acceptable = acceptable_range(p, recommended)
+            # Evidence that the current value is too small outweighs the range around the recommendation.
+            deviates = calculation.get("evidence") or not fits(current, acceptable)
             result.update(recommended_value=recommended, acceptable=acceptable, calculation=calculation,
-                          status="FITS" if fits(current, acceptable) else "DEVIATES")
+                          status="DEVIATES" if deviates else "FITS")
         except NotAssessed as exc:
             result.update(status=exc.status, reason_code=exc.code)
         results.append(result)
@@ -206,9 +209,35 @@ def work_mem(p, facts, dedicated, so_far):
 def max_wal_size(p, facts, dedicated, _):
     if facts["disk"] is None:
         raise NotAssessed("no_disk")
-    value, cap = p("value"), facts["disk"] * p("max_disk_share")
+    cap = facts["disk"] * p("max_disk_share")
+    evidence = checkpoint_evidence(p, facts)
+    if evidence:
+        # Measured: WAL fills up between checkpoints, so more WAL than now, whatever the workload.
+        value = evidence["current"] * p("evidence_factor")
+        recommended = mb_floor(min(value, cap))
+        return recommended, {"method": "checkpoint_evidence", **evidence, "factor": p("evidence_factor"),
+                             "disk": facts["disk"], "disk_share": p("max_disk_share"), "capped": cap < value,
+                             "evidence": recommended > evidence["current"]}
+    value = p("value")
     return mb_floor(min(value, cap)), {"method": "max_wal_size", "value": value, "disk": facts["disk"],
                                        "disk_share": p("max_disk_share"), "capped": cap < value}
+
+
+def checkpoint_evidence(p, facts):
+    """{requested, total, share, current} when enough checkpoints say max_wal_size is too small, else None."""
+    c = facts.get("checkpoints")
+    current = canonical(facts["settings"].get(facts["primary_id"], {}).get("max_wal_size"), "BYTE")
+    if not c or current is None or c["stats_reset"] is None:
+        return None
+    total = c["checkpoints_timed"] + c["checkpoints_requested"]
+    age = (c["captured_at"] - c["stats_reset"]).total_seconds()
+    if total < p("min_checkpoints") or age < p("min_statistics_age"):
+        return None
+    share = c["checkpoints_requested"] / total
+    if share <= p("requested_share_limit"):
+        return None
+    return {"requested": c["checkpoints_requested"], "total": total, "share": round(share, 3),
+            "current": current, "since": c["stats_reset"].isoformat()}
 
 
 def min_wal_size(p, facts, dedicated, so_far):

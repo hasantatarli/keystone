@@ -95,7 +95,8 @@ class RecommendationTests(unittest.TestCase):
         cls.addClassCleanup(cls.conn.close)
         cls.dictionary = config_dictionary.load_config_dictionary(cls.conn, "PostgreSQL")
 
-    def facts(self, memory=16 * GB, cpus=4, disk=100 * GB, version=17, settings=None, replica=None):
+    def facts(self, memory=16 * GB, cpus=4, disk=100 * GB, version=17, settings=None, replica=None,
+              checkpoints=None):
         primary = dict(PG17_DEFAULTS)
         primary.update(settings or {})
         primary = {k: v for k, v in primary.items() if v is not None}
@@ -106,7 +107,7 @@ class RecommendationTests(unittest.TestCase):
             rows[2] = {k: {"setting_value": v, "unit": u} for k, (v, u) in {**primary, **replica}.items()}
         return {"primary_id": 1, "version": version, "names": {1: "node-1", 2: "node-2"},
                 "settings": rows, "memory": memory, "memory_node": 1, "cpus": cpus, "disk": disk,
-                "nodes_without_host": []}
+                "nodes_without_host": [], "checkpoints": checkpoints}
 
     def recommend(self, profile=None, **facts):
         results = rec.recommend(self.dictionary, self.facts(**facts), profile or server_profile({}))
@@ -189,6 +190,35 @@ class RecommendationTests(unittest.TestCase):
         self.assertIsNone(r["checkpoint_timeout"]["assumptions"])
         given = server_profile({"workload_type": "OLTP", "dedicated": True, "storage_type": "SSD"})
         self.assertIsNone(self.recommend(given)["random_page_cost"]["assumptions"])
+
+    def checkpoints(self, timed, requested, days=30):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        return {"in_recovery": False, "checkpoints_timed": timed, "checkpoints_requested": requested,
+                "stats_reset": now - timedelta(days=days), "captured_at": now}
+
+    def test_requested_checkpoints_raise_max_wal_size(self):
+        r = self.recommend(checkpoints=self.checkpoints(66, 54))["max_wal_size"]   # 45 % requested
+        self.assertEqual(r["status"], "DEVIATES")    # 1GB is within 0.5×2GB, but measured too small
+        self.assertEqual(r["recommended_value"], 2 * GB)
+        self.assertEqual(r["calculation"]["method"], "checkpoint_evidence")
+        self.assertEqual((r["calculation"]["requested"], r["calculation"]["total"]), (54, 120))
+        self.assertEqual(r["parameters_used"]["evidence_factor"], 2)
+
+    def test_checkpoint_evidence_needs_enough_checkpoints_time_and_share(self):
+        for cp in (self.checkpoints(108, 12),                 # 10 % requested
+                   self.checkpoints(5, 10),                   # 15 checkpoints only
+                   self.checkpoints(66, 54, days=0.1)):       # statistics too young
+            r = self.recommend(checkpoints=cp)["max_wal_size"]
+            self.assertEqual(r["calculation"]["method"], "max_wal_size", cp)
+            self.assertEqual(r["recommended_value"], 4 * GB)
+
+    def test_checkpoint_evidence_within_the_disk_limit(self):
+        # 10GB disk: 10 % is 1GB, no room above the current 1GB; nothing to change.
+        r = self.recommend(disk=10 * GB, checkpoints=self.checkpoints(66, 54))["max_wal_size"]
+        self.assertTrue(r["calculation"]["capped"])
+        self.assertFalse(r["calculation"]["evidence"])
+        self.assertEqual(r["status"], "FITS")
 
 
 if __name__ == "__main__":

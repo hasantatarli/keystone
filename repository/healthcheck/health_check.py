@@ -75,14 +75,17 @@ def load_assessments(conn, provider, assessment_key=None):
 
 
 def load_evidence_collectors(conn, assessment_keys):
-    """Collector keys required by enabled rules of the given assessments."""
+    """Collector keys the enabled rules of the given assessments read, required or not.
+
+    Optional evidence is collected too: a rule works without it, but uses it when it is there.
+    """
     rows = conn.execute(
         """
         SELECT DISTINCT rer.evidence_source
         FROM keystone.rule_evidence_requirement rer
         JOIN keystone.rule_definition rd ON rd.rule_id = rer.rule_id
         JOIN keystone.assessment_definition ad ON ad.assessment_id = rd.assessment_id
-        WHERE ad.assessment_key = ANY(%s) AND rd.is_enabled AND rer.is_required
+        WHERE ad.assessment_key = ANY(%s) AND rd.is_enabled
         ORDER BY rer.evidence_source
         """,
         (assessment_keys,),
