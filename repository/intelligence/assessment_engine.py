@@ -1934,7 +1934,7 @@ def evaluate_configuration_recommendations(evidence, rule, thresholds):
                 "recommended": recommended,
                 "acceptable": config_rec.acceptable_text(r["acceptable"], value_type),
             },
-            "observed_value": None if isinstance(r["current_value"], str) else r["current_value"],
+            "observed_value": None,          # the sentence already says it, in PostgreSQL units
             "observed_unit": None,
             "subject_type": "SETTING",
             "subject_identifier": r["setting_key"],
