@@ -24,6 +24,7 @@ import re
 from repository.common.logging_config import configure_logging, get_logger
 from repository.intelligence.assessment_engine import (
     CLOCK_SKEW_TOLERANCE_SECONDS, data_mount, usage_percent)
+from repository.intelligence import config_recommendations as config_rec
 from repository.worker import worker
 
 
@@ -73,6 +74,35 @@ TEXTS = {
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
+        "config_title": "Konfigürasyon önerileri",
+        "config_parts": {"DEVIATES": "{n} ayar önerilenden farklı", "NOT_ASSESSED": "{n} ayar değerlendirilemedi",
+                         "FITS": "{n} ayar uygun", "NOT_APPLICABLE": "{n} ayar uygulanmaz"},
+        "config_line": "{n} ayar bu sunucu için önerilen değerlerden farklı; ayrıntı teknik bölümde.",
+        "config_line_na": "{n} ayar sunucu bilgisi (SSH) olmadığı için değerlendirilemedi.",
+        "config_settings": "Konfigürasyon önerileri ({n} ayar)",
+        "config_inputs": "Hesap en küçük sunucuya göre yapıldı: {node} ({facts}).",
+        "config_cols": ["Ayar", "Şu an", "Önerilen", "Kabul edilebilir", "Neden"],
+        "config_off": "kapalı", "config_cpus": "{n} CPU", "config_disk": "veri diski {v}",
+        "config_restart": "↻ restart gerektirir",
+        "config_assumed": "{field} girilmedi, {value} varsayıldı",
+        "config_fields": {"storage_type": "disk tipi", "dedicated": "PostgreSQL'e ayrılmış olup olmadığı",
+                          "workload_type": "iş yükü"},
+        "config_differs": "{node} sunucusunda farklı: {value}",
+        "config_commands": "Komutlar",
+        "config_commands_note": "Keystone bu komutları yalnızca yazar, çalıştırmaz. Bakım penceresinde, değişikliği onaylayarak uygulayın.",
+        "config_patroni": "Patroni kullanılıyorsa",
+        "config_restart_list": "Restart sonrası etkin olur: {names}",
+        "config_connections": "bağlantı",
+        "config_calc_min": "en az", "config_calc_max": "en fazla",
+        "config_calc_cap": "veri diskinin %{share} sınırına indirildi",
+        "config_not_assessed": "{n} ayar değerlendirilemedi",
+        "config_reason": {"no_host": "Sunucunun belleği, CPU sayısı ve diski bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+                          "no_memory": "Sunucunun belleği bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+                          "no_cpus": "CPU sayısı bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+                          "no_disk": "Veri diskinin boyutu bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+                          "few_cpus": "4'ten az CPU var; paralellik ayarları varsayılanda kalır.",
+                          "setting_not_collected": "Ayar bu kontrolde toplanamadı.",
+                          "no_recommendation": "Bu sürüm için öneri yok."},
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
         "topic_na": "Uygulanmaz", "advice_word": "öneri",
@@ -207,6 +237,35 @@ TEXTS = {
         "impact_title": "Affected areas",
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
+        "config_title": "Configuration recommendations",
+        "config_parts": {"DEVIATES": "{n} setting(s) differ from the recommendation",
+                         "NOT_ASSESSED": "{n} not assessed", "FITS": "{n} fit", "NOT_APPLICABLE": "{n} not applicable"},
+        "config_line": "{n} setting(s) differ from the values recommended for this server; details in the technical part.",
+        "config_line_na": "{n} setting(s) could not be assessed without server data (SSH).",
+        "config_settings": "Configuration recommendations ({n} settings)",
+        "config_inputs": "Calculated for the smallest server: {node} ({facts}).",
+        "config_cols": ["Setting", "Current", "Recommended", "Acceptable", "Why"],
+        "config_off": "off", "config_cpus": "{n} CPU(s)", "config_disk": "data disk {v}",
+        "config_restart": "↻ needs a restart",
+        "config_assumed": "{field} not given, {value} assumed",
+        "config_fields": {"storage_type": "storage type", "dedicated": "whether the server is dedicated",
+                          "workload_type": "workload"},
+        "config_differs": "different on {node}: {value}",
+        "config_commands": "Commands",
+        "config_commands_note": "Keystone only writes these commands and never runs them. Apply them in a maintenance window after review.",
+        "config_patroni": "With Patroni",
+        "config_restart_list": "Take effect after a restart: {names}",
+        "config_connections": "connections",
+        "config_calc_min": "at least", "config_calc_max": "at most",
+        "config_calc_cap": "capped at {share}% of the data disk",
+        "config_not_assessed": "{n} setting(s) not assessed",
+        "config_reason": {"no_host": "The server's memory, CPUs and disk are unknown (no server data over SSH).",
+                          "no_memory": "The server's memory is unknown (no server data over SSH).",
+                          "no_cpus": "The number of CPUs is unknown (no server data over SSH).",
+                          "no_disk": "The data disk size is unknown (no server data over SSH).",
+                          "few_cpus": "Fewer than 4 CPUs; parallelism settings stay at their defaults.",
+                          "setting_not_collected": "The setting was not collected in this check.",
+                          "no_recommendation": "No recommendation for this version."},
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
         "topic_na": "Not applicable", "advice_word": "recommendation(s)",
@@ -482,6 +541,18 @@ def load_report_data(conn, health_check_id):
         """, (since, as_of, check["target_id"], check["target_id"])).fetchall()
 
     dictionary = load_dictionary_texts(conn)
+    config = conn.execute(
+        """
+        SELECT cr.* FROM keystone.config_recommendation cr
+        JOIN keystone.assessment_result res USING (assessment_result_id)
+        JOIN keystone.assessment_run ar USING (assessment_run_id)
+        WHERE ar.health_check_id = %s
+        ORDER BY cr.config_recommendation_id
+        """, (health_check_id,)).fetchall()
+    config_reasons = {}
+    for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
+                          "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
+        config_reasons.setdefault(r["setting_key"], {})[r["language_code"]] = r["text"]
     conn.commit()
 
     collected = {(c["target_id"], c["collector_key"]) for c in collections
@@ -494,7 +565,8 @@ def load_report_data(conn, health_check_id):
 
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
-            "databases": databases, "wal_status": wal_status, "as_of": finished, **dictionary}
+            "databases": databases, "wal_status": wal_status, "as_of": finished,
+            "config": config, "config_reasons": config_reasons, **dictionary}
 
 
 NODE_CONTEXT = {
@@ -763,6 +835,9 @@ def topic_summary(data):
             topic["status"] = "unknown"
         elif any(o != "HEALTHY" for o in outcomes):
             topic["status"] = "partial"          # never "no problems" while a rule was not assessed
+        elif (any(r["rule_key"] == CONFIG_RULE for r in topic["results"])
+              and config_counts(data)["NOT_ASSESSED"]):
+            topic["status"] = "partial"          # settings the recommendations could not cover
     order = lambda key: data["topics"].get(key, {}).get("order", 999)   # noqa: E731
     return sorted(topics.items(), key=lambda item: order(item[0]))
 
@@ -834,6 +909,7 @@ background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exa
 .rules li.r-unknown::before{background:var(--na)}
 .rules li.r-info::before{background:var(--accent)}
 .rules li.r-na{color:var(--muted)}
+.cmd{background:var(--soft);border-radius:4px;padding:8px 10px;margin:6px 0;font:12px/1.5 Consolas,monospace;white-space:pre-wrap;word-break:break-word}
 .rules li.r-na::before{background:none;border:1.5px solid var(--na);box-sizing:border-box}
 details.card>summary,details.section>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
@@ -1126,6 +1202,20 @@ def render_impact_chart(data, lang, t):
     return f"<h2>{e(t['impact_title'])}</h2><div class=\"impact\">{''.join(rows)}</div>" + note
 
 
+def config_topic_item(data, t):
+    """One line for the configuration recommendations: how many differ, how many could not be assessed."""
+    counts = config_counts(data)
+    texts = []
+    if counts["DEVIATES"]:
+        texts.append(t["config_line"].format(n=counts["DEVIATES"]))
+    if counts["NOT_ASSESSED"]:
+        texts.append(t["config_line_na"].format(n=counts["NOT_ASSESSED"]))
+    if not texts:
+        return ("ok", e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE"))))
+    cls = "info" if counts["DEVIATES"] else "unknown"
+    return (cls, f"<b>{e(t['config_title'])}</b>: " + e(" · ".join(texts)))
+
+
 def render_topics(data, lang, t):
     """Per topic one item per rule: problems first, then rules not assessed, then what was fine."""
     order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2,
@@ -1138,6 +1228,9 @@ def render_topics(data, lang, t):
         items = []
         for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
             rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
+            if r["rule_key"] == CONFIG_RULE and data.get("config"):
+                items.append(config_topic_item(data, t))
+                continue
             # (bullet colour, text): severity shows in the bullet and in words, texts stay aligned.
             if advisory(r):
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
@@ -1226,8 +1319,20 @@ def unassessed_groups(data, lang, t):
             cause = explain_reason(r.get("reason"), data, t) or name
             key = ("cause", cause)                 # the same missing source is one item
             action = ""
-        group = groups.setdefault(key, {"cause": cause, "action": action, "rules": []})
+        group = groups.setdefault(key, {"cause": cause, "action": action, "rules": [],
+                                        "source": match.group("source") if failed else None})
         group["rules"].append(name)
+    # Settings the configuration recommendations could not cover for lack of server data.
+    host_settings = sum(1 for r in data.get("config") or []
+                        if r["status"] == "NOT_ASSESSED" and r["reason_code"] in HOST_REASONS)
+    if host_settings:
+        label = t["config_settings"].format(n=host_settings)
+        host_group = next((g for g in groups.values() if g.get("source") == "PG_HOST_SNAPSHOT"), None)
+        if host_group is None:
+            host_group = groups.setdefault(("config", "host"), {
+                "cause": t["config_reason"]["no_memory"], "action": t["action_NOT_COLLECTED"],
+                "rules": [], "source": "PG_HOST_SNAPSHOT"})
+        host_group["rules"].append(label)
     return list(groups.values())
 
 
@@ -1527,6 +1632,8 @@ def parameter_line(result, t):
 def render_findings_detail(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
+        if result["rule_key"] == CONFIG_RULE and data.get("config"):
+            continue                         # shown as the configuration table instead
         # Worst first, then the largest measured value.
         findings = sorted(findings, key=lambda f: (SEVERITY_ORDER.get(f["severity"], 9),
                                                    -float(f["observed_value"] or 0)))
@@ -1587,10 +1694,175 @@ def render_collections(data, t):
          for c in data["collections"]]) + "</details>")
 
 
+# ---------------------------------------------------------------- configuration (ADR-0017)
+
+HOST_REASONS = ("no_memory", "no_cpus", "no_disk")
+CONFIG_RULE = "PG-CONF-003"
+
+
+def config_counts(data):
+    counts = {"FITS": 0, "DEVIATES": 0, "NOT_ASSESSED": 0, "NOT_APPLICABLE": 0}
+    for r in data.get("config") or []:
+        counts[r["status"]] += 1
+    return counts
+
+
+def config_summary(counts, t, statuses=("DEVIATES", "NOT_ASSESSED", "FITS", "NOT_APPLICABLE")):
+    """'11 settings differ · 3 fit · 4 not applicable'; statuses with no setting are left out."""
+    return " · ".join(t["config_parts"][s].format(n=counts[s]) for s in statuses if counts[s])
+
+
+def config_number(text):
+    if text is None:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def config_value(text, value_type, t):
+    """A stored value as the report shows it: PostgreSQL syntax, 'off' for -1."""
+    value = config_number(text)
+    if value is None:
+        return ""
+    if not isinstance(value, str) and value < 0:
+        return t["config_off"]
+    if not isinstance(value, str):
+        value = config_rec.round_for(value, value_type)
+    return config_rec.pg_value(value, value_type)
+
+
+def calc_text(row, t, profile):
+    """The calculation in one line, from the stored values: '1945MB × ½ × %25 = 486MB'."""
+    c = row.get("calculation") or {}
+    vt = row["value_type"]
+    pg = lambda v: config_rec.pg_value(config_rec.round_for(float(v), "BYTE"), "BYTE")   # noqa: E731
+    result = config_value(row["recommended_value"], vt, t)
+    method = c.get("method")
+    half = " × ½" if c.get("dedicated_share", 1) == 0.5 else (
+        f" × {c['dedicated_share']:g}" if c.get("dedicated_share", 1) != 1 else "")
+    limits = ""
+    rec = config_number(row["recommended_value"])
+    if c.get("min") is not None and rec == c["min"]:
+        limits = f" ({t['config_calc_min']} {config_value(str(c['min']), vt, t)})"
+    elif c.get("max") is not None and rec == c["max"]:
+        limits = f" ({t['config_calc_max']} {config_value(str(c['max']), vt, t)})"
+    if method == "memory_share":
+        share = t["percent"].format(n=f"{c['share'] * 100:g}")
+        return f"{pg(c['memory'])}{half} × {share} = {result}{limits}"
+    if method == "work_mem":
+        return (f"({pg(c['memory'])}{half} − shared_buffers {pg(c['shared_buffers'])}) / "
+                f"({c['max_connections']:g} {t['config_connections']} × {c['factor']:g}) = {result}{limits}")
+    if method == "max_wal_size":
+        workload = t["profile_values"].get(profile.get("workload_type", {}).get("value"), "")
+        text = f"{t['profile_workload_type']} {workload}: {pg(c['value'])}"
+        if c.get("capped"):
+            cap = t["config_calc_cap"].format(share=f"{c['disk_share'] * 100:g}")
+            text += f"; {cap} ({pg(c['disk'])}) = {result}"
+        return text
+    if method == "share_of":
+        return f"{c['of']} {pg(c['base'])} × {c['share']:g} = {result}"
+    if method == "cpu_share":
+        return f"{t['config_cpus'].format(n=c['cpus'])} × {c['share']:g} = {result}{limits}"
+    return ""
+
+
+def config_inputs(data, t):
+    """'Calculated for the smallest server: node (1 CPU, 1.9 GB, data disk 11.2 GB).'"""
+    nodes = [n for n in data["nodes"] if n.get("memory_total_bytes")]
+    if not nodes:
+        return ""
+    smallest = min(nodes, key=lambda n: n["memory_total_bytes"])
+    facts = [t["config_cpus"].format(n=min(n["logical_cpu_count"] for n in nodes if n.get("logical_cpu_count")))
+             if any(n.get("logical_cpu_count") for n in nodes) else "",
+             fmt_bytes(smallest["memory_total_bytes"])]
+    disks = [d for n in data["nodes"] if (d := data_disk(n, data["storage"]))]
+    if disks:
+        facts.append(t["config_disk"].format(v=fmt_bytes(min(d["total_bytes"] for d in disks))))
+    return t["config_inputs"].format(node=smallest["name"], facts=", ".join(f for f in facts if f))
+
+
+def config_why(row, data, lang, t, profile):
+    reasons = data["config_reasons"].get(row["setting_key"], {})
+    parts = [reasons.get(lang) or reasons.get(FALLBACK_LANGUAGE, "")]
+    if row["status"] in ("NOT_ASSESSED", "NOT_APPLICABLE"):
+        return e(t["config_reason"].get(row["reason_code"], row["reason_code"] or ""))
+    calc = calc_text(row, t, profile)
+    html_ = e(parts[0])
+    if calc:
+        html_ += f'<div class="facts">{e(calc)}</div>'
+    for field in row.get("assumptions") or []:
+        value = t["profile_values"].get(profile.get(field, {}).get("value"), "")
+        html_ += f'<div class="facts"><i>{e(t["config_assumed"].format(field=t["config_fields"][field], value=value))}</i></div>'
+    for d in row.get("node_differences") or []:
+        html_ += f'<div class="facts">{e(t["config_differs"].format(node=d["node"], value=d["value"]))}</div>'
+    return html_
+
+
+def config_row(row, data, lang, t, profile):
+    vt = row["value_type"]
+    name = e(row["setting_key"]) + (" ↻" if row.get("restart_required") else "")
+    acceptable = config_rec.acceptable_text(row["acceptable"], vt) if row.get("acceptable") else ""
+    return [name, e(config_value(row["current_value"], vt, t)),
+            e(config_value(row["recommended_value"], vt, t)) if row["recommended_value"] else "—",
+            e(acceptable) or "—", config_why(row, data, lang, t, profile)]
+
+
+def config_commands(rows, t):
+    changes = [(r["setting_key"], config_value(r["recommended_value"], r["value_type"], t), r.get("restart_required"))
+               for r in rows if r["status"] == "DEVIATES" and r["recommended_value"]]
+    if not changes:
+        return ""
+    sql_ = "\n".join(f"ALTER SYSTEM SET {k} = '{v}';" for k, v, _ in changes) + "\nSELECT pg_reload_conf();"
+    patroni = "patronictl edit-config \\\n" + " \\\n".join(f"  --pg {k}={v}" for k, v, _ in changes)
+    restart = [k for k, _, needs in changes if needs]
+    note = (f'<p class="note">{e(t["config_restart_list"].format(names=", ".join(restart)))}</p>'
+            if restart else "")
+    return (f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"
+            f'<div class="cmd">{e(sql_)}</div>'
+            f"<div class=\"facts\">{e(t['config_patroni'])}:</div><div class=\"cmd\">{e(patroni)}</div>" + note)
+
+
+def render_config(data, lang, t):
+    rows = data.get("config") or []
+    if not rows:
+        return ""
+    profile = data["check"].get("target_profile") or {}
+    counts = config_counts(data)
+    action = [r for r in rows if r["status"] == "DEVIATES"]
+    missing = [r for r in rows if r["status"] == "NOT_ASSESSED"]
+    fine = [r for r in rows if r["status"] in ("FITS", "NOT_APPLICABLE")]
+    summary = config_summary(counts, t)
+    inputs = config_inputs(data, t)
+    parts = [f'<details class="section"><summary><h2>{e(t["config_title"])}'
+             f'<span class="note">{e(summary)}</span></h2></summary>']
+    parts.append(f'<p class="note">{e(inputs)}</p>' if inputs else "")
+    if action:
+        parts.append(table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in action]))
+        if any(r.get("restart_required") for r in action):
+            parts.append(f'<p class="note">{e(t["config_restart"])}</p>')
+    # Settings without a recommendation: one line per cause, not a table row each.
+    by_reason = {}
+    for r in missing:
+        code = "no_host" if r["reason_code"] in HOST_REASONS else r["reason_code"]
+        by_reason.setdefault(code, []).append(r["setting_key"])
+    for code, names in by_reason.items():
+        parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
+                     f'{e(", ".join(names))}<span class="facts"> — '
+                     f'{e(t["config_reason"].get(code, code or ""))}</span></p>')
+    parts.append(config_commands(rows, t))
+    if fine:
+        parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'
+                     + table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in fine])
+                     + "</details>")
+    return "".join(parts) + "</details>"
+
+
 def render_technical(data, lang, t):
     return (f'<div class="part part-tech">{e(t["part_tech"])}</div>'
             + render_system(data, t) + render_findings_detail(data, lang, t)
-            + render_results(data, lang, t) + render_collections(data, t)
+            + render_config(data, lang, t) + render_results(data, lang, t) + render_collections(data, t)
             + f"<h2>{e(t['method'])}</h2><p>{e(t['method_text'])}</p>")
 
 

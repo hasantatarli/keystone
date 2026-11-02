@@ -522,9 +522,9 @@ class ReportTests(test_health_check.HealthCheckTests):
                                  "LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
 
-    def test_configuration_tuning_on_real_settings(self):
+    def prepare_configuration_evidence(self):
+        """Real settings of the test server on two nodes: 16 GB / 4 CPUs and 8 GB / 2 CPUs."""
         from psycopg.rows import dict_row
-        from repository.intelligence import assessment_engine as engine
         from repository.worker import worker
         sql = Path("providers/postgresql/telemetry/collectors/configuration_snapshot.sql").read_text()
         version = self.conn.execute("SHOW server_version").fetchone()["server_version"]
@@ -543,6 +543,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.add_host(self.node1, 4, 16, [("/", 30, 100)])
         self.add_host(self.node2, 2, 8, [("/", 30, 100)])        # the smallest node decides
         self.conn.commit()
+
+    def test_configuration_tuning_on_real_settings(self):
+        from repository.intelligence import assessment_engine as engine
+        version = self.conn.execute("SHOW server_version").fetchone()["server_version"]
+        self.prepare_configuration_evidence()
 
         engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
         outcomes = self.latest_outcomes()
@@ -579,6 +584,58 @@ class ReportTests(test_health_check.HealthCheckTests):
                                  "ORDER BY finding_id DESC LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "On node-2 shared_buffers (128MB) plus max_connections × work_mem "
                                "(100 × 100MB) is 10128MB, more than its memory (8GB).")
+
+    def test_configuration_section_of_the_report(self):
+        from repository.intelligence import assessment_engine as engine
+        self.conn.execute("UPDATE keystone.target SET workload_type = NULL, dedicated = NULL, "
+                          "storage_type = NULL WHERE target_id = %s", (self.system,))
+        check_id = self.make_check()
+        self.prepare_configuration_evidence()
+        old = self.conn.execute(
+            "SELECT ar.assessment_run_id FROM keystone.assessment_run ar JOIN keystone.assessment_definition "
+            "ad USING (assessment_id) WHERE ar.health_check_id = %s AND ad.assessment_key = "
+            "'PG_CONFIGURATION_TUNING'", (check_id,)).fetchone()["assessment_run_id"]
+        for table_ in ("keystone.finding", "keystone.assessment_result", "keystone.assessment_run"):
+            self.conn.execute(f"DELETE FROM {table_} WHERE assessment_run_id = %s", (old,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system, health_check_id=check_id)
+
+        page = self.render(check_id, "tr")
+        executive, technical = page[:page.index(TECH_PANEL)], page[page.index(TECH_PANEL):]
+        self.assertIn("<b>Konfigürasyon önerileri</b>: ", executive)
+        self.assertIn("ayar bu sunucu için önerilen değerlerden farklı; ayrıntı teknik bölümde.", executive)
+        self.assertNotIn("PG-CONF-003</span></h3>", page)             # the table replaces the card
+        self.assertIn("<h2>Konfigürasyon önerileri<span class=\"note\">", technical)
+        self.assertIn("Hesap en küçük sunucuya göre yapıldı: node-2 (2 CPU, 8.0 GB, veri diski 100.0 GB).",
+                      technical)
+        self.assertIn("<td>shared_buffers ↻</td><td>128MB</td><td>2GB</td><td>1228MB – 3276MB</td>", technical)
+        self.assertIn("8GB × %25 = 2GB", technical)
+        self.assertIn("<i>disk tipi girilmedi, SSD varsayıldı</i>", technical)
+        self.assertIn("<td>log_min_duration_statement</td><td>kapalı</td><td>1s</td>", technical)
+        self.assertIn("ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
+        self.assertIn("--pg random_page_cost=1.1", technical)
+        self.assertIn("Restart sonrası etkin olur: shared_buffers", technical)
+        self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
+
+        # Without server data the settings that need it are said, in the card of the missing data.
+        self.conn.execute("DELETE FROM postgresql.host_snapshot")
+        self.conn.execute("DELETE FROM postgresql.storage_snapshot")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system, health_check_id=check_id)
+        self.conn.execute("DELETE FROM keystone.config_recommendation WHERE assessment_result_id IN ("
+                          "SELECT assessment_result_id FROM keystone.assessment_result WHERE "
+                          "assessment_run_id IN (SELECT assessment_run_id FROM keystone.assessment_run "
+                          "WHERE health_check_id = %s AND assessment_run_id < (SELECT max(assessment_run_id) "
+                          "FROM keystone.assessment_run)))", (check_id,))
+        self.conn.commit()
+        data = report.load_report_data(self.conn, check_id)
+        technical = report.render_html(data, "tr")
+        technical = technical[technical.index(TECH_PANEL):]
+        self.assertIn("<p><b>10 ayar değerlendirilemedi</b>: shared_buffers, effective_cache_size", technical)
+        self.assertNotIn("<td>shared_buffers ↻</td>", technical)       # no table row per missing setting
+        groups = report.unassessed_groups(data, "tr", report.TEXTS["tr"])
+        self.assertIn("Konfigürasyon önerileri (10 ayar)", [name for g in groups for name in g["rules"]])
+        self.assertEqual(dict(report.topic_summary(data))["CONFIGURATION"]["status"], "partial")
 
     def test_recommendations_stay_out_of_the_executive_part(self):
         check_id = self.make_check()

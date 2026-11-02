@@ -22,6 +22,15 @@ NEEDS = {"shared_buffers": "memory", "effective_cache_size": "memory", "work_mem
          "max_parallel_workers_per_gather": "cpus", "max_parallel_maintenance_workers": "cpus"}
 
 
+# Profile fields a recommendation depends on; an assumed one is said next to it.
+PROFILE_DEPENDS = {
+    "shared_buffers": ("dedicated",), "effective_cache_size": ("dedicated",),
+    "work_mem": ("dedicated", "workload_type"), "maintenance_work_mem": ("dedicated",),
+    "max_wal_size": ("workload_type",), "min_wal_size": ("workload_type",),
+    "random_page_cost": ("storage_type",), "effective_io_concurrency": ("storage_type",),
+}
+
+
 class NotAssessed(Exception):
     """A setting cannot be recommended for this server; code names why (report texts)."""
 
@@ -140,10 +149,14 @@ def recommend(dictionary, facts, profile):
             return value
 
         current = canonical(primary.get(key), value_type)
+        assumed = [f for f in PROFILE_DEPENDS.get(key, ()) if profile[f].get("assumed")]
         result = {"setting_key": key, "group_key": setting["group_key"], "value_type": value_type,
                   "current_value": current, "recommended_value": None, "acceptable": None,
                   "calculation": None, "reason_code": None, "parameters_used": used,
-                  "node_differences": node_differences(facts, key, value_type)}
+                  "node_differences": node_differences(facts, key, value_type),
+                  "restart_required": (primary.get(key) or {}).get("context") == "postmaster"
+                  if primary.get(key) else None,
+                  "assumptions": assumed or None}
         try:
             if current is None:
                 raise NotAssessed("setting_not_collected")

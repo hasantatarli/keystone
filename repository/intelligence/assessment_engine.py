@@ -295,13 +295,16 @@ def insert_config_recommendations(conn, assessment_result_id, results):
         cur.executemany(
             "INSERT INTO keystone.config_recommendation (assessment_result_id, setting_key, group_key, "
             "value_type, status, current_value, recommended_value, acceptable, calculation, reason_code, "
-            "parameters_used, node_differences) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "parameters_used, node_differences, restart_required, assumptions) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [(assessment_result_id, r["setting_key"], r["group_key"], r["value_type"], r["status"],
               text(r["current_value"]), text(r["recommended_value"]),
               Jsonb(r["acceptable"]) if r["acceptable"] else None,
               Jsonb(r["calculation"]) if r["calculation"] else None, r["reason_code"],
               Jsonb(r["parameters_used"]) if r["parameters_used"] else None,
-              Jsonb(r["node_differences"]) if r["node_differences"] else None) for r in results])
+              Jsonb(r["node_differences"]) if r["node_differences"] else None,
+              r.get("restart_required"), Jsonb(r["assumptions"]) if r.get("assumptions") else None)
+             for r in results])
 
 
 def load_parameters(conn, rule_id):
@@ -616,7 +619,7 @@ def load_latest_configuration_snapshot(conn, target_id):
     return conn.execute(
         """
         SELECT c.target_id, t.name AS node_name, c.captured_at,
-               c.setting_name, c.setting_value, c.unit, c.source, c.pending_restart
+               c.setting_name, c.setting_value, c.unit, c.source, c.pending_restart, c.context
         FROM keystone.target t
         JOIN LATERAL (
             SELECT max(captured_at) AS captured_at FROM postgresql.configuration_snapshot
