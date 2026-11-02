@@ -284,6 +284,20 @@ Offset must stay smaller than the interval (default 30 s).
 SELECT * FROM keystone.schedule_consistency_warning WHERE target_id = 1;
 ```
 
+### Server profile (ADR-0017)
+
+Facts Keystone cannot collect, on the target the health check runs on (the SYSTEM, or a NODE without one). NULL means not given: OLTP, dedicated and SSD are assumed, and the report says so.
+
+```sql
+UPDATE keystone.target
+SET workload_type = 'OLTP',      -- OLTP | OLAP | MIXED
+    dedicated     = true,        -- the server runs only PostgreSQL
+    storage_type  = 'SSD'        -- SSD | HDD
+WHERE target_id = 6;
+```
+
+Each health check keeps the profile it used (`health_check.target_profile`).
+
 ---
 
 ## 10. Checking what happened
