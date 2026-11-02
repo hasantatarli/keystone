@@ -47,10 +47,11 @@ Sources combined:
 | --- | --- | --- | --- | --- | --- |
 | **PG-CONF-001** | Pending restart | A setting was changed but needs a restart (`pending_restart`) — WARNING | Ready: PG-002 | DB parameters | Done |
 | **PG-CONF-002** | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING (may be a conscious choice) | Ready: PG-002 | DB parameters | Done |
-| PG-CONF-003 | Settings far from the recommendation for this server | Current value far outside the recommended range computed from the server's facts (memory, CPUs, storage, connections, workload); first: memory settings. Recommendations are shown for every covered setting, findings only for large deviations | Ready: PG-002 + host memory/CPU · Gap: storage type, workload type | Memory setting | P1 |
+| **PG-CONF-003** | Settings far from the recommendation for this server | Current value far outside the recommended range computed from the server's facts (memory, CPUs, storage, connections, workload); first: memory settings. Recommendations are shown for every covered setting, findings only for large deviations | Ready: PG-002 + host memory/CPU · Gap: storage type, workload type | Memory setting | Done (V047, V048, INFO; ADR-0017) |
 | **PG-CONF-004** | Autovacuum disabled | `autovacuum = off` — CRITICAL; per-table `autovacuum_enabled = false` on large tables — WARNING | Ready (global): PG-002 · Gap (per table): reloptions in PG-005 | Vacuum & Statistics | Done |
-| PG-CONF-005 | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later | Ready: PG-002 | pg_stat_statements extension | P2 |
+| PG-CONF-005 | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later. `log_min_duration_statement` is already judged by PG-CONF-003; do not judge it twice | Ready: PG-002 | pg_stat_statements extension | P2 |
 | PG-CONF-006 | No safety timeouts | `idle_in_transaction_session_timeout = 0` while PG-TRAN-001 findings exist — recommendation, not a stand-alone finding | Ready: PG-002 | — | P3 |
+| **PG-CONF-007** | Memory overcommitment | `shared_buffers + max_connections × work_mem` above a node's physical memory — CRITICAL (OOM killer) | Ready: PG-002 + host memory | Memory setting | Done (V048) |
 
 ## 2. Sessions & Connections
 
@@ -189,7 +190,7 @@ A health check shows performance indicators; it does not replace a Performance I
 | Checks | 29 | 1 | 22 | 10 |
 | of which evidence ready | 29 | 1 | 9 | 5 |
 
-Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
@@ -211,7 +212,7 @@ Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the 
 | Table Size, Index Size | Context |
 | Vacuum & Statistics | PG-MAINT-001/002/003, PG-CONF-004 |
 | Extensions | Context; PG-LIFE-004 |
-| Memory setting | PG-CONF-003 |
+| Memory setting | PG-CONF-003, PG-CONF-007 |
 | pg_stat_statements extension | PG-PERF-001, PG-CONF-005 |
 | Users & Roles Info | PG-SEC-001/002 |
 | schema Info | Context |

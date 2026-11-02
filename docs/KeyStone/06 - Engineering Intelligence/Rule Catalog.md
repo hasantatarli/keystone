@@ -585,6 +585,42 @@ Unit tests for the column-type limit, boundaries, descending, cycling, unused an
 
 ---
 
+# PG_CONFIGURATION_TUNING — Configuration Tuning (V048, ADR-0017)
+
+Daily. Recommendations are for the whole system and computed from the smallest node (memory, CPUs, data disk) with the check's server profile; the numbers are in the configuration Dictionary (V047), the logic in `repository/intelligence/config_recommendations.py`. Every result is stored in `keystone.config_recommendation` (status, current, recommended, acceptable range, calculation, Dictionary numbers used); the inputs are not copied.
+
+## PG-CONF-003 — Setting Outside Recommendation
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT` (86400 s), `PG_INSTANCE_INVENTORY` (3600 s), required; `PG_HOST_SNAPSHOT` optional (86400 s) |
+| Condition | The primary's value outside the acceptable range of the recommendation for this server (18 settings, 17 on PostgreSQL 18) |
+| Severity | INFO: a recommendation, not a problem; stays out of the executive cards and tiles |
+| Subject | SETTING |
+
+**Design notes**  
+Values are compared in bytes, seconds, numbers or words; `pg_settings` units (8kB, kB, MB, ms, s, min) are converted first, -1 (disabled) is kept. Recommended values are written in PostgreSQL syntax (`2GB`, `15min`). Another node with a different value is noted on the setting, not judged on its own. Without host data the 10 settings that need memory, CPUs or the data disk are NOT_ASSESSED (`no_memory`, `no_cpus`, `no_disk`); with fewer CPUs than `parallel_min_cpus` the parallelism settings are NOT_APPLICABLE (`few_cpus`). The rule is INSUFFICIENT_EVIDENCE only when no setting could be assessed.
+
+**Known limitations**  
+`max_wal_size` from the workload only; checkpoint evidence (requested checkpoints) comes in step 3b.
+
+## PG-CONF-007 — Memory Overcommitment
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT`, `PG_HOST_SNAPSHOT`, required (86400 s) |
+| Condition | On a node, `shared_buffers + max_connections × work_mem` above its physical memory |
+| Severity | CRITICAL (OOM killer restarts the whole database) |
+| Subject | NODE |
+
+**Design notes**  
+Physical memory, not the non-dedicated share. The formula is pessimistic (not every connection uses `work_mem` at once) but a query can use it several times. Each node is judged with its own settings and memory; nodes without host data are skipped.
+
+**Verification (PG-CONF-003/007)**  
+Calculation tests on the installed Dictionary (`tests/test_config_recommendations.py`); repository test runs the real configuration collector, two nodes of 16 GB / 4 CPUs and 8 GB / 2 CPUs, and a 100 MB `work_mem` on the smaller one for CRITICAL. Lab: pending.
+
+---
+
 # PG_MAINTENANCE_HEALTH — Maintenance Health (V039)
 
 Both rules read the latest `PG_VACUUM_ANALYZE` snapshot per database (one row per table, freshness 86400 s) and produce one finding per table. Severity: ratio ≥ WARNING / CRITICAL threshold; below the ratio but count ≥ the large-table parameter → WARNING; below the minimum count the table is not judged. Ratios are judged unrounded and shown rounded. The report shows the worst 10 findings per rule and the rest under "show all".
