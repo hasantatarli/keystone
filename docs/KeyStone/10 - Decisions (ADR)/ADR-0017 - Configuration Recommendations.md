@@ -30,18 +30,38 @@ The fields are optional. Keystone keeps "not given" apart from a chosen value: w
 - Settings that must not be lower on a standby than on the primary (`max_connections`, `max_worker_processes`, `max_prepared_transactions`, `max_locks_per_transaction`, `max_wal_senders`) are recommended once for all nodes.
 - Node-specific values (for example a larger `work_mem` on a reporting replica) are out of scope for the first version.
 
-### Settings covered (first version, 20)
+### Which settings: only general best practice (Hasan, 2026-11-02)
 
-| Group | Settings | Based on |
-| --- | --- | --- |
-| Memory | `shared_buffers`, `effective_cache_size`, `work_mem`, `maintenance_work_mem`, `huge_pages` | memory, connections, workload, dedicated |
-| WAL / checkpoint | `max_wal_size`, `min_wal_size`, `checkpoint_completion_target`, `checkpoint_timeout`, `wal_buffers` | workload, write volume |
-| Storage | `random_page_cost`, `effective_io_concurrency` | storage type |
-| Parallelism | `max_worker_processes`, `max_parallel_workers`, `max_parallel_workers_per_gather`, `max_parallel_maintenance_workers` | CPUs, workload |
-| Autovacuum | `autovacuum_max_workers`, `autovacuum_vacuum_cost_limit` | CPUs, number and size of tables |
-| Observability | `log_min_duration_statement`, `track_io_timing` | fixed good practice |
+Keystone recommends a value only where the PostgreSQL documentation recommends one or the practice is widely accepted (for example PGTune's calculations, `random_page_cost` 1.1 on SSD). Where the guidance is "keep the default and tune to your needs", the value would be Keystone's own experience presented as best practice; such settings are left out. They belong to the later intelligence layer, which can examine the system and ask the user (see "Later: intelligence layer").
 
-Sources: the PostgreSQL documentation and widely used rules (the logic of PGTune, EDB and Crunchy Data guidance). Every recommendation shows its reason and calculation, for example "shared_buffers: 25 % of memory; 16 GB × 0.25 = 4 GB".
+### Settings covered (first version, 18)
+
+C = CPUs and M = memory of the smallest node; M is halved when the server is not dedicated (`non_dedicated_memory_share` 0.5). Ranges are multiples of the recommended value (`range_low`/`range_high`) or plain values (`accept_min`/`accept_max`).
+
+| Group | Setting | Recommended | Acceptable | Source |
+| --- | --- | --- | --- | --- |
+| Memory | `shared_buffers` | 25 % of M, at least 128 MB | 0.6–1.6× (15–40 %) | documentation |
+| | `effective_cache_size` | 75 % of M | 0.67–1.2× | documentation |
+| | `work_mem` | (M − shared_buffers) / (max_connections × k); k OLTP 4, mixed 2, OLAP 1; at least 4 MB, at most 64 MB / 256 MB / 1 GB | 0.25–4× | PGTune |
+| | `maintenance_work_mem` | M / 16, 64 MB – 2 GB | 0.5–2× | PGTune |
+| | `huge_pages` | `try` | `try`, `on` | documentation |
+| WAL / checkpoint | `max_wal_size` | OLTP 4 GB, mixed 8 GB, OLAP 16 GB; at most 10 % of the data disk | 0.5–4× | PGTune |
+| | `min_wal_size` | `max_wal_size` / 4 | 0.25–4× | PGTune |
+| | `checkpoint_completion_target` | 0.9 | 0.8–0.95 | documentation (default since 14) |
+| | `checkpoint_timeout` | 15 min | 10–30 min | widely used |
+| | `wal_buffers` | 16 MB | 0.5–4× | documentation (automatic value) |
+| Storage | `random_page_cost` | SSD 1.1, HDD 4.0 | SSD 1.0–2.0, HDD 2.0–4.0 | widely used |
+| | `effective_io_concurrency` (15–17) | SSD 200, HDD 2 | 0.5–2× | widely used |
+| Parallelism (only with C ≥ 4) | `max_worker_processes` | at least 8 and C | lower bound only (extensions and replication use it) | PGTune |
+| | `max_parallel_workers` | C | 0.5–2× | PGTune |
+| | `max_parallel_workers_per_gather` | C / 2 rounded up, at most 4 | 0.5–2× | PGTune |
+| | `max_parallel_maintenance_workers` | C / 2 rounded up, at most 4 | 0.5–2× | PGTune |
+| Observability | `log_min_duration_statement` | 1 s | 250 ms – 10 s | widely used |
+| | `track_io_timing` | `on` (after `pg_test_timing`) | `on` | widely used |
+
+`max_connections` is an input (the application's need), not a recommendation. Left out under the criterion above: `autovacuum_max_workers` and `autovacuum_vacuum_cost_limit` (no agreed numbers; autovacuum is judged by its results in PG-MAINT-001/002 and the wraparound rules), and the version-specific settings first planned (`vacuum_buffer_usage_limit`, `io_combine_limit`, `io_method`, `io_workers`, `autovacuum_worker_slots`). PostgreSQL 18 changed `effective_io_concurrency` (default 16 with asynchronous I/O) and no recommendation exists for it, so it is recommended on 15–17 only.
+
+Every recommendation shows its reason and calculation, for example "shared_buffers: 25 % of memory; 16 GB × 0.25 = 4 GB".
 
 Without host evidence (no SSH) memory and CPU are unknown: those settings are not assessed and the report says why.
 
@@ -63,7 +83,7 @@ Logic in code, numbers in the Dictionary, as for rules:
 
 - **Code:** one calculation function per setting (for example `work_mem` from memory left after `shared_buffers`, connections and a factor; less memory when the server is not dedicated), unit-tested directly. No formula language (the rule DSL stays rejected).
 - **Dictionary (new table, filled by migrations):** the tunable numbers per setting and workload type: factors, acceptable range bounds, lower and upper limits (for example `maintenance_work_mem` at most 2 GB). Tuning for a customer or sector changes data, not code.
-- **Per health check:** every recommendation is stored with the setting, current value, recommended value, range, reason and the inputs used (memory, CPUs, workload, whether a default was assumed). Reports are built from it and stay correct after the Dictionary changes, like `thresholds_used`.
+- **Per health check:** the result of every recommendation is stored: setting, current value, recommended value, acceptable range, status and the Dictionary numbers used. The inputs (memory, CPUs, settings, profile) are not copied: they are already in the collected snapshots and the check's `target_profile`. The same raw data gives different results under different Dictionary numbers, so the result is what the customer was told and stays correct after the Dictionary changes, like `thresholds_used` (Hasan, 2026-11-02).
 
 ### Report layout (to be reviewed on the first real report)
 
@@ -74,19 +94,21 @@ Logic in code, numbers in the Dictionary, as for rules:
 
 Recommendations follow the server's PostgreSQL version, not a fixed list: every setting in the Dictionary has the version range it exists in (first version, and a last version for removed or renamed settings), and the numbers can differ per version. A setting the server's version does not have is never recommended; settings a version adds are recommended for that version. The version is read from the primary; mixed versions across nodes are their own finding (PG-HA-004).
 
-The first version covers PostgreSQL 15–18 with, besides the 20 settings above:
+The first version covers PostgreSQL 15–18; the only version-bound setting is `effective_io_concurrency` (15–17).
 
-| From | Settings |
-| --- | --- |
-| 16 | `vacuum_buffer_usage_limit` |
-| 17 | `io_combine_limit` |
-| 18 | `io_method`, `io_workers`, `autovacuum_worker_slots`; `effective_io_concurrency` calculated for 18's asynchronous I/O |
+### Recomputed on every check, runnable on its own (Hasan, 2026-11-02)
+
+Servers change: memory grows, CPUs and disks change. Recommendations are never fixed: every health check computes them from that check's facts. Configuration tuning is its own assessment (`PG_CONFIGURATION_TUNING`), so it can be run alone with `health_check --assessment PG_CONFIGURATION_TUNING`, and on a schedule like the other assessments. Because each check's facts are kept, the report says when the hardware changed since the previous check ("memory 8 GB → 16 GB; recommendations recalculated").
+
+### Later: intelligence layer
+
+The configuration collector keeps every `pg_settings` row (about 350, with defaults and sources), not only the 18 above, together with host facts, the profile and Keystone's results. A later intelligence layer can work on this data: explain the results, and suggest values for settings Keystone does not check, asking the user where experience rather than best practice decides.
 
 ## Implementation order
 
 1. Server profile on the target (workload type, dedicated, storage type; "not given" kept apart). Done 2026-11-02 (V046): `workload_type`, `dedicated`, `storage_type` on `keystone.target`, NULL for not given; each health check stores the profile it used with the assumed fields marked (`health_check.target_profile`); the technical report shows it. Reading `rotational` over SSH moves to step 3 with the calculations.
-2. Dictionary table of settings: version range, factors and ranges per workload, limits.
-3. Calculation functions with unit tests; recommendations stored per health check; the memory commitment rule (CRITICAL).
+2. Dictionary table of settings: version range, factors and ranges per workload, limits. Done 2026-11-02 (V047): `config_setting` (group, value type, version range, order), `config_setting_text` (reason per language), `config_parameter` (numbers; the most specific row by workload, storage type and version wins).
+3. Calculation functions with unit tests; results stored per health check; the memory commitment rule (CRITICAL); checkpoint evidence (`pg_stat_bgwriter` / `pg_stat_checkpointer`: requested checkpoints above 20 % → `max_wal_size` doubled, WARNING); storage type over SSH as a note; hardware change since the previous check.
 4. Report: executive card and area line, technical inputs, table, commands, other non-default settings.
 
 Each step is its own pull request and is reviewed in the lab.

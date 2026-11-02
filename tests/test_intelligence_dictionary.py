@@ -273,6 +273,17 @@ EXPECTED_RULES = {
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
 
 
+# ADR-0017: the settings Keystone recommends, in report order.
+EXPECTED_CONFIG_SETTINGS = [
+    "shared_buffers", "effective_cache_size", "work_mem", "maintenance_work_mem", "huge_pages",
+    "max_wal_size", "min_wal_size", "checkpoint_completion_target", "checkpoint_timeout", "wal_buffers",
+    "random_page_cost", "effective_io_concurrency",
+    "max_worker_processes", "max_parallel_workers", "max_parallel_workers_per_gather",
+    "max_parallel_maintenance_workers",
+    "log_min_duration_statement", "track_io_timing",
+]
+
+
 class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
     """Install once into an empty database, then inspect the Dictionary."""
 
@@ -491,6 +502,58 @@ class IntelligenceDictionaryCleanInstallTests(unittest.TestCase):
             """
         )
         self.assertEqual(missing, [])
+
+    # ------------------------------------------------- configuration (ADR-0017)
+
+    def config(self):
+        from repository.intelligence import config_dictionary
+        return config_dictionary.load_config_dictionary(self.conn, "PostgreSQL")
+
+    def test_configuration_settings_are_the_agreed_eighteen(self):
+        self.assertEqual(list(self.config()["settings"]), EXPECTED_CONFIG_SETTINGS)
+
+    def test_every_configuration_setting_has_a_reason_in_every_language(self):
+        texts = self.config()["texts"]
+        languages = {r[0] for r in self.query("SELECT language_code FROM keystone.dictionary_language")}
+        for setting in EXPECTED_CONFIG_SETTINGS:
+            self.assertEqual(set(texts.get(setting, {})), languages, setting)
+            for language in languages:
+                self.assertTrue(texts[setting][language].get("REASON"), (setting, language))
+
+    def test_every_configuration_setting_has_a_value_and_a_range_for_every_profile(self):
+        from repository.intelligence.config_dictionary import parameter, settings_for_version
+        config = self.config()
+        calculated = {"memory_share", "connection_factor", "max_wal_size_share", "cpu_share"}
+        for version in (15, 16, 17, 18):
+            for setting in settings_for_version(config, version):
+                key = setting["setting_key"]
+                for workload in ("OLTP", "MIXED", "OLAP"):
+                    for storage in ("SSD", "HDD"):
+                        found = {k for k in {"value", "accept_values", "range_low", "range_high",
+                                             "accept_min", "accept_max"} | calculated
+                                 if parameter(config, key, k, workload, storage, version) is not None}
+                        where = (key, workload, storage, version)
+                        self.assertTrue(found & ({"value"} | calculated), where)       # how to recommend
+                        self.assertTrue(found & {"range_low", "accept_min", "accept_values"}, where)
+                        if "accept_min" in found:
+                            self.assertIn("accept_max", found, where)
+
+    def test_effective_io_concurrency_is_not_recommended_on_18(self):
+        from repository.intelligence.config_dictionary import settings_for_version
+        keys = lambda v: [s["setting_key"] for s in settings_for_version(self.config(), v)]  # noqa: E731
+        self.assertIn("effective_io_concurrency", keys(17))
+        self.assertNotIn("effective_io_concurrency", keys(18))
+        self.assertEqual(len(keys(18)), 17)
+
+    def test_most_specific_configuration_number_wins(self):
+        from repository.intelligence.config_dictionary import parameter
+        config = self.config()
+        self.assertEqual(parameter(config, "work_mem", "max", "OLAP", "SSD", 17), 1073741824)
+        self.assertEqual(parameter(config, "work_mem", "min", "OLAP", "SSD", 17), 4194304)   # every workload
+        self.assertEqual(parameter(config, "random_page_cost", "value", "OLTP", "HDD", 16), 4.0)
+        self.assertEqual(parameter(config, "huge_pages", "accept_values", "OLTP", "SSD", 15), "try,on")
+        self.assertEqual(parameter(config, None, "non_dedicated_memory_share", "OLTP", "SSD", 18), 0.5)
+        self.assertIsNone(parameter(config, "work_mem", "accept_min", "OLTP", "SSD", 17))
 
 
 class DevelopmentRepositoryUpgradeTests(unittest.TestCase):
