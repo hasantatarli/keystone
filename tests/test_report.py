@@ -629,6 +629,10 @@ class ReportTests(test_health_check.HealthCheckTests):
                           "FROM keystone.assessment_run)))", (check_id,))
         self.conn.commit()
         data = report.load_report_data(self.conn, check_id)
+        technical = report.render_html(data, "tr")
+        technical = technical[technical.index(TECH_PANEL):]
+        self.assertIn("<p><b>10 ayar değerlendirilemedi</b>: shared_buffers, effective_cache_size", technical)
+        self.assertNotIn("<td>shared_buffers ↻</td>", technical)       # no table row per missing setting
         groups = report.unassessed_groups(data, "tr", report.TEXTS["tr"])
         self.assertIn("Konfigürasyon önerileri (10 ayar)", [name for g in groups for name in g["rules"]])
         self.assertEqual(dict(report.topic_summary(data))["CONFIGURATION"]["status"], "partial")

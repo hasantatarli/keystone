@@ -94,8 +94,10 @@ TEXTS = {
         "config_restart_list": "Restart sonrası etkin olur: {names}",
         "config_connections": "bağlantı",
         "config_calc_min": "en az", "config_calc_max": "en fazla",
-        "config_calc_cap": "veri diskinin %{share} ile sınırlandı",
-        "config_reason": {"no_memory": "Sunucunun belleği bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+        "config_calc_cap": "veri diskinin %{share} sınırına indirildi",
+        "config_not_assessed": "{n} ayar değerlendirilemedi",
+        "config_reason": {"no_host": "Sunucunun belleği, CPU sayısı ve diski bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
+                          "no_memory": "Sunucunun belleği bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_cpus": "CPU sayısı bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_disk": "Veri diskinin boyutu bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "few_cpus": "4'ten az CPU var; paralellik ayarları varsayılanda kalır.",
@@ -256,7 +258,9 @@ TEXTS = {
         "config_connections": "connections",
         "config_calc_min": "at least", "config_calc_max": "at most",
         "config_calc_cap": "capped at {share}% of the data disk",
-        "config_reason": {"no_memory": "The server's memory is unknown (no server data over SSH).",
+        "config_not_assessed": "{n} setting(s) not assessed",
+        "config_reason": {"no_host": "The server's memory, CPUs and disk are unknown (no server data over SSH).",
+                          "no_memory": "The server's memory is unknown (no server data over SSH).",
                           "no_cpus": "The number of CPUs is unknown (no server data over SSH).",
                           "no_disk": "The data disk size is unknown (no server data over SSH).",
                           "few_cpus": "Fewer than 4 CPUs; parallelism settings stay at their defaults.",
@@ -1826,7 +1830,8 @@ def render_config(data, lang, t):
         return ""
     profile = data["check"].get("target_profile") or {}
     counts = config_counts(data)
-    action = [r for r in rows if r["status"] in ("DEVIATES", "NOT_ASSESSED")]
+    action = [r for r in rows if r["status"] == "DEVIATES"]
+    missing = [r for r in rows if r["status"] == "NOT_ASSESSED"]
     fine = [r for r in rows if r["status"] in ("FITS", "NOT_APPLICABLE")]
     summary = config_summary(counts, t)
     inputs = config_inputs(data, t)
@@ -1838,6 +1843,15 @@ def render_config(data, lang, t):
         parts.append(table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in action]))
         if any(r.get("restart_required") for r in action):
             parts.append(f'<p class="note">{e(t["config_restart"])}</p>')
+    # Settings without a recommendation: one line per cause, not a table row each.
+    by_reason = {}
+    for r in missing:
+        code = "no_host" if r["reason_code"] in HOST_REASONS else r["reason_code"]
+        by_reason.setdefault(code, []).append(r["setting_key"])
+    for code, names in by_reason.items():
+        parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
+                     f'{e(", ".join(names))}<span class="facts"> — '
+                     f'{e(t["config_reason"].get(code, code or ""))}</span></p>')
     parts.append(config_commands(rows, t))
     if fine:
         parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'
