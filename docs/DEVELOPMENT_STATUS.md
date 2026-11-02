@@ -235,6 +235,21 @@ Small gaps noted: `collector_assignment` has no creation time / creator (needed 
 
 Multi-system lab (Hasan, 2026-10-30): everything so far was verified on one system (one Patroni cluster). Before real engagements, build more systems with Docker (or more VMs) and run the same work across them: a standalone server, a second cluster, PostgreSQL 15, 16 and 18 next to 17, a database with many objects. Questions to answer: several health checks at once (worker pool, per-target limits), targets with the same database or node names, version differences in collectors and the configuration recommendations, the customer overview (ADR-0016), report and repository size with many targets.
 
+Multi-system lab, first run (2026-10-30, `feat/multi-system-lab`): Docker host `pg-lab-docker` with PostgreSQL 15, 16 and 18 standalone and 17 primary + replica, one address per server. Every collector except one worked on every version with `keystone_monitor`. Found and fixed on the branch:
+- PG_REPLICATION_SLOTS read columns newer than PG 15 (`conflicting` 16+, `invalidation_reason` and `failover` 17+) and failed on 15 and 16. Version-specific columns are now read through `to_jsonb`, one script for every version.
+- A system without slots had no PG_REPLICATION_SLOTS evidence, so PG-REP-001/002/005 were not assessed. The collector always returns a SYSTEM row (PG019 `replication_slot_status_snapshot`); no slots is healthy.
+- PG-CONN-001 counted Keystone's own failed session: a sibling collector's connection is "idle in transaction (aborted)" for a moment before it closes. Target connections set `application_name = keystone`; the activity collectors leave those sessions out.
+- Report: collection errors show their first line (PostgreSQL's LINE/caret lines stay in Collected Data); no "not collected (not collected)"; missing OS/CPU/memory reads "Unknown"; the address is the registered connection address, the server's own (Docker, NAT, proxy) as a tooltip.
+Second run (hc55-58): every collector succeeds except PG_HOST_SNAPSHOT (no SSH); the only check not assessed is PG-CAP-001.
+
+NOT_APPLICABLE outcome (V045, ADR-0014 addendum 2): PG-REP-003/004 on a system with no replica connected and none known in recovery; slot rules, PG-REP-006 and PG-HA-001 stay. Not counted among the checks done; noted next to the totals.
+
+SSH test (hc63, 2026-10-31): sshd in the PG 17 containers (port 2222, lab image `deploy/lab/ssh`); 21/21 collections, all 29 checks assessed, PG-CAP-001 healthy at 70 %. Found: plain `df` hid the data volume's own mount behind `/` (same device); the host collector now runs `df -a` and the report shows one row per device. Known limitation recorded: the executive inventory adds CPU, memory and disk over nodes, so containers on one host are counted twice. The negative test (SSH to the Docker host) was skipped: the volume lives on that host's root disk, so the numbers would be right and it teaches nothing new.
+
+Concurrent health checks (hc65-68, 2026-11-02): pg15, pg16, pg18 and pg17 started at the same moment, each with its own worker pool; all COMPLETED in 16-17 s, collections exactly as in single runs (15/16 with host data not collected where there is no SSH, 21/21 on pg17), no cross-check mix-up.
+
+Multi-system lab done (`feat/multi-system-lab`). Open from it: the customer overview (ADR-0016), report and repository size with many targets, a database with many objects.
+
 Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
 Hardening backlog:

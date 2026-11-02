@@ -389,6 +389,50 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(outcomes["PG-REP-004"], ("ATTENTION_REQUIRED", "CRITICAL"))   # node-2 missing
         self.assertEqual(outcomes["PG-REP-006"], ("ATTENTION_REQUIRED", "CRITICAL"))
 
+    def test_standalone_system_replica_rules_do_not_apply(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/replication_status_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(sql).fetchall()          # the test server has no replicas
+        worker.save_replication_status_snapshot(self.conn, {"target_id": self.system}, rows)
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        self.conn.execute(
+            "INSERT INTO postgresql.instance_inventory (target_id, server_address, in_recovery, "
+            "last_collected_at) VALUES (%s, '10.0.0.1', false, %s) ON CONFLICT (target_id) DO UPDATE "
+            "SET in_recovery = false, last_collected_at = EXCLUDED.last_collected_at", (self.node1, now))
+        self.conn.execute("DELETE FROM postgresql.instance_inventory WHERE target_id <> %s", (self.node1,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcomes = self.latest_outcomes()
+        for rule in ("PG-REP-003", "PG-REP-004"):
+            self.assertEqual(outcomes[rule][0], "NOT_APPLICABLE", rule)
+            self.assertIn("[no_replicas]", outcomes[rule][2])
+        self.assertEqual(outcomes["PG-REP-006"][0], "HEALTHY")       # still meaningful alone
+
+    def test_rules_that_do_not_apply_are_noted_not_counted(self):
+        check_id = self.make_check()
+        self.conn.execute(
+            "UPDATE keystone.assessment_result res SET outcome = 'NOT_APPLICABLE', "
+            "reason = 'PG_REPLICATION_STATUS: [no_replicas] The system has no replicas.' "
+            "FROM keystone.assessment_run ar, keystone.rule_definition rd "
+            "WHERE ar.assessment_run_id = res.assessment_run_id AND ar.health_check_id = %s "
+            "AND rd.rule_id = res.rule_id AND rd.rule_key IN ('PG-REP-003', 'PG-REP-004')", (check_id,))
+        self.conn.commit()
+        data = report.load_report_data(self.conn, check_id)
+        counts, _ = report.summarize(data)
+        self.assertEqual(counts["not_applicable"], 2)
+        self.assertEqual(counts["total"], len(data["results"]) - 2)
+        page = report.render_html(data, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        self.assertIn("2 kontrol bu sisteme uygulanmaz.", executive)
+        self.assertIn('<li class="r-na">Replikasyon gecikmesi (uygulanmaz): Sistemde replica yok.</li>',
+                      executive)
+        card = executive[executive.index("Değerlendirilemeyen kontroller"):]
+        self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</details>")])
+        self.assertIn('<span class="badge b-NOT_APPLICABLE">Uygulanmaz</span>', page)
+
     def test_problem_cards_list_causes_and_steps(self):
         page = self.render(self.make_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
@@ -612,6 +656,63 @@ class ReportTests(test_health_check.HealthCheckTests):
         t = report.TEXTS["tr"]
         self.assertEqual(report.explain_reason(reason, {"collections": []}, t),
                          t["reason_codes"]["no_timeline_history"])
+
+    def test_replication_slots_collector_runs_on_this_version_and_none_is_evidence(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/replication_slots_snapshot.sql").read_text()
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(sql).fetchall()      # columns newer than this server read as NULL
+        self.assertEqual([(r["record_type"], r["slot_count"]) for r in rows], [("SYSTEM", 0)])
+        worker.save_replication_slot_snapshot(self.conn, {"target_id": self.system}, rows)
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcomes = self.latest_outcomes()
+        for rule in ("PG-REP-001", "PG-REP-002", "PG-REP-005"):
+            self.assertEqual(outcomes[rule][:2], ("HEALTHY", None), rule)
+
+        # A forgotten slot from the same collection is still found.
+        self.conn.execute(
+            "INSERT INTO postgresql.replication_slot_snapshot (target_id, captured_at, slot_name, "
+            "slot_type, temporary, active, two_phase, failover, wal_status) "
+            "SELECT target_id, captured_at, 'old_backup', 'physical', false, false, false, false, "
+            "'extended' FROM postgresql.replication_slot_status_snapshot")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
+        outcomes = self.latest_outcomes()
+        self.assertEqual(outcomes["PG-REP-001"][0], "ATTENTION_REQUIRED")
+        self.assertEqual(outcomes["PG-REP-005"][0], "ATTENTION_REQUIRED")
+
+    def test_collection_errors_show_their_first_line_and_no_repeated_verb(self):
+        t = report.TEXTS["tr"]
+        error = "column s.conflicting does not exist\nLINE 35:     s.conflicting,\n             ^"
+        self.assertEqual(report.first_line(error), "column s.conflicting does not exist")
+        self.assertEqual(report.status_suffix("NOT_COLLECTED", t), "")
+        self.assertEqual(report.status_suffix("FAILED", t), " (başarısız)")
+        data = {"collections": [{"collector_key": "PG_HOST_SNAPSHOT", "status": "NOT_COLLECTED",
+                                 "status_message": "no HOST connection defined for this target"},
+                                {"collector_key": "PG_REPLICATION_SLOTS", "status": "FAILED",
+                                 "status_message": error}]}
+        host = report.explain_reason("PG_HOST_SNAPSHOT: Required evidence is not available.", data, t)
+        self.assertEqual(host, "PG_HOST_SNAPSHOT bu kontrolde toplanamadı "
+                               "(no HOST connection defined for this target).")
+        slots = report.explain_reason("PG_REPLICATION_SLOTS: Required evidence is not available.", data, t)
+        self.assertEqual(slots, "PG_REPLICATION_SLOTS bu kontrolde toplanamadı "
+                                "(Başarısız: column s.conflicting does not exist).")
+        self.assertNotIn("toplanamadı (toplanamadı)",
+                         report.explain_reason("PG_HOST_SNAPSHOT: Required evidence is not available.",
+                                               data, t, short=True))
+
+    def test_address_is_the_registered_one_and_missing_host_data_is_unknown(self):
+        t = report.TEXTS["tr"]
+        node = {"connection_host": "192.168.1.105", "connection_port": 5432,
+                "server_address": "172.18.0.3", "server_port": 5432}
+        self.assertEqual(report.address_cell(node), '<span title="172.18.0.3:5432">192.168.1.105:5432</span>')
+        node["server_address"] = "192.168.1.105"
+        self.assertEqual(report.address_cell(node), "192.168.1.105:5432")
+        self.assertEqual(report.or_unknown("", t), '<span class="note">Bilinmiyor</span>')
+        self.assertEqual(report.or_unknown(4, t), "4")
 
     def test_index_schema_and_role_collectors_feed_the_rules(self):
         from psycopg.rows import dict_row

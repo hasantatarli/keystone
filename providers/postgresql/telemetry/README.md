@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG018).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG019).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -13,7 +13,7 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_ACTIVITY_SNAPSHOT | SYSTEM | `activity_snapshot` | PG-TRAN-001/003 |
 | PG_CONNECTION_ACTIVITY | SYSTEM | `connection_activity_snapshot` | PG-CONN-001/002 |
 | PG_REPLICATION_STATUS | SYSTEM | `replication_status_snapshot`, `replica_status_snapshot` | PG-REP-003/004/006 |
-| PG_REPLICATION_SLOTS | SYSTEM | `replication_slot_snapshot` | PG-REP-001/002/005 |
+| PG_REPLICATION_SLOTS | SYSTEM | `replication_slot_status_snapshot`, `replication_slot_snapshot` | PG-REP-001/002/005 |
 | PG_ROLES | SYSTEM | `role_snapshot` | PG-SEC-001 |
 | PG_PREPARED_TRANSACTIONS | SYSTEM | `prepared_transaction_status_snapshot`, `prepared_transaction_snapshot` | PG-TRAN-005 |
 | PG_TRANSACTION_WRAPAROUND | DATABASE | `transaction_wraparound_snapshot` | PG-TRAN-002/004 |

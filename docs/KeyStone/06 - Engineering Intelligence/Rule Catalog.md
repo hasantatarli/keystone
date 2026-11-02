@@ -237,7 +237,7 @@ Detect replicas that apply the primary's changes late.
 Lab 2026-10-21: with `recovery_min_apply_delay = 5min` on a replica, `replay_lag` grew 37 s → 84 s → 143 s and WAL behind 174 → 321 MB, so the time metric follows a stuck replay. Such a deliberately delayed replica (protection against accidental deletes) is judged only on the lag beyond its delay. The finding still reports the measured lag as the observed value and shows the intended delay and the part beyond it separately (V035): "6 minutes behind, 1 minute beyond its intended delay of 5 minutes", never just "1 minute behind". `pg_wal_replay_pause()` cannot create lag under Patroni: Patroni resumes replay within seconds.
 
 **Known limitations**  
-Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. Replicas are matched to their node configuration by address. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004.
+Time thresholds only (one unit per rule); WAL bytes behind is shown, not judged. Replicas are matched to their node configuration by address. `replay_lag` is computed by the primary from replies; a replica that stopped replying is covered by PG-REP-004. On a system with no replica connected and none known in recovery the rule is NOT_APPLICABLE (ADR-0014 addendum 2).
 
 ## PG-REP-004 — Replica Not Streaming
 
@@ -252,7 +252,7 @@ Detect servers known as replicas that do not receive changes from the primary.
 | Subject | REPLICA (node name or application_name) |
 
 **Design notes**  
-Known replicas come from the instance inventory, so no expected topology has to be declared (2026-09-21 decision). Addresses are matched without prefix length; when a node's address is unknown the rule compares counts.
+Known replicas come from the instance inventory, so no expected topology has to be declared (2026-09-21 decision). Addresses are matched without prefix length; when a node's address is unknown the rule compares counts. A system with no replica connected and none known in recovery is NOT_APPLICABLE; a replica connected to a single registered node is still checked (ADR-0014 addendum 2).
 
 **Known limitations**  
 Cascading replicas connected to another replica are reported as not connected. After a failover, inventory older than the freshness limit can name the wrong node; the health check always collects it fresh.
@@ -346,6 +346,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 - First rule on NODE-scoped evidence and first rule with two evidence sources. Loaders read the target itself if it is a NODE, otherwise its active NODE children. Evaluators of multi-source rules receive `{evidence_source: rows}`; single-source evaluators are unchanged.
 - The data disk is the mount with the longest mount point that contains `data_directory` as a whole directory (`/var/lib/pg` does not contain `/var/lib/pgsql`). The report inventory uses the same function, so the table and the rule always agree.
 - Other mounts (`/`, `/boot`, backup disks) are not judged by this rule.
+- The host collector runs `df -a`: plain `df` keeps one mount per device, so a data directory bind-mounted from the root filesystem (containers, lab 2026-10-31) was matched to `/` instead of its own mount. Pseudo filesystems (size 0) are skipped; the report shows one row per device (the data mount, else the shortest mount point).
 - Root-reserved blocks (ext4: 5 %) are not available to the postgres user, so they count as used. Lab 2026-10-20: used / size gave 77 % while `df` showed 82 % and PostgreSQL would fail at 100 % of the available space; used / (used + available) matches `df`.
 - Introduced 2026-10-20 because the report showed disk usage as an inventory remark while the Capacity summary said "no problems found". Judgements are rules; the inventory only displays.
 
@@ -354,6 +355,7 @@ Detect nodes whose filesystem holding PostgreSQL's `data_directory` is filling u
 - Tablespaces outside `data_directory` and a separately mounted `pg_wal` are not evaluated.
 - Nodes without host evidence (no SSH connection) are skipped while other nodes are evaluated; the HEALTHY text then covers only the evaluated nodes. The report inventory shows such nodes as unknown. If no node has host evidence the rule ends INSUFFICIENT_EVIDENCE.
 - Freshness is checked on the newest row across nodes; a node whose host snapshot is older than the others is still evaluated on its latest data.
+- The executive inventory adds CPU, memory and data disk over the nodes. Nodes that share a machine or a disk (containers on one host, shared storage) are counted once per node; Keystone cannot tell from host evidence alone (lab 2026-10-31: two containers on one VM shown as 2 cores, 3.8 GB).
 - Usage percent only; growth rate and time-to-full need history (Capacity Forecasting, Phase 3).
 - Linux host evidence only.
 

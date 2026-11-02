@@ -50,7 +50,7 @@ TEXTS = {
         "verdict_unassessed": "{n} kontrol yapılamadı.",
         "unassessed_title": "Değerlendirilemeyen kontroller",
         "unassessed_lead": "Bu kontroller yapılamadı; sistemde sorun olup olmadığı bilinmiyor.",
-        "unassessed_collect": "{targets}: {source} toplanamadı ({status})",
+        "unassessed_collect": "{targets}: {source} toplanamadı{status}",
         "unassessed_affects": "Etkilenen kontroller",
         "unassessed_action": "Yapılması gereken",
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
@@ -58,6 +58,7 @@ TEXTS = {
         "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
+        "not_applicable_note": "{count} kontrol bu sisteme uygulanmaz.",
         "count_critical": "Kritik", "count_warning": "Uyarı",
         "count_healthy": "Sağlıklı", "count_not_assessed": "Değerlendirilemedi",
         "inventory_title": "Sistem envanteri",
@@ -74,6 +75,7 @@ TEXTS = {
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
+        "topic_na": "Uygulanmaz",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -123,6 +125,7 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
         "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
+                         "no_replicas": "Sistemde replica yok.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
@@ -152,15 +155,16 @@ TEXTS = {
                         "sebep için teknik detaylardaki bağlam bilgileri incelenmelidir."),
         "generated": "Rapor oluşturma zamanı",
         "outcome": {"HEALTHY": "Sağlıklı", "ATTENTION_REQUIRED": "Dikkat",
-                    "INSUFFICIENT_EVIDENCE": "Veri yetersiz", "ERROR": "Hata"},
+                    "INSUFFICIENT_EVIDENCE": "Veri yetersiz", "ERROR": "Hata",
+                    "NOT_APPLICABLE": "Uygulanmaz"},
         "severity": {"CRITICAL": "Kritik", "WARNING": "Uyarı", "INFO": "Bilgi"},
         "collection_status": {"SUCCESS": "Başarılı", "PARTIAL_SUCCESS": "Kısmen başarılı",
                               "FAILED": "Başarısız", "CONNECTION_FAILED": "Bağlantı hatası",
                               "TIMEOUT": "Zaman aşımı", "STALE": "Yarıda kaldı",
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
         "days": "gün", "hours": "saat", "minutes": "dakika",
-        "reason_not_collected": "{source} bu kontrolde toplanamadı ({status}: {message}).",
-        "reason_not_collected_short": "{source} toplanamadı ({status}); ayrıntı teknik bölümde.",
+        "reason_not_collected": "{source} bu kontrolde toplanamadı ({detail}).",
+        "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
     },
@@ -175,7 +179,7 @@ TEXTS = {
         "verdict_unassessed": "{n} check(s) could not be done.",
         "unassessed_title": "Checks not assessed",
         "unassessed_lead": "These checks could not be done; whether there is a problem is unknown.",
-        "unassessed_collect": "{targets}: {source} not collected ({status})",
+        "unassessed_collect": "{targets}: {source} not collected{status}",
         "unassessed_affects": "Checks affected",
         "unassessed_action": "What to do",
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
@@ -183,6 +187,7 @@ TEXTS = {
         "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
+        "not_applicable_note": "{count} check(s) do not apply to this system.",
         "count_critical": "Critical", "count_warning": "Warning",
         "count_healthy": "Healthy", "count_not_assessed": "Not assessed",
         "inventory_title": "System inventory",
@@ -199,6 +204,7 @@ TEXTS = {
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
+        "topic_na": "Not applicable",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -247,6 +253,7 @@ TEXTS = {
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
         "reason_codes": {"no_primary": "There is no primary among the collected servers.",
+                         "no_replicas": "The system has no replicas.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
@@ -276,15 +283,16 @@ TEXTS = {
                         "see the context in the technical details."),
         "generated": "Report generated",
         "outcome": {"HEALTHY": "Healthy", "ATTENTION_REQUIRED": "Attention",
-                    "INSUFFICIENT_EVIDENCE": "Insufficient data", "ERROR": "Error"},
+                    "INSUFFICIENT_EVIDENCE": "Insufficient data", "ERROR": "Error",
+                    "NOT_APPLICABLE": "Not applicable"},
         "severity": {"CRITICAL": "Critical", "WARNING": "Warning", "INFO": "Info"},
         "collection_status": {"SUCCESS": "Success", "PARTIAL_SUCCESS": "Partial",
                               "FAILED": "Failed", "CONNECTION_FAILED": "Connection failed",
                               "TIMEOUT": "Timed out", "STALE": "Interrupted",
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
         "days": "days", "hours": "hours", "minutes": "minutes",
-        "reason_not_collected": "{source} could not be collected in this check ({status}: {message}).",
-        "reason_not_collected_short": "{source} not collected ({status}); details in the technical part.",
+        "reason_not_collected": "{source} could not be collected in this check ({detail}).",
+        "reason_not_collected_short": "{source} not collected{status}; details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
     },
@@ -393,6 +401,7 @@ def load_report_data(conn, health_check_id):
     nodes = conn.execute(
         """
         SELECT t.target_id, t.name, ii.server_address, ii.server_port, ii.server_version,
+               tc.host AS connection_host, tc.port AS connection_port,
                ii.in_recovery, ii.postmaster_start_time,
                hs.hostname, hs.os_name, hs.os_version, hs.logical_cpu_count,
                hs.memory_total_bytes, hs.captured_at AS host_captured_at,
@@ -400,6 +409,11 @@ def load_report_data(conn, health_check_id):
         FROM keystone.target t
         LEFT JOIN postgresql.instance_inventory ii
             ON ii.target_id = t.target_id AND ii.last_collected_at BETWEEN %s AND %s
+        LEFT JOIN LATERAL (
+            SELECT c.host, c.port FROM keystone.target_connection c
+            WHERE c.target_id = t.target_id AND c.is_active AND c.connection_purpose <> 'HOST'
+            ORDER BY c.connection_id LIMIT 1
+        ) tc ON TRUE
         LEFT JOIN LATERAL (
             SELECT * FROM postgresql.host_snapshot h
             WHERE h.target_id = t.target_id AND h.captured_at BETWEEN %s AND %s
@@ -419,7 +433,7 @@ def load_report_data(conn, health_check_id):
 
     storage = conn.execute(
         """
-        SELECT t.target_id, t.name AS node_name, s.mount_point, s.used_bytes, s.total_bytes,
+        SELECT t.target_id, t.name AS node_name, s.device, s.mount_point, s.used_bytes, s.total_bytes,
                s.available_bytes
         FROM keystone.target t
         JOIN LATERAL (
@@ -609,11 +623,11 @@ def explain_reason(reason, data, t, short=False):
     if failed:
         c = failed[0]
         if short:
-            return t["reason_not_collected_short"].format(
-                source=source, status=t["collection_status"].get(c["status"], c["status"]).lower())
-        return t["reason_not_collected"].format(
-            source=source, status=t["collection_status"].get(c["status"], c["status"]),
-            message=c["status_message"] or "-")
+            return t["reason_not_collected_short"].format(source=source, status=status_suffix(c["status"], t))
+        message = first_line(c["status_message"]) or "-"
+        detail = message if c["status"] == "NOT_COLLECTED" else (
+            f'{t["collection_status"].get(c["status"], c["status"])}: {message}')
+        return t["reason_not_collected"].format(source=source, detail=detail)
     if match.group("missing"):
         return t["reason_missing"].format(source=source)
     return t["reason_stale"].format(source=source, age=fmt_duration(float(match.group("age")), t),
@@ -661,9 +675,11 @@ def localized(entry, lang, field):
 
 
 def summarize(data):
-    results = data["results"]
+    # A rule that does not apply here (no replicas, say) is not a check done; it is noted apart.
+    results = [r for r in data["results"] if r["outcome"] != "NOT_APPLICABLE"]
     counts = {"total": len(results), "healthy": 0, "attention": 0, "not_assessed": 0,
-              "critical": 0, "warning": 0}
+              "critical": 0, "warning": 0,
+              "not_applicable": len(data["results"]) - len(results)}
     for r in results:
         if r["outcome"] == "HEALTHY":
             counts["healthy"] += 1
@@ -716,9 +732,11 @@ def topic_summary(data):
         topic = topics.setdefault(key, {"results": [], "status": "ok"})
         topic["results"].append(r)
     for topic in topics.values():
-        outcomes = [r["outcome"] for r in topic["results"]]
+        outcomes = [r["outcome"] for r in topic["results"] if r["outcome"] != "NOT_APPLICABLE"]
         severities = [r["max_severity"] for r in topic["results"] if r["max_severity"]]
-        if "CRITICAL" in severities:
+        if not outcomes:
+            topic["status"] = "na"
+        elif "CRITICAL" in severities:
             topic["status"] = "critical"
         elif "ATTENTION_REQUIRED" in outcomes:
             topic["status"] = "attention"
@@ -795,6 +813,8 @@ background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exa
 .rules li.r-critical::before{background:var(--crit-bar)}
 .rules li.r-warning::before{background:var(--warn-bar)}
 .rules li.r-unknown::before{background:var(--na)}
+.rules li.r-na{color:var(--muted)}
+.rules li.r-na::before{background:none;border:1.5px solid var(--na);box-sizing:border-box}
 details.card>summary,details.section>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
 details.card>summary h3::before,details.section>summary h2::before{content:"▸";color:var(--muted);width:12px}
@@ -809,7 +829,7 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .badge{display:inline-block;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .b-CRITICAL,.b-ERROR,.b-critical{background:var(--crit-bg);color:var(--crit)}
 .b-WARNING,.b-ATTENTION_REQUIRED,.b-attention{background:var(--warn-bg);color:var(--warn)}
-.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial{background:var(--na-bg);color:var(--na)}
+.b-INFO,.b-INSUFFICIENT_EVIDENCE,.b-unknown,.b-partial,.b-NOT_APPLICABLE,.b-na{background:var(--na-bg);color:var(--na)}
 .b-HEALTHY,.b-SUCCESS,.b-ok{background:var(--ok-bg);color:var(--ok)}
 .b-FAILED,.b-CONNECTION_FAILED,.b-TIMEOUT,.b-STALE{background:var(--crit-bg);color:var(--crit)}
 .b-PARTIAL_SUCCESS,.b-WAIT_LIMIT{background:var(--warn-bg);color:var(--warn)}
@@ -896,6 +916,21 @@ def data_disk(node, storage):
     return data_mount(node.get("data_directory"), mounts)
 
 
+def shown_mounts(storage, data_mounts):
+    """One row per node and device: the data mount if it is there, else the shortest mount point.
+
+    df -a also lists bind mounts of the same filesystem (/etc/hosts in a container, say).
+    """
+    chosen = {}
+    for s_ in storage:
+        key = (s_["target_id"], s_.get("device") or s_["mount_point"])
+        current = chosen.get(key)
+        if (current is None or id(s_) in data_mounts
+                or (id(current) not in data_mounts and len(s_["mount_point"]) < len(current["mount_point"]))):
+            chosen[key] = s_
+    return [s_ for s_ in storage if chosen.get((s_["target_id"], s_.get("device") or s_["mount_point"])) is s_]
+
+
 def disk_limits(data):
     """Meter colours follow the data disk rule's thresholds used in this check."""
     limits = dict(DEFAULT_DISK_LIMITS)
@@ -923,6 +958,23 @@ def os_text(node):
     if node.get("os_version") and node["os_version"] not in text:
         text = f"{text} {node['os_version']}".strip()
     return text
+
+
+def or_unknown(value, t):
+    """A cell value, or a muted 'unknown' when it was not collected (no SSH, say)."""
+    if value in (None, ""):
+        return f'<span class="note">{e(t["inv_disk_unknown"])}</span>'
+    return e(value)
+
+
+def address_cell(node):
+    """The address Keystone connects to; the server's own (NAT, Docker, proxy) as a tooltip if different."""
+    registered = (f"{node['connection_host']}:{node['connection_port'] or 5432}"
+                  if node.get("connection_host") else "")
+    reported = f"{node['server_address']}:{node['server_port']}" if node.get("server_address") else ""
+    if registered and reported and registered != reported:
+        return f'<span title="{e(reported)}">{e(registered)}</span>'
+    return e(registered or reported)
 
 
 def version_cell(version):
@@ -1018,9 +1070,9 @@ def render_inventory(data, t):
     shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
              or n in hosts]
     if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
-        rows = [[e(n["name"]), e(role_of(n, t)), e(os_text(n)),
-                 e(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else ""),
-                 e(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else ""),
+        rows = [[e(n["name"]), e(role_of(n, t)), or_unknown(os_text(n), t),
+                 or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else "", t),
+                 or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t),
                  disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
         parts.append(table([t["inv_servers"], t["inv_role"], t["os"], t["inv_cpu"], t["inv_memory"],
                             t["inv_data_disk"]], rows, numeric=(3, 4)))
@@ -1056,7 +1108,8 @@ def render_impact_chart(data, lang, t):
 
 def render_topics(data, lang, t):
     """Per topic one item per rule: problems first, then rules not assessed, then what was fine."""
-    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2}
+    order = {"ATTENTION_REQUIRED": 0, "INSUFFICIENT_EVIDENCE": 1, "ERROR": 1, "HEALTHY": 2,
+             "NOT_APPLICABLE": 3}
     rows = []
     for key, topic in topic_summary(data):
         entry = data["topics"].get(key)
@@ -1076,6 +1129,10 @@ def render_topics(data, lang, t):
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
+            elif r["outcome"] == "NOT_APPLICABLE":
+                reason = explain_reason(r.get("reason"), data, t, short=True)
+                items.append(("na", f"{e(rule_name)} ({e(t['outcome']['NOT_APPLICABLE'].lower())})"
+                              + (f": {e(reason)}" if reason else "")))
             else:
                 reason = explain_reason(r.get("reason"), data, t, short=True)
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
@@ -1126,7 +1183,7 @@ def unassessed_groups(data, lang, t):
     """
     groups = {}
     for r in data["results"]:
-        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED"):
+        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED", "NOT_APPLICABLE"):
             continue
         name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
         match = REASON_PATTERN.match(r.get("reason") or "")
@@ -1136,8 +1193,7 @@ def unassessed_groups(data, lang, t):
             status = failed[0]["status"]
             targets = ", ".join(sorted({c["target_name"] for c in failed}))
             cause = t["unassessed_collect"].format(
-                targets=targets, source=match.group("source"),
-                status=t["collection_status"].get(status, status).lower())
+                targets=targets, source=match.group("source"), status=status_suffix(status, t))
             key = (targets, status)
             action = t.get("action_" + status, t["action_other"])
         else:
@@ -1170,6 +1226,18 @@ def render_unassessed(data, lang, t):
             f'<ul class="items">{"".join(items)}</ul></details>')
 
 
+def first_line(text):
+    """First line of a collector error; PostgreSQL adds LINE/caret lines that belong in the details."""
+    return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+
+
+def status_suffix(status, t):
+    """' (failed)' after 'not collected'; nothing for NOT_COLLECTED, which would repeat the verb."""
+    if status == "NOT_COLLECTED":
+        return ""
+    return f' ({t["collection_status"].get(status, status).lower()})'
+
+
 def shorten(text, limit=140):
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
@@ -1180,11 +1248,13 @@ def render_executive(data, lang, t):
              (counts["healthy"], t["count_healthy"]), (counts["not_assessed"], t["count_not_assessed"])]
     coverage = e(t["coverage"].format(**counts)) + (
         f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
-        if counts["not_assessed"] else "")
+        if counts["not_assessed"] else "") + (
+        f" · {e(t['not_applicable_note'].format(count=counts['not_applicable']))}"
+        if counts["not_applicable"] else "")
     collections = data["collections"]
     ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
     if collections and ok < len(collections):
-        errors = sorted({c["status_message"] for c in collections
+        errors = sorted({first_line(c["status_message"]) for c in collections
                          if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
         coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
                      + (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
@@ -1214,11 +1284,12 @@ def render_system(data, t):
                 continue
             role = "" if n["in_recovery"] is None else (
                 t["role_replica"] if n["in_recovery"] else t["role_primary"])
-            rows.append([e(n["name"]),
-                         e(f"{n['server_address']}:{n['server_port']}" if n["server_address"] else ""),
+            rows.append([e(n["name"]), address_cell(n),
                          e(role), version_cell(n["server_version"]),
                          e(fmt_uptime(n["postmaster_start_time"], data["as_of"], t)),
-                         e(os_text(n)), e(n["logical_cpu_count"]), e(fmt_bytes(n["memory_total_bytes"]))])
+                         or_unknown(os_text(n), t),
+                         or_unknown(n["logical_cpu_count"], t),
+                         or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t)])
         parts.append(f"<h3>{e(t['nodes'])}</h3>" + table(
             [t["node"], t["address"], t["role"], t["version"], t["up_since"], t["os"], t["cpu"],
              t["memory"]], rows, numeric=(6, 7)))
@@ -1232,7 +1303,7 @@ def render_system(data, t):
               e(fmt_bytes(s["used_bytes"])),
               e(fmt_bytes(s["total_bytes"])),
               e(t["percent"].format(n=disk_percent(s)) if s["total_bytes"] else "")]
-             for s in data["storage"]], numeric=(2, 3, 4)))
+             for s in shown_mounts(data["storage"], data_mounts)], numeric=(2, 3, 4)))
     parts.append(f"<h3>{e(t['databases'])}</h3>")
     if data["databases"]:
         parts.append(table(

@@ -20,6 +20,7 @@ Every assessment run records one **assessment result per evaluated rule** in `ke
   - `HEALTHY` — the rule was evaluated and produced no finding,
   - `ATTENTION_REQUIRED` — the rule produced one or more findings,
   - `INSUFFICIENT_EVIDENCE` — required evidence was missing or stale; the rule was not evaluated,
+  - `NOT_APPLICABLE` — the rule's premise does not exist on the system (addendum 2, V045),
   - `ERROR` — the rule could not be evaluated because of a technical failure;
 - `max_severity` — the highest severity among the rule's findings, stored once at evaluation time (NULL unless `ATTENTION_REQUIRED`). Reports and future notifications read it directly instead of recomputing it from findings;
 - `finding_count`, a human-readable `reason` (for example the evidence age and allowed age, or the error message), and the evaluation time.
@@ -57,3 +58,12 @@ Repository logging uses a **separate autocommit connection**, so an event is not
 ## Addendum (2026-10-30, Hasan)
 
 An INSUFFICIENT_EVIDENCE result stays an outcome, never a finding: a finding says a problem was found, an unassessed check says nothing could be seen, and a severity for the unknown would be invented. Reports draw attention to it instead: the executive part has a "Checks not assessed" card that groups the checks by cause (a failed collection or missing source is listed once with every check it stopped) and says what to do, and the verdict states how many checks could not be done. An area with a check not assessed is "partly assessed", never "no problems".
+
+## Addendum 2 (2026-10-30, Hasan): NOT_APPLICABLE
+
+The multi-system lab showed standalone servers reported as "every connected replica is in sync — healthy". The sentence is true but says nothing, and reads as if replicas were checked. A rule whose premise does not exist on the system ends `NOT_APPLICABLE` (V045): not a finding, not missing data, and not counted among the checks done. The evaluator decides from evidence it already has and raises `NotApplicable(source, code, message)` with the same coded reason as `InsufficientEvidence`.
+
+Reports leave it out of the totals and tiles, note it next to them ("2 checks do not apply to this system"), list it last in its area with a hollow grey bullet and the reason, and never put it in the "Checks not assessed" card. An area where every rule is not applicable is labelled "Not applicable".
+
+First use, PG-REP-003 and PG-REP-004: a system with no replica connected to the primary (`pg_stat_replication` empty) and no node known in recovery. Both conditions are needed: a replica the customer did not register in Keystone still streams from the primary and is still judged. Rules that stay meaningful on a single server keep their outcome: the slot rules (backup tools and CDC use slots), PG-REP-006 (synchronous_standby_names set without a standby blocks commits) and PG-HA-001 (a new timeline on a standalone server means a restore).
+

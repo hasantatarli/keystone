@@ -10,9 +10,13 @@ __pycache__/
 # Local environment / secrets
 .env
 .env.*
+!.env.example
 
 # Local log files (ADR-0014)
 logs/
 
 # Generated health check reports (may contain customer data)
 reports/
+
+# lab passwords
+deploy/lab/.env

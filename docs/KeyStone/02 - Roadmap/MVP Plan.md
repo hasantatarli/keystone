@@ -76,7 +76,7 @@ The threshold model limitation was resolved with the first rules that needed it:
 
 ## Readiness Criteria for a First Real Engagement
 
-- Verified on more than one system at once (multi-system lab: standalone and clustered, several PostgreSQL versions), not only on the single lab cluster.
+- Verified on more than one system at once (multi-system lab: standalone and clustered, several PostgreSQL versions), not only on the single lab cluster. Done 2026-11-02: PostgreSQL 15, 16, 18 standalone and 17 primary + replica, with and without SSH, four health checks at once.
 
 - One command performs a health check without hand-written SQL.
 - The report is understandable without the founder present.
