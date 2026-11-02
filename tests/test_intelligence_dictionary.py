@@ -149,7 +149,8 @@ EXPECTED_RULES = {
         "thresholds": {},
         "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400),
                      "PG_INSTANCE_INVENTORY": (True, 3600),
-                     "PG_HOST_SNAPSHOT": (False, 86400)},
+                     "PG_HOST_SNAPSHOT": (False, 86400),
+                     "PG_CHECKPOINT_STATS": (False, 86400)},
     },
     "PG-CONF-007": {
         "assessment": "PG_CONFIGURATION_TUNING",

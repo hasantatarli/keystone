@@ -200,15 +200,15 @@ class HealthCheckTests(unittest.TestCase):
                                     "PG_INSTANCE_INVENTORY"})
 
     def test_collector_past_the_wait_limit_is_not_waited_for(self):
-        self.slow = {"PG_TRANSACTION_WRAPAROUND": 4}
+        self.slow = {"PG_TRANSACTION_WRAPAROUND": 5}
         started = time.monotonic()
-        check_id = self.run_check(wait_minutes=1.5 / 60)       # 1.5 s per collector
+        check_id = self.run_check(wait_minutes=2.5 / 60)       # 2.5 s: time for the queue to reach it
 
         row = self.collections(check_id)[(self.system, "PG_TRANSACTION_WRAPAROUND")]
         self.assertEqual(row["status"], "WAIT_LIMIT")
         self.assertIn("Still running", row["status_message"])
         # The command still waits for the thread at exit (it cannot be killed).
-        self.assertGreaterEqual(time.monotonic() - started, 4)
+        self.assertGreaterEqual(time.monotonic() - started, 5)
 
     def test_already_queued_task_is_followed_not_duplicated(self):
         self.assign(self.system, "PG_ACTIVITY_SNAPSHOT")

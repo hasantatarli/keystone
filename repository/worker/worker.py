@@ -2180,6 +2180,14 @@ def save_prepared_transactions_snapshot(conn, task, rows):
                   r["prepared_at"], r["owner"], r["database_name"]) for r in transactions])
 
 
+def save_checkpoint_stats_snapshot(conn, task, rows):
+    """Persist PG_CHECKPOINT_STATS: one row with the checkpoint counters."""
+    if len(rows) != 1:
+        raise RuntimeError(f"PG_CHECKPOINT_STATS returned {len(rows)} rows; expected 1.")
+    insert_rows(conn, "checkpoint_stats_snapshot", task, rows,
+                ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
+
+
 def insert_rows(conn, table, task, rows, columns, casts=None):
     """Insert collector rows into a postgresql.* table; one captured_at per collection."""
     if len({r["captured_at"] for r in rows}) > 1:
@@ -2243,6 +2251,7 @@ COLLECTOR_HANDLERS = {
     "PG_TRANSACTION_WRAPAROUND": save_transaction_wraparound_snapshot,
     "PG_REPLICATION_STATUS": save_replication_status_snapshot,
     "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
+    "PG_CHECKPOINT_STATS": save_checkpoint_stats_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,
