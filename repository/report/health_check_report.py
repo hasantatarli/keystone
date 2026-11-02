@@ -1838,7 +1838,6 @@ def render_config(data, lang, t):
     parts = [f'<details class="section"><summary><h2>{e(t["config_title"])}'
              f'<span class="note">{e(summary)}</span></h2></summary>']
     parts.append(f'<p class="note">{e(inputs)}</p>' if inputs else "")
-    parts.append(profile_line(profile, t))
     if action:
         parts.append(table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in action]))
         if any(r.get("restart_required") for r in action):
