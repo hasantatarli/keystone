@@ -13,8 +13,11 @@ import getpass
 import time
 import uuid
 
+from psycopg.types.json import Jsonb
+
 from repository.agent.pool import WorkerPool
 from repository.common.logging_config import configure_logging, get_logger
+from repository.common.server_profile import server_profile
 from repository.intelligence import assessment_engine
 from repository.worker import worker
 
@@ -41,7 +44,8 @@ POLL_SECONDS = 1
 def load_target_tree(conn, target_id):
     """The target and, for a SYSTEM target, its active NODE children."""
     target = conn.execute(
-        "SELECT target_id, name, provider, target_type, is_active "
+        "SELECT target_id, name, provider, target_type, is_active, "
+        "workload_type, dedicated, storage_type "
         "FROM keystone.target WHERE target_id = %s", (target_id,)
     ).fetchone()
     if target is None:
@@ -266,10 +270,11 @@ def run_health_check(connect, target_id, assessment_key=None,
     with connect() as conn:
         target, nodes = load_target_tree(conn, target_id)
         assessment_keys = load_assessments(conn, target["provider"], assessment_key)
+        # The profile as it is now: reports of this check keep it after the target changes.
         row = conn.execute(
-            "INSERT INTO keystone.health_check (target_id, status, requested_by) "
-            "VALUES (%s, 'RUNNING', %s) RETURNING health_check_id, started_at",
-            (target_id, requested_by),
+            "INSERT INTO keystone.health_check (target_id, status, requested_by, target_profile) "
+            "VALUES (%s, 'RUNNING', %s, %s) RETURNING health_check_id, started_at",
+            (target_id, requested_by, Jsonb(server_profile(target))),
         ).fetchone()
         health_check_id = row["health_check_id"]
         conn.commit()

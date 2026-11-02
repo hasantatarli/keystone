@@ -82,6 +82,11 @@ TEXTS = {
         "collected_count": "{ok} / {total} başarılı",
         "why_it_matters": "Neden önemli", "what_to_do": "Ne yapılmalı", "what_happens": "Ne oluyor", "causes": "Olası sebepler",
         "system": "Sistem Bilgisi",
+        "profile_title": "Sunucu profili", "profile_assumed": "belirtilmedi, varsayıldı",
+        "profile_workload_type": "İş yükü", "profile_dedicated": "PostgreSQL'e ayrılmış",
+        "profile_storage_type": "Disk",
+        "profile_values": {"OLTP": "OLTP", "OLAP": "Raporlama (OLAP)", "MIXED": "Karma",
+                           "SSD": "SSD", "HDD": "HDD", True: "evet", False: "hayır"},
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
         "up_since": "Çalışma süresi", "os": "İşletim sistemi", "cpu": "CPU", "memory": "Bellek",
@@ -211,6 +216,11 @@ TEXTS = {
         "collected_count": "{ok} of {total} succeeded",
         "why_it_matters": "Why it matters", "what_to_do": "What to do", "what_happens": "What is happening", "causes": "Likely causes",
         "system": "System Overview",
+        "profile_title": "Server profile", "profile_assumed": "not given, assumed",
+        "profile_workload_type": "Workload", "profile_dedicated": "Dedicated to PostgreSQL",
+        "profile_storage_type": "Storage",
+        "profile_values": {"OLTP": "OLTP", "OLAP": "Reporting (OLAP)", "MIXED": "Mixed",
+                           "SSD": "SSD", "HDD": "HDD", True: "yes", False: "no"},
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
         "up_since": "Uptime", "os": "Operating system", "cpu": "CPU", "memory": "Memory",
@@ -1272,8 +1282,24 @@ def render_executive(data, lang, t):
             + render_impact_chart(data, lang, t) + render_topics(data, lang, t))
 
 
+def profile_line(profile, t):
+    """'Workload: OLTP (not given, assumed) · ...' from the profile this check used; '' for older checks."""
+    if not profile:
+        return ""
+    items = []
+    for field in ("workload_type", "dedicated", "storage_type"):
+        entry = profile.get(field)
+        if not entry:
+            continue
+        text = f'{t["profile_" + field]}: {t["profile_values"].get(entry["value"], entry["value"])}'
+        if entry.get("assumed"):
+            text += f' ({t["profile_assumed"]})'
+        items.append(e(text))
+    return f'<p><b>{e(t["profile_title"])}</b> · ' + " · ".join(items) + "</p>" if items else ""
+
+
 def render_system(data, t):
-    parts = [f"<h2>{e(t['system'])}</h2>"]
+    parts = [f"<h2>{e(t['system'])}</h2>", profile_line(data["check"].get("target_profile"), t)]
     missing = f'<p class="note">{e(t["not_collected_here"])}</p>'
     if data["nodes"]:
         rows = []

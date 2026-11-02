@@ -433,6 +433,45 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</details>")])
         self.assertIn('<span class="badge b-NOT_APPLICABLE">Uygulanmaz</span>', page)
 
+    def test_server_profile_is_kept_per_check_and_assumed_values_are_said(self):
+        self.conn.execute("UPDATE keystone.target SET workload_type = NULL, dedicated = NULL, "
+                          "storage_type = NULL WHERE target_id = %s", (self.system,))
+        self.conn.commit()
+        first = self.make_check()
+        page = self.render(first, "tr")
+        self.assertIn("<b>Sunucu profili</b> · İş yükü: OLTP (belirtilmedi, varsayıldı) · "
+                      "PostgreSQL&#x27;e ayrılmış: evet (belirtilmedi, varsayıldı) · "
+                      "Disk: SSD (belirtilmedi, varsayıldı)", page)
+
+        self.conn.execute("UPDATE keystone.target SET workload_type = 'OLAP', dedicated = false, "
+                          "storage_type = 'HDD' WHERE target_id = %s", (self.system,))
+        self.conn.commit()
+        second = self.run_check()
+        self.assertIn("İş yükü: Raporlama (OLAP) · PostgreSQL&#x27;e ayrılmış: hayır · Disk: HDD",
+                      self.render(second, "tr"))
+        self.assertIn("Workload: Reporting (OLAP) · Dedicated to PostgreSQL: no · Storage: HDD",
+                      self.render(second, "en"))
+        # The first report still shows what that check assumed.
+        self.assertIn("İş yükü: OLTP (belirtilmedi, varsayıldı)", self.render(first, "tr"))
+        self.conn.execute("UPDATE keystone.target SET workload_type = NULL, dedicated = NULL, "
+                          "storage_type = NULL WHERE target_id = %s", (self.system,))
+        self.conn.commit()
+
+    def test_profile_values_are_checked(self):
+        from psycopg import errors
+        with self.assertRaises(errors.CheckViolation):
+            self.conn.execute("UPDATE keystone.target SET workload_type = 'BATCH' WHERE target_id = %s",
+                              (self.system,))
+        self.conn.rollback()
+
+    def test_server_profile_defaults(self):
+        from repository.common.server_profile import server_profile
+        self.assertEqual(server_profile({"workload_type": "MIXED", "dedicated": False}),
+                         {"workload_type": {"value": "MIXED", "assumed": False},
+                          "dedicated": {"value": False, "assumed": False},
+                          "storage_type": {"value": "SSD", "assumed": True}})
+        self.assertEqual(report.profile_line(None, report.TEXTS["tr"]), "")
+
     def test_problem_cards_list_causes_and_steps(self):
         page = self.render(self.make_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]

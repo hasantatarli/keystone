@@ -84,7 +84,7 @@ The first version covers PostgreSQL 15–18 with, besides the 20 settings above:
 
 ## Implementation order
 
-1. Server profile on the target (workload type, dedicated, storage type; "not given" kept apart).
+1. Server profile on the target (workload type, dedicated, storage type; "not given" kept apart). Done 2026-11-02 (V046): `workload_type`, `dedicated`, `storage_type` on `keystone.target`, NULL for not given; each health check stores the profile it used with the assumed fields marked (`health_check.target_profile`); the technical report shows it. Reading `rotational` over SSH moves to step 3 with the calculations.
 2. Dictionary table of settings: version range, factors and ranges per workload, limits.
 3. Calculation functions with unit tests; recommendations stored per health check; the memory commitment rule (CRITICAL).
 4. Report: executive card and area line, technical inputs, table, commands, other non-default settings.
