@@ -75,7 +75,7 @@ TEXTS = {
         "findings_word": "bulgu",
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
-        "topic_na": "Uygulanmaz",
+        "topic_na": "Uygulanmaz", "advice_word": "öneri",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -209,7 +209,7 @@ TEXTS = {
         "findings_word": "finding(s)",
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
-        "topic_na": "Not applicable",
+        "topic_na": "Not applicable", "advice_word": "recommendation(s)",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -684,6 +684,11 @@ def localized(entry, lang, field):
     return ""
 
 
+def advisory(result):
+    """A rule whose findings are all INFO: recommendations, not problems (ADR-0017)."""
+    return result["outcome"] == "ATTENTION_REQUIRED" and result.get("max_severity") == "INFO"
+
+
 def summarize(data):
     # A rule that does not apply here (no replicas, say) is not a check done; it is noted apart.
     results = [r for r in data["results"] if r["outcome"] != "NOT_APPLICABLE"]
@@ -691,7 +696,8 @@ def summarize(data):
               "critical": 0, "warning": 0,
               "not_applicable": len(data["results"]) - len(results)}
     for r in results:
-        if r["outcome"] == "HEALTHY":
+        # Recommendations (INFO only) are no risk: the executive part counts the rule as healthy.
+        if r["outcome"] == "HEALTHY" or advisory(r):
             counts["healthy"] += 1
         elif r["outcome"] == "ATTENTION_REQUIRED":
             counts["attention"] += 1
@@ -699,9 +705,9 @@ def summarize(data):
             counts["not_assessed"] += 1
     # Tiles count checks, so they add up to the total; findings are counted per problem card.
     for r in results:
-        if r["outcome"] == "ATTENTION_REQUIRED":
+        if r["outcome"] == "ATTENTION_REQUIRED" and not advisory(r):
             counts["critical" if r["max_severity"] == "CRITICAL" else "warning"] += 1
-    counts["findings"] = len(data["findings"])
+    counts["findings"] = sum(1 for f in data["findings"] if f["severity"] != "INFO")
     counts["evaluated"] = counts["healthy"] + counts["attention"]
 
     if counts["critical"]:
@@ -725,6 +731,8 @@ def impact_summary(data):
             if rule_id in evaluated and key in summary:
                 summary[key]["checked"] = True
     for f in data["findings"]:
+        if f["severity"] == "INFO":
+            continue                         # recommendations are not problems of an area
         for key in data["rule_categories"].get(f["rule_id"], ()):
             if key in summary:
                 problems = summary[key]["problems"]
@@ -742,8 +750,9 @@ def topic_summary(data):
         topic = topics.setdefault(key, {"results": [], "status": "ok"})
         topic["results"].append(r)
     for topic in topics.values():
-        outcomes = [r["outcome"] for r in topic["results"] if r["outcome"] != "NOT_APPLICABLE"]
         severities = [r["max_severity"] for r in topic["results"] if r["max_severity"]]
+        outcomes = ["HEALTHY" if advisory(r) else r["outcome"] for r in topic["results"]
+                    if r["outcome"] != "NOT_APPLICABLE"]
         if not outcomes:
             topic["status"] = "na"
         elif "CRITICAL" in severities:
@@ -823,6 +832,7 @@ background:var(--ok-bar);-webkit-print-color-adjust:exact;print-color-adjust:exa
 .rules li.r-critical::before{background:var(--crit-bar)}
 .rules li.r-warning::before{background:var(--warn-bar)}
 .rules li.r-unknown::before{background:var(--na)}
+.rules li.r-info::before{background:var(--accent)}
 .rules li.r-na{color:var(--muted)}
 .rules li.r-na::before{background:none;border:1.5px solid var(--na);box-sizing:border-box}
 details.card>summary,details.section>summary{cursor:pointer;list-style:none}
@@ -1129,7 +1139,11 @@ def render_topics(data, lang, t):
         for r in sorted(topic["results"], key=lambda r: order.get(r["outcome"], 3)):
             rule_name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
             # (bullet colour, text): severity shows in the bullet and in words, texts stay aligned.
-            if r["outcome"] == "ATTENTION_REQUIRED":
+            if advisory(r):
+                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
+                items.append(("info", f"<b>{e(rule_name)}</b> ({count} {e(t['advice_word'])}): "
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))))
+            elif r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
                 label = t["severity"].get(severity, severity).lower()
@@ -1172,6 +1186,8 @@ def render_main_problems(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
         worst = min((f["severity"] for f in findings), key=lambda s: SEVERITY_ORDER.get(s, 9))
+        if worst == "INFO":
+            continue                         # recommendations stay out of the executive cards
         name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
         meaning = first_sentence(rule_text(data, result["rule_id"], lang, "MEANING"))
         # Closed by default: name, severity and one sentence; causes and steps on demand.

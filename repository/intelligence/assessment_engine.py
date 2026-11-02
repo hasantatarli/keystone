@@ -12,6 +12,8 @@ from psycopg.types.json import Jsonb
 from psycopg.rows import dict_row
 
 from repository.common.logging_config import configure_logging, get_logger
+from repository.common.server_profile import server_profile
+from repository.intelligence import config_dictionary, config_recommendations as config_rec
 
 
 # Console + log file + event_log (ADR-0014). Unconfigured: WARNING+ to stderr.
@@ -231,6 +233,7 @@ def insert_assessment_result(
                 parameters_used
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING assessment_result_id
             """,
             (
                 assessment_run_id,
@@ -244,6 +247,61 @@ def insert_assessment_result(
                 Jsonb(parameters) if parameters else None,
             ),
         )
+        row = cur.fetchone()
+        return row["assessment_result_id"] if isinstance(row, dict) else row[0]
+
+
+class RunContext:
+    """What an evaluator may need beyond evidence: the server profile, the configuration Dictionary,
+    and a place to leave results stored next to the rule's result (configuration recommendations)."""
+
+    def __init__(self, conn, target_id, health_check_id=None):
+        self.conn, self.target_id, self.health_check_id = conn, target_id, health_check_id
+        self.recommendations = {}
+        self._profile = self._dictionary = None
+
+    @property
+    def profile(self):
+        """The profile the health check used, or the target's current one for scheduled runs."""
+        if self._profile is None:
+            row = None
+            if self.health_check_id is not None:
+                row = self.conn.execute("SELECT target_profile FROM keystone.health_check "
+                                        "WHERE health_check_id = %s", (self.health_check_id,)).fetchone()
+                row = row and (row["target_profile"] if isinstance(row, dict) else row[0])
+            if not row:
+                with self.conn.cursor(row_factory=dict_row) as cur:
+                    target = cur.execute("SELECT workload_type, dedicated, storage_type FROM keystone.target "
+                                         "WHERE target_id = %s", (self.target_id,)).fetchone()
+                row = server_profile(target or {})
+            self._profile = row
+        return self._profile
+
+    @property
+    def config_dictionary(self):
+        if self._dictionary is None:
+            provider = self.conn.execute("SELECT provider FROM keystone.target WHERE target_id = %s",
+                                         (self.target_id,)).fetchone()
+            provider = provider["provider"] if isinstance(provider, dict) else provider[0]
+            self._dictionary = config_dictionary.load_config_dictionary(self.conn, provider)
+        return self._dictionary
+
+
+def insert_config_recommendations(conn, assessment_result_id, results):
+    """Store what PG-CONF-003 told: every setting with its status, values and calculation."""
+    def text(value):
+        return None if value is None else (value if isinstance(value, str) else repr(float(value)))
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO keystone.config_recommendation (assessment_result_id, setting_key, group_key, "
+            "value_type, status, current_value, recommended_value, acceptable, calculation, reason_code, "
+            "parameters_used, node_differences) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            [(assessment_result_id, r["setting_key"], r["group_key"], r["value_type"], r["status"],
+              text(r["current_value"]), text(r["recommended_value"]),
+              Jsonb(r["acceptable"]) if r["acceptable"] else None,
+              Jsonb(r["calculation"]) if r["calculation"] else None, r["reason_code"],
+              Jsonb(r["parameters_used"]) if r["parameters_used"] else None,
+              Jsonb(r["node_differences"]) if r["node_differences"] else None) for r in results])
 
 
 def load_parameters(conn, rule_id):
@@ -515,6 +573,24 @@ def load_latest_vacuum_analyze_snapshot(conn, target_id):
         WHERE v.target_id = %s
         ORDER BY v.database_name, v.schema_name, v.object_name
         """, (target_id, target_id)).fetchall()
+
+
+def load_latest_host_snapshot(conn, target_id):
+    """Latest PG_HOST_SNAPSHOT per node: a HOST row (CPUs, memory) and STORAGE rows (filesystems)."""
+    hosts = conn.execute(
+        """
+        SELECT 'HOST' AS record_type, h.target_id, t.name AS node_name, h.captured_at,
+               h.logical_cpu_count, h.memory_total_bytes
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT * FROM postgresql.host_snapshot h
+            WHERE h.target_id = t.target_id ORDER BY h.captured_at DESC LIMIT 1
+        ) h ON TRUE
+        WHERE t.target_id = ANY(%s)
+        ORDER BY h.target_id
+        """, (node_target_ids(conn, target_id),)).fetchall()
+    storage = [{"record_type": "STORAGE", **r} for r in load_latest_storage_snapshot(conn, target_id)]
+    return hosts + storage
 
 
 def load_latest_storage_snapshot(conn, target_id):
@@ -1437,7 +1513,8 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
     findings = []
     for target_id, directory in data_directories.items():
         mounts = [m for m in evidence["PG_HOST_SNAPSHOT"]
-                  if m["target_id"] == target_id and m["total_bytes"]]
+                  if m.get("record_type", "STORAGE") == "STORAGE"
+                  and m["target_id"] == target_id and m["total_bytes"]]
         mount = data_mount(directory, mounts)
         if mount is None:
             continue
@@ -1807,7 +1884,7 @@ EVIDENCE_LOADERS = {
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
     "PG_REPLICATION_SLOTS": load_latest_replication_slot_snapshot,
     "PG_CONNECTION_ACTIVITY": load_latest_connection_activity_snapshot,
-    "PG_HOST_SNAPSHOT": load_latest_storage_snapshot,
+    "PG_HOST_SNAPSHOT": load_latest_host_snapshot,
     "PG_CONFIGURATION_SNAPSHOT": load_latest_configuration_snapshot,
     "PG_REPLICATION_STATUS": load_latest_replication_status,
     "PG_INSTANCE_INVENTORY": load_instance_inventory,
@@ -1825,6 +1902,90 @@ EVIDENCE_LOADERS = {
 # can dispatch rules generically instead of growing a rule-specific if/elif tree.
 # Rules with one evidence source get its rows; rules with several get
 # {evidence_source: rows}.
+def evaluate_configuration_recommendations(evidence, rule, thresholds):
+    """PG-CONF-003: every covered setting against the value recommended for this server (ADR-0017).
+
+    Results of all settings are left in the run context and stored with the rule's result;
+    the settings outside their range become INFO findings.
+    """
+    context = rule["context"]
+    facts = config_rec.server_facts(evidence)
+    if facts["version"] is None:
+        raise InsufficientEvidence("PG_INSTANCE_INVENTORY", "no_primary", "There is no primary among the nodes.")
+    results = config_rec.recommend(context.config_dictionary, facts, context.profile)
+    if not any(r["status"] in ("FITS", "DEVIATES") for r in results):
+        raise InsufficientEvidence("PG_CONFIGURATION_SNAPSHOT", "no_setting_assessed",
+                                   "No setting could be assessed.")
+    context.recommendations[rule["rule_key"]] = results
+    findings = []
+    for r in results:
+        if r["status"] != "DEVIATES":
+            continue
+        value_type = r["value_type"]
+        recommended = config_rec.pg_value(config_rec.round_for(r["recommended_value"], value_type)
+                                          if not isinstance(r["recommended_value"], str)
+                                          else r["recommended_value"], value_type)
+        findings.append({
+            "severity": rule["default_severity"],
+            "snapshot_id": None,
+            "template_values": {
+                "setting": r["setting_key"],
+                "current": config_rec.pg_value(r["current_value"], value_type),
+                "recommended": recommended,
+                "acceptable": config_rec.acceptable_text(r["acceptable"], value_type),
+            },
+            "observed_value": None,          # the sentence already says it, in PostgreSQL units
+            "observed_unit": None,
+            "subject_type": "SETTING",
+            "subject_identifier": r["setting_key"],
+            "details": {"calculation": r["calculation"], "node_differences": r["node_differences"]},
+        })
+    return findings
+
+
+def evaluate_memory_overcommitment(evidence, rule, thresholds):
+    """PG-CONF-007: shared_buffers + max_connections × work_mem above a node's physical memory."""
+    hosts = {r["target_id"]: r for r in evidence["PG_HOST_SNAPSHOT"]
+             if r.get("record_type") == "HOST" and r.get("memory_total_bytes")}
+    settings = {}
+    for row in evidence["PG_CONFIGURATION_SNAPSHOT"]:
+        settings.setdefault(row["target_id"], {})[row["setting_name"]] = row
+    if not any(t in hosts for t in settings):
+        raise InsufficientEvidence("PG_HOST_SNAPSHOT", "no_memory", "No server's memory is known.")
+    findings = []
+    for target_id, s in settings.items():
+        host = hosts.get(target_id)
+        if host is None or not all(k in s for k in ("shared_buffers", "max_connections", "work_mem")):
+            continue
+        shared_buffers = config_rec.canonical(s["shared_buffers"], "BYTE")
+        connections = config_rec.canonical(s["max_connections"], "COUNT")
+        work_mem = config_rec.canonical(s["work_mem"], "BYTE")
+        committed = shared_buffers + connections * work_mem
+        memory = host["memory_total_bytes"]
+        if committed <= memory:
+            continue
+        findings.append({
+            "severity": rule["default_severity"],
+            "snapshot_id": None,
+            "template_values": {
+                "node": host["node_name"],
+                "shared_buffers": config_rec.pg_value(shared_buffers, "BYTE"),
+                "max_connections": f"{connections:g}",
+                "work_mem": config_rec.pg_value(work_mem, "BYTE"),
+                "committed": config_rec.pg_value(config_rec.mb_floor(committed), "BYTE"),
+                "memory": config_rec.pg_value(config_rec.mb_floor(memory), "BYTE"),
+            },
+            "observed_value": round(committed / memory * 100, 1),
+            "observed_unit": "PERCENT",
+            "subject_type": "NODE",
+            "subject_identifier": host["node_name"],
+            "details": {"node": host["node_name"], "shared_buffers": shared_buffers,
+                        "max_connections": connections, "work_mem": work_mem,
+                        "committed_bytes": committed, "memory_bytes": memory},
+        })
+    return findings
+
+
 RULE_EVALUATORS = {
     "PG-TRAN-001": evaluate_long_idle_transaction,
     "PG-TRAN-002": evaluate_database_xid_wraparound,
@@ -1833,6 +1994,8 @@ RULE_EVALUATORS = {
     "PG-REP-002": evaluate_replication_slot_wal_unavailable,
     "PG-CONN-001": evaluate_aborted_idle_transaction_connections,
     "PG-CAP-001": evaluate_data_disk_usage,
+    "PG-CONF-003": evaluate_configuration_recommendations,
+    "PG-CONF-007": evaluate_memory_overcommitment,
     "PG-REP-003": evaluate_replication_lag,
     "PG-REP-004": evaluate_replica_not_streaming,
     "PG-REP-005": evaluate_inactive_replication_slot,
@@ -1939,7 +2102,8 @@ def current_rows(rows, requirement, evaluation_time, source=None, uncollected=No
             and (r.get("target_id"), source) not in (uncollected or ())]
 
 
-def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncollected=None):
+def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncollected=None,
+                  context=None):
     """Evaluate one rule -> (outcome, findings, reason).
 
     Missing/stale evidence returns INSUFFICIENT_EVIDENCE; real problems raise.
@@ -1951,7 +2115,7 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
         )
 
     thresholds = load_thresholds(conn, rule["rule_id"])
-    rule = {**rule, "parameters": load_parameters(conn, rule["rule_id"])}
+    rule = {**rule, "parameters": load_parameters(conn, rule["rule_id"]), "context": context}
     evidence_requirements = load_evidence_requirements(
         conn,
         rule["rule_id"],
@@ -2090,6 +2254,7 @@ def run_assessment(
 
         # One evidence load per source per run, shared by all rules.
         evidence_cache = {}
+        context = RunContext(conn, target_id, health_check_id)
         error_count = 0
         outcome_counts = {}
 
@@ -2106,6 +2271,7 @@ def run_assessment(
                         evaluation_time,
                         evidence_cache,
                         uncollected,
+                        context,
                     )
 
                     for finding in findings:
@@ -2122,7 +2288,7 @@ def run_assessment(
                             rule["name"],
                         )
 
-                    insert_assessment_result(
+                    result_id = insert_assessment_result(
                         conn,
                         assessment_run_id,
                         rule,
@@ -2134,6 +2300,9 @@ def run_assessment(
                         load_thresholds(conn, rule["rule_id"]),
                         load_parameters(conn, rule["rule_id"]),
                     )
+                    recommendations = context.recommendations.pop(rule["rule_key"], None)
+                    if recommendations and outcome in (OUTCOME_HEALTHY, OUTCOME_ATTENTION_REQUIRED):
+                        insert_config_recommendations(conn, result_id, recommendations)
 
             except Exception as exc:
                 # Rule's work (incl. findings) was rolled back; record ERROR.

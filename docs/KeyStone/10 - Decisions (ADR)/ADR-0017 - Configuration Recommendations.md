@@ -71,11 +71,11 @@ A recommendation is a value and an acceptable range around it (for example `shar
 
 | Current value | Result |
 | --- | --- |
-| Inside the acceptable range | No finding; the table shows "fits" with the recommended value as information |
-| Outside the range | WARNING with the recommendation and its reason |
-| Endangers the server | CRITICAL, from rules on combinations of settings, not single values: first, memory commitment (`shared_buffers` + `max_connections` × `work_mem` above memory: risk of the OOM killer) |
+| Inside the acceptable range | No finding; stored as FITS |
+| Outside the range | INFO finding (PG-CONF-003) with the recommendation and its reason |
+| Endangers the server | CRITICAL, from rules on combinations of settings, not single values: first, memory commitment (PG-CONF-007: `shared_buffers` + `max_connections` × `work_mem` above physical memory, risk of the OOM killer) |
 
-The range of every setting is written down with its reason.
+A setting outside its range is a recommendation, not a problem (Hasan, 2026-11-02; first planned as WARNING). Executives need the risk, not the values: only CRITICAL configuration risk reaches the executive cards. Recommendations are a DBA's tool; their main place will be the management screens, and until those exist, the technical part of the report.
 
 ### Where the formulas live
 
@@ -85,10 +85,13 @@ Logic in code, numbers in the Dictionary, as for rules:
 - **Dictionary (new table, filled by migrations):** the tunable numbers per setting and workload type: factors, acceptable range bounds, lower and upper limits (for example `maintenance_work_mem` at most 2 GB). Tuning for a customer or sector changes data, not code.
 - **Per health check:** the result of every recommendation is stored: setting, current value, recommended value, acceptable range, status and the Dictionary numbers used. The inputs (memory, CPUs, settings, profile) are not copied: they are already in the collected snapshots and the check's `target_profile`. The same raw data gives different results under different Dictionary numbers, so the result is what the customer was told and stays correct after the Dictionary changes, like `thresholds_used` (Hasan, 2026-11-02).
 
-### Report layout (to be reviewed on the first real report)
+### Report layout (Hasan, 2026-11-02: keep the report short)
 
-- **Executive:** one main-problem card "Configuration deviates from the recommendations (N settings)", closed by default, the most important settings in plain words when opened; the configuration area says how many of the settings fit, deviate or endanger the server.
-- **Technical**, collapsible: the calculation inputs first (smallest server used, workload, storage, dedicated; every assumed default marked); the recommendation table by group (setting, current, recommended, acceptable range, status, reason with the calculation); commands for the settings outside their range, both `ALTER SYSTEM SET` and `patronictl edit-config --pg`, restart-requiring ones marked (Keystone writes them, never runs them); other settings changed from their default as context (setting, value, default, source).
+A long report is not read. Limits:
+
+- **Executive:** no card for recommendations; at most one line in the configuration area ("3 settings differ from the values recommended for this server; details in the technical part"). The only exception is a CRITICAL combination (memory commitment), which is a problem card like any other risk.
+- **Technical**, collapsible: what needs action is open (settings outside their range and settings not assessed, each with its reason, calculation and commands, `ALTER SYSTEM SET` and `patronictl edit-config --pg`, restart-requiring ones marked; Keystone writes them, never runs them); the settings that fit are one line with their count, the list closed; the calculation inputs (smallest server, workload, storage, dedicated, assumed defaults marked).
+- **Not in the report:** other settings changed from their default. They are kept with every configuration snapshot for the management screens and the intelligence layer.
 
 ### Versions
 
@@ -108,7 +111,7 @@ The configuration collector keeps every `pg_settings` row (about 350, with defau
 
 1. Server profile on the target (workload type, dedicated, storage type; "not given" kept apart). Done 2026-11-02 (V046): `workload_type`, `dedicated`, `storage_type` on `keystone.target`, NULL for not given; each health check stores the profile it used with the assumed fields marked (`health_check.target_profile`); the technical report shows it. Reading `rotational` over SSH moves to step 3 with the calculations.
 2. Dictionary table of settings: version range, factors and ranges per workload, limits. Done 2026-11-02 (V047): `config_setting` (group, value type, version range, order), `config_setting_text` (reason per language), `config_parameter` (numbers; the most specific row by workload, storage type and version wins).
-3. Calculation functions with unit tests; results stored per health check; the memory commitment rule (CRITICAL); checkpoint evidence (`pg_stat_bgwriter` / `pg_stat_checkpointer`: requested checkpoints above 20 % → `max_wal_size` doubled, WARNING); storage type over SSH as a note; hardware change since the previous check.
-4. Report: executive card and area line, technical inputs, table, commands, other non-default settings.
+3. a) Done 2026-11-02 (V048): calculation functions with unit tests, `PG_CONFIGURATION_TUNING` with PG-CONF-003 (INFO) and PG-CONF-007 (CRITICAL), results in `keystone.config_recommendation`. b) Checkpoint evidence (`pg_stat_bgwriter` / `pg_stat_checkpointer`: requested checkpoints above 20 % → `max_wal_size` doubled, WARNING); storage type over SSH as a note; hardware change since the previous check.
+4. Report: area line, technical inputs, table of settings needing action, commands (see Report layout).
 
 Each step is its own pull request and is reviewed in the lab.

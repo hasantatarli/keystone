@@ -522,6 +522,90 @@ class ReportTests(test_health_check.HealthCheckTests):
                                  "LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
 
+    def test_configuration_tuning_on_real_settings(self):
+        from psycopg.rows import dict_row
+        from repository.intelligence import assessment_engine as engine
+        from repository.worker import worker
+        sql = Path("providers/postgresql/telemetry/collectors/configuration_snapshot.sql").read_text()
+        version = self.conn.execute("SHOW server_version").fetchone()["server_version"]
+        now = self.conn.execute("SELECT now() AS n").fetchone()["n"]
+        for node, recovery in ((self.node1, False), (self.node2, True)):
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                rows = cur.execute(sql).fetchall()
+            worker.save_configuration_snapshot(self.conn, {"target_id": node}, rows)
+            self.conn.execute(
+                "INSERT INTO postgresql.instance_inventory (target_id, server_version, in_recovery, "
+                "last_collected_at) VALUES (%s, %s, %s, %s) ON CONFLICT (target_id) DO UPDATE "
+                "SET server_version = EXCLUDED.server_version, in_recovery = EXCLUDED.in_recovery, "
+                "last_collected_at = EXCLUDED.last_collected_at", (node, version, recovery, now))
+        self.conn.execute("DELETE FROM postgresql.instance_inventory WHERE target_id NOT IN (%s, %s)",
+                          (self.node1, self.node2))
+        self.add_host(self.node1, 4, 16, [("/", 30, 100)])
+        self.add_host(self.node2, 2, 8, [("/", 30, 100)])        # the smallest node decides
+        self.conn.commit()
+
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
+        outcomes = self.latest_outcomes()
+        self.assertEqual(outcomes["PG-CONF-003"][:2], ("ATTENTION_REQUIRED", "INFO"))
+        self.assertEqual(outcomes["PG-CONF-007"][:2], ("HEALTHY", None))
+        rows = {r["setting_key"]: r for r in self.conn.execute(
+            "SELECT cr.* FROM keystone.config_recommendation cr "
+            "JOIN keystone.assessment_result res USING (assessment_result_id) "
+            "WHERE res.assessment_run_id = (SELECT max(assessment_run_id) FROM keystone.assessment_run)"
+        ).fetchall()}
+        major = int(version.split(".")[0])
+        self.assertEqual(len(rows), 18 if major <= 17 else 17)
+        self.assertEqual(rows["shared_buffers"]["status"], "DEVIATES")          # default 128MB on 8GB
+        self.assertEqual(float(rows["shared_buffers"]["recommended_value"]), 2 * 1024 ** 3)
+        self.assertEqual(rows["shared_buffers"]["calculation"]["memory"], 8 * 1024 ** 3)
+        self.assertEqual(rows["max_parallel_workers"]["status"], "NOT_APPLICABLE")   # 2 CPUs
+        self.assertEqual(rows["checkpoint_completion_target"]["status"], "FITS")
+        finding = self.conn.execute(
+            "SELECT f.finding_text, f.severity FROM keystone.finding f JOIN keystone.rule_definition rd "
+            "USING (rule_id) WHERE rd.rule_key = 'PG-CONF-003' AND f.subject_identifier = 'shared_buffers' "
+            "ORDER BY f.finding_id DESC LIMIT 1").fetchone()
+        self.assertEqual(finding["severity"], "INFO")
+        self.assertEqual(finding["finding_text"], "shared_buffers is 128MB; recommended for this server: "
+                                                  "2GB (acceptable: 1228MB – 3276MB).")
+
+        # 100 connections × 100MB work_mem on the 8GB replica: the OOM risk is CRITICAL.
+        self.conn.execute("UPDATE postgresql.configuration_snapshot SET setting_value = '102400' "
+                          "WHERE target_id = %s AND setting_name = 'work_mem'", (self.node2,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
+        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+        text = self.conn.execute("SELECT finding_text FROM keystone.finding f JOIN keystone.rule_definition "
+                                 "rd USING (rule_id) WHERE rd.rule_key = 'PG-CONF-007' "
+                                 "ORDER BY finding_id DESC LIMIT 1").fetchone()["finding_text"]
+        self.assertEqual(text, "On node-2 shared_buffers (128MB) plus max_connections × work_mem "
+                               "(100 × 100MB) is 10128MB, more than its memory (8GB).")
+
+    def test_recommendations_stay_out_of_the_executive_part(self):
+        check_id = self.make_check()
+        run = self.conn.execute(
+            "SELECT ar.assessment_run_id, rd.rule_id FROM keystone.assessment_run ar "
+            "JOIN keystone.rule_definition rd ON rd.assessment_id = ar.assessment_id "
+            "WHERE ar.health_check_id = %s AND rd.rule_key = 'PG-CONF-003'", (check_id,)).fetchone()
+        self.conn.execute(
+            "INSERT INTO keystone.finding (assessment_run_id, rule_id, severity, title, finding_text, "
+            "recommendation, subject_type, subject_identifier) VALUES (%s, %s, 'INFO', 'Setting', "
+            "'shared_buffers is 128MB.', 'Review.', 'SETTING', 'shared_buffers')",
+            (run["assessment_run_id"], run["rule_id"]))
+        self.conn.execute(
+            "UPDATE keystone.assessment_result SET outcome = 'ATTENTION_REQUIRED', max_severity = 'INFO', "
+            "finding_count = 1, reason = NULL WHERE assessment_run_id = %s AND rule_id = %s",
+            (run["assessment_run_id"], run["rule_id"]))
+        self.conn.commit()
+        data = report.load_report_data(self.conn, check_id)
+        before = report.summarize(data)[0]
+        page = report.render_html(data, "tr")
+        executive = page[:page.index(TECH_PANEL)]
+        problems = executive[executive.index("Öne çıkan sorunlar"):]
+        self.assertNotIn("Öneriden farklı ayar", problems[:problems.index("<h2>", 5)])
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 öneri)', executive)
+        self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
+        self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
+
     def test_context_tolerates_target_clocks_slightly_behind(self):
         # Lab 2026-10-21: VM clocks behind the laptop; this check's inventory looked "not collected".
         check_id = self.make_check()
