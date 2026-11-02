@@ -23,6 +23,9 @@ from test_installer_findings import DisposablePostgres
 
 GB, MB = 1024 ** 3, 1024 ** 2
 
+RESTART_SETTINGS = {"shared_buffers", "huge_pages", "wal_buffers", "max_worker_processes",
+                    "max_connections"}
+
 # pg_settings defaults of PostgreSQL 17 for the settings Keystone recommends.
 PG17_DEFAULTS = {
     "max_connections": ("100", None), "shared_buffers": ("16384", "8kB"),
@@ -96,7 +99,9 @@ class RecommendationTests(unittest.TestCase):
         primary = dict(PG17_DEFAULTS)
         primary.update(settings or {})
         primary = {k: v for k, v in primary.items() if v is not None}
-        rows = {1: {k: {"setting_value": v, "unit": u} for k, (v, u) in primary.items()}}
+        rows = {1: {k: {"setting_value": v, "unit": u,
+                        "context": "postmaster" if k in RESTART_SETTINGS else "user"}
+                    for k, (v, u) in primary.items()}}
         if replica:
             rows[2] = {k: {"setting_value": v, "unit": u} for k, (v, u) in {**primary, **replica}.items()}
         return {"primary_id": 1, "version": version, "names": {1: "node-1", 2: "node-2"},
@@ -174,6 +179,16 @@ class RecommendationTests(unittest.TestCase):
         r = self.recommend(settings={"checkpoint_timeout": None})
         self.assertEqual((r["checkpoint_timeout"]["status"], r["checkpoint_timeout"]["reason_code"]),
                          ("NOT_ASSESSED", "setting_not_collected"))
+
+    def test_restart_and_assumed_profile_are_kept_with_the_result(self):
+        r = self.recommend()                                   # nothing given: every field assumed
+        self.assertTrue(r["shared_buffers"]["restart_required"])
+        self.assertFalse(r["work_mem"]["restart_required"])
+        self.assertEqual(r["random_page_cost"]["assumptions"], ["storage_type"])
+        self.assertEqual(r["work_mem"]["assumptions"], ["dedicated", "workload_type"])
+        self.assertIsNone(r["checkpoint_timeout"]["assumptions"])
+        given = server_profile({"workload_type": "OLTP", "dedicated": True, "storage_type": "SSD"})
+        self.assertIsNone(self.recommend(given)["random_page_cost"]["assumptions"])
 
 
 if __name__ == "__main__":
