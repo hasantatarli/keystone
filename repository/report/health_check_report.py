@@ -88,6 +88,9 @@ TEXTS = {
         "config_fields": {"storage_type": "disk tipi", "dedicated": "PostgreSQL'e ayrılmış olup olmadığı",
                           "workload_type": "iş yükü"},
         "config_differs": "{node} sunucusunda farklı: {value}",
+        "config_disk_assumed": "Disk tipi girilmedi, {profile} varsayıldı; veri diski {nodes} sunucusunda {observed} bildiriyor. Doğruysa profilde disk tipini belirtin.",
+        "config_disk_conflict": "Profilde disk tipi {profile}; veri diski {nodes} sunucusunda {observed} bildiriyor.",
+        "config_disk_virtual": "Sanal makinede ({virt}) disk, altında SSD olsa da dönen disk görünebilir.",
         "config_commands": "Komutlar",
         "config_commands_note": "Keystone bu komutları yalnızca yazar, çalıştırmaz. Bakım penceresinde, değişikliği onaylayarak uygulayın.",
         "config_patroni": "Patroni kullanılıyorsa",
@@ -252,6 +255,9 @@ TEXTS = {
         "config_fields": {"storage_type": "storage type", "dedicated": "whether the server is dedicated",
                           "workload_type": "workload"},
         "config_differs": "different on {node}: {value}",
+        "config_disk_assumed": "Storage type not given, {profile} assumed; the data disk reports {observed} on {nodes}. If that is right, set the storage type in the profile.",
+        "config_disk_conflict": "The profile says {profile}; the data disk reports {observed} on {nodes}.",
+        "config_disk_virtual": "On a virtual machine ({virt}) a disk can appear rotating even when SSD is underneath.",
         "config_commands": "Commands",
         "config_commands_note": "Keystone only writes these commands and never runs them. Apply them in a maintenance window after review.",
         "config_patroni": "With Patroni",
@@ -475,7 +481,7 @@ def load_report_data(conn, health_check_id):
                tc.host AS connection_host, tc.port AS connection_port,
                ii.in_recovery, ii.postmaster_start_time,
                hs.hostname, hs.os_name, hs.os_version, hs.logical_cpu_count,
-               hs.memory_total_bytes, hs.captured_at AS host_captured_at,
+               hs.memory_total_bytes, hs.captured_at AS host_captured_at, hs.virtualization,
                cs.setting_value AS data_directory
         FROM keystone.target t
         LEFT JOIN postgresql.instance_inventory ii
@@ -505,7 +511,7 @@ def load_report_data(conn, health_check_id):
     storage = conn.execute(
         """
         SELECT t.target_id, t.name AS node_name, s.device, s.mount_point, s.used_bytes, s.total_bytes,
-               s.available_bytes
+               s.available_bytes, s.rotational
         FROM keystone.target t
         JOIN LATERAL (
             SELECT max(captured_at) AS captured_at FROM postgresql.storage_snapshot
@@ -1793,6 +1799,36 @@ def config_inputs(data, t):
     return t["config_inputs"].format(node=smallest["name"], facts=", ".join(f for f in facts if f))
 
 
+def config_disk_note(data, t, profile):
+    """A note when the data disk reports another type than the profile (lsblk ROTA); '' otherwise.
+
+    Note only: virtual disks often report rotating on SSD, so the profile stays the input.
+    """
+    entry = profile.get("storage_type")
+    if not entry:
+        return ""
+    differing = []
+    for n in data["nodes"]:
+        disk = data_disk(n, data["storage"])
+        if disk is None or disk.get("rotational") is None:
+            continue
+        observed = "HDD" if disk["rotational"] else "SSD"
+        if observed != entry["value"]:
+            differing.append((n, observed))
+    if not differing:
+        return ""
+    observed = differing[0][1]                      # the profile has one value, so the other one
+    values = t["profile_values"]
+    text = t["config_disk_assumed" if entry.get("assumed") else "config_disk_conflict"].format(
+        profile=values.get(entry["value"], entry["value"]), observed=values.get(observed, observed),
+        nodes=", ".join(n["name"] for n, _ in differing))
+    virtual = sorted({n["virtualization"] for n, o in differing
+                      if o == "HDD" and n.get("virtualization") not in (None, "none")})
+    if virtual:
+        text += " " + t["config_disk_virtual"].format(virt=", ".join(virtual))
+    return text
+
+
 def config_why(row, data, lang, t, profile):
     reasons = data["config_reasons"].get(row["setting_key"], {})
     parts = [reasons.get(lang) or reasons.get(FALLBACK_LANGUAGE, "")]
@@ -1848,6 +1884,8 @@ def render_config(data, lang, t):
     parts = [f'<details class="section"><summary><h2>{e(t["config_title"])}'
              f'<span class="note">{e(summary)}</span></h2></summary>']
     parts.append(f'<p class="note">{e(inputs)}</p>' if inputs else "")
+    disk_note = config_disk_note(data, t, profile)
+    parts.append(f'<p class="note">{e(disk_note)}</p>' if disk_note else "")
     if action:
         parts.append(table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in action]))
         if any(r.get("restart_required") for r in action):

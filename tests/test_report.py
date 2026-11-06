@@ -644,6 +644,17 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("--pg random_page_cost=1.1", technical)
         self.assertIn("Restart sonrası etkin olur: shared_buffers", technical)
         self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
+        self.assertNotIn("bildiriyor", technical)                     # rotation not collected: no note
+
+        # The data disk reports rotating on a VM: a note, the recommendation unchanged (PG021).
+        self.conn.execute("UPDATE postgresql.storage_snapshot SET rotational = TRUE")
+        self.conn.execute("UPDATE postgresql.host_snapshot SET virtualization = 'kvm'")
+        self.conn.commit()
+        technical = self.render(check_id, "tr")
+        self.assertIn("Disk tipi girilmedi, SSD varsayıldı; veri diski node-1, node-2 sunucusunda HDD "
+                      "bildiriyor. Doğruysa profilde disk tipini belirtin. Sanal makinede (kvm) disk, "
+                      "altında SSD olsa da dönen disk görünebilir.", technical)
+        self.assertIn("--pg random_page_cost=1.1", technical)
 
         # Without server data the settings that need it are said, in the card of the missing data.
         self.conn.execute("DELETE FROM postgresql.host_snapshot")

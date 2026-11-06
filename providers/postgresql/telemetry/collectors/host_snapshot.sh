@@ -35,3 +35,14 @@ cat /proc/meminfo
 
 echo "===FILESYSTEMS==="
 df -a -B1 -P -x tmpfs -x devtmpfs
+
+# BLOCK_DEVICES: lsblk ROTA per /dev device (1 rotating, 0 not); VIRTUALIZATION:
+# the hypervisor or "none". Virtual disks often report 1 on SSD: a note only.
+echo "===BLOCK_DEVICES==="
+df -a -P -x tmpfs -x devtmpfs | awk 'NR > 1 && $1 ~ /^\/dev\// {print $1}' | sort -u |
+while read -r device; do
+    echo "$device $(lsblk -ndo ROTA "$device" 2>/dev/null)"
+done
+
+echo "===VIRTUALIZATION==="
+systemd-detect-virt --vm 2>/dev/null || true

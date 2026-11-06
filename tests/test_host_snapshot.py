@@ -53,6 +53,47 @@ class HostSnapshotParseTests(unittest.TestCase):
         shown = report.shown_mounts(storage, {id(data)})
         self.assertEqual([s["mount_point"] for s in shown], ["/", "/var/lib/postgresql/data"])
 
+    def test_older_output_without_disk_sections_leaves_them_unknown(self):
+        rows = worker.parse_host_snapshot_output(OUTPUT)
+        self.assertIsNone(rows[0]["virtualization"])
+        self.assertTrue(all(r["rotational"] is None for r in rows if r["record_type"] == "STORAGE"))
+
+    def test_rotation_per_device_and_hypervisor(self):
+        # Cloud container 2026-11-06: virtio disks under KVM report ROTA 1.
+        output = OUTPUT + "===BLOCK_DEVICES===\n/dev/mapper/ubuntu--vg-ubuntu--lv    1\n/dev/sdb x\n" \
+                          "===VIRTUALIZATION===\nkvm\n"
+        rows = worker.parse_host_snapshot_output(output)
+        self.assertEqual(rows[0]["virtualization"], "kvm")
+        rotation = {r["mount_point"]: r["rotational"] for r in rows if r["record_type"] == "STORAGE"}
+        self.assertEqual(rotation, {"/": None, "/var/lib/postgresql/data": True, "/etc/hosts": True})
+
+
+class DiskTypeNoteTests(unittest.TestCase):
+    """The report's note when the data disk reports another type than the profile."""
+
+    def note(self, profile, rotational, virtualization=None, lang="tr"):
+        from repository.report import health_check_report as report
+        nodes = [{"target_id": 1, "name": "node-1", "data_directory": "/data", "virtualization": virtualization}]
+        storage = [{"target_id": 1, "mount_point": "/data", "total_bytes": 10, "rotational": rotational}]
+        return report.config_disk_note({"nodes": nodes, "storage": storage}, report.TEXTS[lang], profile)
+
+    def test_no_note_when_the_disk_agrees_or_is_unknown(self):
+        self.assertEqual(self.note({"storage_type": {"value": "SSD", "assumed": True}}, False), "")
+        self.assertEqual(self.note({"storage_type": {"value": "SSD", "assumed": True}}, None), "")
+        self.assertEqual(self.note({}, True), "")                            # older checks: no profile
+
+    def test_assumed_profile_asks_for_the_storage_type(self):
+        self.assertEqual(self.note({"storage_type": {"value": "SSD", "assumed": True}}, True),
+                         "Disk tipi girilmedi, SSD varsayıldı; veri diski node-1 sunucusunda HDD bildiriyor. "
+                         "Doğruysa profilde disk tipini belirtin.")
+
+    def test_given_profile_states_the_conflict_and_a_virtual_disk_caveat(self):
+        self.assertEqual(self.note({"storage_type": {"value": "SSD"}}, True, "vmware", "en"),
+                         "The profile says SSD; the data disk reports HDD on node-1. On a virtual machine "
+                         "(vmware) a disk can appear rotating even when SSD is underneath.")
+        self.assertNotIn("virtual", self.note({"storage_type": {"value": "SSD"}}, True, "none", "en"))
+        self.assertNotIn("virtual", self.note({"storage_type": {"value": "HDD"}}, False, "kvm", "en"))
+
 
 if __name__ == "__main__":
     unittest.main()
