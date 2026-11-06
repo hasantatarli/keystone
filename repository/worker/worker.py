@@ -688,6 +688,17 @@ def parse_host_snapshot_output(output):
             - swap_free_bytes
         )
 
+    # Optional sections (older scripts lack them): lsblk ROTA per device, hypervisor.
+    rotational = {}
+
+    for line in sections.get("BLOCK_DEVICES", []):
+        parts = line.split()
+
+        if len(parts) == 2 and parts[1] in ("0", "1"):
+            rotational[parts[0]] = parts[1] == "1"
+
+    virtualization = " ".join(sections.get("VIRTUALIZATION", [])).strip() or None
+
     captured_at = datetime.now(timezone.utc)
 
     rows = [
@@ -709,6 +720,7 @@ def parse_host_snapshot_output(output):
             "memory_used_bytes": memory_used_bytes,
             "swap_total_bytes": swap_total_bytes,
             "swap_used_bytes": swap_used_bytes,
+            "virtualization": virtualization,
         }
     ]
 
@@ -742,6 +754,7 @@ def parse_host_snapshot_output(output):
                 "total_bytes": int(total),
                 "used_bytes": int(used),
                 "available_bytes": int(available),
+                "rotational": rotational.get(device),
             }
         )
 
@@ -2080,7 +2093,8 @@ def save_host_snapshot(conn, task, rows):
                 memory_available_bytes,
                 memory_used_bytes,
                 swap_total_bytes,
-                swap_used_bytes
+                swap_used_bytes,
+                virtualization
             )
             VALUES
             (
@@ -2097,11 +2111,13 @@ def save_host_snapshot(conn, task, rows):
                 %(memory_available_bytes)s,
                 %(memory_used_bytes)s,
                 %(swap_total_bytes)s,
-                %(swap_used_bytes)s
+                %(swap_used_bytes)s,
+                %(virtualization)s
             );
             """,
             {
                 "target_id": task["target_id"],
+                "virtualization": None,
                 **host,
             },
         )
@@ -2118,7 +2134,8 @@ def save_host_snapshot(conn, task, rows):
                     mount_point,
                     total_bytes,
                     used_bytes,
-                    available_bytes
+                    available_bytes,
+                    rotational
                 )
                 VALUES
                 (
@@ -2129,11 +2146,13 @@ def save_host_snapshot(conn, task, rows):
                     %(mount_point)s,
                     %(total_bytes)s,
                     %(used_bytes)s,
-                    %(available_bytes)s
+                    %(available_bytes)s,
+                    %(rotational)s
                 );
                 """,
                 {
                     "target_id": task["target_id"],
+                    "rotational": None,
                     **storage,
                 },
             )
