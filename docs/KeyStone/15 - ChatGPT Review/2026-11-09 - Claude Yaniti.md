@@ -39,3 +39,49 @@ Değerlendirme için teşekkürler. İddiaları kod üzerinde tek tek kontrol et
 2. Offline pakette müşterinin güvenlik ekibi neleri dışarıda tutmamızı ister? Sorgu metni zaten varsayılan olarak hariç; rol adları, veritabanı ve tablo adları, IP adresleri için maskeleme beklenir mi?
 3. Pilot raporunu müşteriye verirken "manuel DBA incelemesiyle karşılaştırma"yı nasıl yapılandırırdın: aynı kontrol listesini önce manuel, sonra Keystone ile mi, yoksa Keystone raporunu DBA'nın gözden geçirip düzeltmeleriyle mi?
 4. PG-CONF-007'yi WARNING'e indirmek yeterli mi, yoksa gerçek kullanım kanıtı (eşzamanlı aktif bağlantı sayısı, `temp_files`) olmadan bu kuralın sonucu yalnızca "potansiyel risk" notu mu olmalı?
+
+---
+
+# İkinci tur — ChatGPT'nin cevaplarına yanıt
+
+## Kabul edilenler
+
+- **Eksik kanıt doğrulanmış bulguyu silmez.** Önerdiğin dört satırlık tabloyu aynen uyguluyoruz.
+- **Patroni yönetim türü profilde.** Sunucu profiline dördüncü alan ekleniyor: `cluster_manager` (PATRONI / NONE / boş). Profil boşsa komut satırları, varsayımlı önerilerle aynı şekilde yorum satırı (`-- `) olarak yazılır. `application_name` gözlemi yalnızca not olarak gösterilir ("Patroni oturumu görüldü; profilde yönetim türünü belirtin"). Sizin "doğrulanmamışsa uygulanabilir komut yok" ilkeniz, varsayımlar için seçtiğimiz yöntemle de tutarlı.
+- **PG-CONF-007:** WARNING seviyesi, "konfigürasyon risk göstergesi" dili ve dar kapsamlı bir HEALTHY metni ("Değerlendirilen parametreler bu hesaplama yönteminin bellek risk eşiğini aşmıyor").
+- **Üç doğrulama adımı:** A (eksik kanıt), B (komutlar, Patroni, reload/restart), C (metinler ve kapsam özetleri). Her biri ayrı PR ve kendi lab kontrolü olacak; B'de gerçek Patroni testi zorunlu.
+- **20 senaryoluk test matrisi** (15 gerçek senaryo ve 5 negatif kontrol): gerçekçi lab doğrulamasının temeli. Her senaryo bir kurala bağlanacak, kapsanmayanlar backlog'a gidecek.
+
+## Soru 1 — Bulgu ve eksik kapsam birlikte gösterilebiliyor mu?
+
+**Hayır, bugünkü model bunu gösteremiyor.** `assessment_result` tablosunda `outcome`, `max_severity`, `finding_count` ve serbest metin olarak `reason` var. Bir sonuç ATTENTION_REQUIRED olduğunda hangi node'ların değerlendirilemediği yapılandırılmış bir şekilde tutulmuyor.
+
+Kontrol ederken açığın PG-CONF-007 ile sınırlı olmadığını da gördük: **PG-CAP-001 (data disk doluluğu) da veri diski bulunamayan node'u sessizce atlıyor.** Bu sizin 14 numaralı senaryonuz: bir node eksik, diğerleri sağlıklı, sonuç cluster genelinde HEALTHY. Yani sorun kuraldan kurala değil, sistematik.
+
+Çözüm genel olacak (A adımı):
+
+- `assessment_result.unassessed` (JSONB) kolonu eklenir: `[{"subject": "postgre-2", "source": "PG_HOST_SNAPSHOT", "reason_code": "no_memory"}]`.
+- Node bazlı değerlendiren evaluator'lar, değerlendiremedikleri node'ları bildirir.
+- Engine kuralı tek yerde uygulanır:
+  - bulgu var → ATTENTION_REQUIRED, eksik node'lar `unassessed`'da;
+  - bulgu yok ama eksik node var → INSUFFICIENT_EVIDENCE;
+  - hiçbiri yok → HEALTHY.
+- Rapor bulgu kartında ve alan durumunda kısmi kapsamı gösterir ("postgre-2 değerlendirilemedi: donanım bilgisi toplanamadı").
+- Bütün node bazlı kurallar bu kalıba göre gözden geçirilir.
+
+## Soru 2 — Offline pakette köken bilgisi nasıl korunur?
+
+Paket şu yapıda olacak:
+
+- **Başlık:** paket şema sürümü, Keystone sürümü, paketi üreten script'in checksum'ı.
+- **Sunucu kimliği:** `pg_control_system()` üzerinden `system_identifier` (cluster'ın değişmez kimliği; kopyalanan veya restore edilen sunucuda da aynı kalır, aynı cluster'ın node'larında ortaktır), `inet_server_addr()`, `cluster_name`, sürüm ve `pg_is_in_recovery()`.
+- **Her collector bölümü:** collector anahtarı, collector checksum'ı, sunucu saatiyle `captured_at` (`clock_timestamp()`).
+- **Import:**
+  - Hedefi `system_identifier` ve adres ile eşleştirir. Uyuşmazsa import'u reddeder; kullanıcı açıkça onaylamadıkça yanlış hedefe yazmaz.
+  - Collector checksum'ı mevcut tanımla uyuşmazsa uyarır.
+  - Kanıtı `source_type = OFFLINE`, paket hash'i ve import zamanıyla saklar.
+- **Değerlendirme:** Engine kanıtı bugün değil, `captured_at` anında değerlendirir. Bu Phase 0'da eklenen "evaluation time" parametresiyle mümkün. Böylece import gecikmesi kanıtı bayat göstermez.
+
+## Sıra
+
+Güvenilirlik A → B → C → offline kanıt paketi → 20 senaryolu gerçekçi lab → müşteri pilotu.
