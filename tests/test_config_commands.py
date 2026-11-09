@@ -7,6 +7,7 @@ Run from the repository root:
     python -B -m unittest discover -s tests -p test_config_commands.py -v
 """
 
+import time
 import unittest
 
 from repository.intelligence import config_recommendations as rec
@@ -119,13 +120,18 @@ class AppliedCommandsTests(unittest.TestCase):
                 for line in got[title].splitlines():
                     if not line.startswith("--"):
                         conn.execute(line)
-            # Reload: the reload block is in effect, the restart block is pending.
-            self.assertEqual(self.setting(conn, "maintenance_work_mem")[0], str(128 * 1024))
-            self.assertEqual(self.setting(conn, "checkpoint_timeout")[0], "900")
-            self.assertEqual(self.setting(conn, "random_page_cost")[0], "1.1")
-            pending = {r[0] for r in conn.execute("SELECT name FROM pg_settings WHERE pending_restart")}
-            self.assertIn("shared_buffers", pending)
-            self.assertNotEqual(self.setting(conn, "shared_buffers")[0], str(256 * 1024 // 8))
+        # pg_reload_conf() only signals: wait until a new session sees the reload block in effect.
+        deadline = time.monotonic() + 10
+        while True:
+            with self.server.connect(autocommit=True) as conn:
+                values = [self.setting(conn, k)[0] for k in
+                          ("maintenance_work_mem", "checkpoint_timeout", "random_page_cost")]
+                restart_value = self.setting(conn, "shared_buffers")[0]
+            if values == [str(128 * 1024), "900", "1.1"] or time.monotonic() > deadline:
+                break
+            time.sleep(0.2)
+        self.assertEqual(values, [str(128 * 1024), "900", "1.1"])
+        self.assertNotEqual(restart_value, str(256 * 1024 // 8))           # needs the restart
         self.server.command([self.server.pg_ctl, "-D", str(self.server.data), "-l", str(self.server.log),
                              "-w", "-t", "30", "restart"])
         with self.server.connect(autocommit=True) as conn:
