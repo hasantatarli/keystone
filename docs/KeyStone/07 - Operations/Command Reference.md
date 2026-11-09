@@ -286,13 +286,14 @@ SELECT * FROM keystone.schedule_consistency_warning WHERE target_id = 1;
 
 ### Server profile (ADR-0017)
 
-Facts Keystone cannot collect, on the target the health check runs on (the SYSTEM, or a NODE without one). NULL means not given: OLTP, dedicated and SSD are assumed, and the report says so.
+Facts Keystone cannot collect, on the target the health check runs on (the SYSTEM, or a NODE without one). NULL means not given: OLTP, dedicated and SSD are assumed, and the report says so. The management type has no default (V052): until it is given, the report writes every configuration command as a comment.
 
 ```sql
 UPDATE keystone.target
 SET workload_type = 'OLTP',      -- OLTP | OLAP | MIXED
     dedicated     = true,        -- the server runs only PostgreSQL
-    storage_type  = 'SSD'        -- SSD | HDD
+    storage_type  = 'SSD',       -- SSD | HDD
+    cluster_manager = 'PATRONI'  -- PATRONI (patronictl edit-config) | NONE (ALTER SYSTEM)
 WHERE target_id = 6;
 ```
 

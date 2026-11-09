@@ -45,7 +45,7 @@ def load_target_tree(conn, target_id):
     """The target and, for a SYSTEM target, its active NODE children."""
     target = conn.execute(
         "SELECT target_id, name, provider, target_type, is_active, "
-        "workload_type, dedicated, storage_type "
+        "workload_type, dedicated, storage_type, cluster_manager "
         "FROM keystone.target WHERE target_id = %s", (target_id,)
     ).fetchone()
     if target is None:

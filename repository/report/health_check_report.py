@@ -93,7 +93,15 @@ TEXTS = {
         "config_disk_virtual": "Sanal makinede ({virt}) disk, altında SSD olsa da dönen disk görünebilir.",
         "config_commands": "Komutlar",
         "config_commands_note": "Keystone bu komutları yalnızca yazar, çalıştırmaz. Bakım penceresinde, değişikliği onaylayarak uygulayın.",
-        "config_patroni": "Patroni kullanılıyorsa",
+        "config_block_reload": "Reload ile etkinleşir",
+        "config_block_restart": "Restart gerektirir",
+        "config_block_patroni": "Patroni (DCS'teki ayarlar; reload Patroni tarafından yapılır)",
+        "config_block_patroni_restart": "Patroni: restart bekleyen sunucuları yeniden başlatır",
+        "config_block_unknown": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Patroni kullanılıyorsa ALTER SYSTEM kullanmayın: ayar DCS'ten sapar. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'PATRONI' (ya da 'NONE').",
+        "config_patroni_seen": "Bu kontrolde Patroni oturumları görüldü.",
+        "config_patroni_config": "Cluster adı PostgreSQL'in cluster_name ayarından alındı; Patroni scope'u farklıysa değiştirin. patronictl yapılandırma dosyasını varsayılan yerde bulamazsa -c <dosya> ekleyin (örneğin -c /etc/patroni/config.yml). Bir sunucunun yerel Patroni yapılandırmasında (postgresql.parameters) tanımlı ayar DCS'teki değeri ezer: uyguladıktan sonra her sunucuda SHOW <ayar> ile doğrulayın; değer değişmediyse ayarı yerel dosyadan kaldırın ve patronictl reload çalıştırın.",
+        "config_assumed_cmd": "varsayım: {items}; profili doğrulayınca kullanın",
+        "config_restart_hint": "Sonra PostgreSQL'i bakım penceresinde yeniden başlatın.",
         "config_restart_list": "Restart sonrası etkin olur: {names}",
         "config_connections": "bağlantı",
         "config_calc_min": "en az", "config_calc_max": "en fazla",
@@ -105,6 +113,7 @@ TEXTS = {
                           "no_cpus": "CPU sayısı bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_disk": "Veri diskinin boyutu bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "few_cpus": "4'ten az CPU var; paralellik ayarları varsayılanda kalır.",
+                          "windows": "Windows'ta PostgreSQL bu ayarı desteklemez; 0 kalmalı.",
                           "setting_not_collected": "Ayar bu kontrolde toplanamadı.",
                           "no_recommendation": "Bu sürüm için öneri yok."},
         "topics_title": "Alanlara göre durum",
@@ -119,7 +128,9 @@ TEXTS = {
         "profile_title": "Sunucu profili", "profile_assumed": "belirtilmedi, varsayıldı",
         "profile_workload_type": "İş yükü", "profile_dedicated": "PostgreSQL'e ayrılmış",
         "profile_storage_type": "Disk",
-        "profile_values": {"OLTP": "OLTP", "OLAP": "Raporlama (OLAP)", "MIXED": "Karma",
+        "profile_cluster_manager": "Ayar yönetimi", "profile_not_given": "belirtilmedi",
+        "profile_values": {"PATRONI": "Patroni", "NONE": "ALTER SYSTEM (Patroni yok)",
+                           "OLTP": "OLTP", "OLAP": "Raporlama (OLAP)", "MIXED": "Karma",
                            "SSD": "SSD", "HDD": "HDD", True: "evet", False: "hayır"},
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -163,14 +174,19 @@ TEXTS = {
         "detail_last_archived_time": "Son başarılı arşiv", "detail_stats_reset": "İstatistik sıfırlama",
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
-        "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
+        "unassessed_line": "Değerlendirilemeyen sunucu: {items}",
+        "unassessed_reason": {"not_collected": "veri toplanamadı", "no_disk": "veri diski bilgisi yok",
+                              "no_memory": "bellek bilgisi yok"},
+        "config_host_partial": "Bilgisi eksik sunucu: {nodes}. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
+        "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
+                         "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
                          "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
-                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yetki, ilgili veritabanında: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <kullanıcı>."},
+                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yalnızca bu sequence'ler için, ilgili veritabanında: GRANT SELECT ON SEQUENCE <sequence> TO <kullanıcı>; (SELECT değeri okumaya yeter, sequence'i ilerletemez; şemadaki bütün sequence'lere toplu yetki gerekmez)."},
         "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
         "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
         "detail_limit_source": "Sınırı belirleyen", "limit_source_column": "kolon tipi",
@@ -179,8 +195,8 @@ TEXTS = {
         "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
         "detail_valid_until": "Geçerlilik sonu",
-        "inv_failover": "Son failover", "inv_failover_ago": "{ago} önce",
-        "inv_failover_never": "Hiç olmamış", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
+        "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
+        "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
@@ -260,7 +276,15 @@ TEXTS = {
         "config_disk_virtual": "On a virtual machine ({virt}) a disk can appear rotating even when SSD is underneath.",
         "config_commands": "Commands",
         "config_commands_note": "Keystone only writes these commands and never runs them. Apply them in a maintenance window after review.",
-        "config_patroni": "With Patroni",
+        "config_block_reload": "Takes effect with a reload",
+        "config_block_restart": "Needs a restart",
+        "config_block_patroni": "Patroni (settings in the DCS; Patroni reloads)",
+        "config_block_patroni_restart": "Patroni: restarts the servers with a pending restart",
+        "config_block_unknown": "The management type is not given in the profile, so the commands are written as comments. With Patroni do not use ALTER SYSTEM: the setting drifts from the DCS. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'PATRONI' (or 'NONE').",
+        "config_patroni_seen": "Patroni sessions were seen in this check.",
+        "config_patroni_config": "The cluster name comes from PostgreSQL's cluster_name; change it if the Patroni scope differs. If patronictl does not find its configuration file, add -c <file> (for example -c /etc/patroni/config.yml). A setting in a server's local Patroni configuration (postgresql.parameters) overrides the DCS: after applying, check SHOW <setting> on every server; if the value did not change, remove the setting from the local file and run patronictl reload.",
+        "config_assumed_cmd": "assumed: {items}; use after confirming the profile",
+        "config_restart_hint": "Then restart PostgreSQL in a maintenance window.",
         "config_restart_list": "Take effect after a restart: {names}",
         "config_connections": "connections",
         "config_calc_min": "at least", "config_calc_max": "at most",
@@ -272,6 +296,7 @@ TEXTS = {
                           "no_cpus": "The number of CPUs is unknown (no server data over SSH).",
                           "no_disk": "The data disk size is unknown (no server data over SSH).",
                           "few_cpus": "Fewer than 4 CPUs; parallelism settings stay at their defaults.",
+                          "windows": "PostgreSQL does not support this setting on Windows; it stays 0.",
                           "setting_not_collected": "The setting was not collected in this check.",
                           "no_recommendation": "No recommendation for this version."},
         "topics_title": "Status by area",
@@ -286,7 +311,9 @@ TEXTS = {
         "profile_title": "Server profile", "profile_assumed": "not given, assumed",
         "profile_workload_type": "Workload", "profile_dedicated": "Dedicated to PostgreSQL",
         "profile_storage_type": "Storage",
-        "profile_values": {"OLTP": "OLTP", "OLAP": "Reporting (OLAP)", "MIXED": "Mixed",
+        "profile_cluster_manager": "Settings managed by", "profile_not_given": "not given",
+        "profile_values": {"PATRONI": "Patroni", "NONE": "ALTER SYSTEM (no Patroni)",
+                           "OLTP": "OLTP", "OLAP": "Reporting (OLAP)", "MIXED": "Mixed",
                            "SSD": "SSD", "HDD": "HDD", True: "yes", False: "no"},
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -329,14 +356,19 @@ TEXTS = {
         "detail_last_archived_time": "Last success", "detail_stats_reset": "Statistics reset",
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
-        "reason_codes": {"no_primary": "There is no primary among the collected servers.",
+        "unassessed_line": "Server not assessed: {items}",
+        "unassessed_reason": {"not_collected": "data not collected", "no_disk": "no data disk information",
+                              "no_memory": "no memory information"},
+        "config_host_partial": "Server data missing: {nodes}. Without the smallest server these settings are not calculated.",
+        "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
+                         "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
                          "no_index_usage": "Index usage was not collected from any server.",
-                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant, in that database: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <user>."},
+                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant only these, in that database: GRANT SELECT ON SEQUENCE <sequence> TO <user>; (SELECT reads the value and cannot advance the sequence; no schema-wide grant is needed)."},
         "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
         "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
         "detail_limit_source": "Limit set by", "limit_source_column": "column type",
@@ -345,8 +377,8 @@ TEXTS = {
         "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
         "detail_valid_until": "Valid until",
-        "inv_failover": "Last failover", "inv_failover_ago": "{ago} ago",
-        "inv_failover_never": "Never", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
+        "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
+        "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
@@ -436,7 +468,7 @@ def load_report_data(conn, health_check_id):
     results = conn.execute(
         """
         SELECT ad.assessment_key, rd.rule_id, rd.rule_key, rd.name AS rule_name, rd.topic_key,
-               res.outcome, res.max_severity, res.reason, ar.assessment_run_id,
+               res.outcome, res.max_severity, res.reason, res.unassessed, ar.assessment_run_id,
                COALESCE(res.thresholds_used, (
                    SELECT jsonb_agg(jsonb_build_object('severity', th.severity,
                                                        'value', th.threshold_value,
@@ -557,6 +589,22 @@ def load_report_data(conn, health_check_id):
         WHERE ar.health_check_id = %s
         ORDER BY cr.config_recommendation_id
         """, (health_check_id,)).fetchall()
+    # A hint only (review 2026-11-09): Patroni's own sessions seen by this check.
+    patroni_seen = conn.execute(
+        """
+        SELECT EXISTS (SELECT 1 FROM postgresql.activity_snapshot a JOIN keystone.target t USING (target_id)
+                       WHERE (t.target_id = %s OR t.parent_target_id = %s)
+                         AND a.captured_at BETWEEN %s AND %s AND a.application_name ILIKE 'patroni%%')
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchone()["exists"]
+    # Patroni's scope is PostgreSQL's cluster_name unless changed; for patronictl restart.
+    cluster_name = conn.execute(
+        """
+        SELECT cs.setting_value FROM postgresql.configuration_snapshot cs
+        JOIN keystone.target t USING (target_id)
+        WHERE (t.target_id = %s OR t.parent_target_id = %s) AND cs.setting_name = 'cluster_name'
+          AND cs.captured_at BETWEEN %s AND %s AND cs.setting_value <> ''
+        ORDER BY cs.captured_at DESC LIMIT 1
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchone()
     config_reasons = {}
     for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
                           "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
@@ -574,7 +622,8 @@ def load_report_data(conn, health_check_id):
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
             "databases": databases, "wal_status": wal_status, "as_of": finished,
-            "config": config, "config_reasons": config_reasons, **dictionary}
+            "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen,
+            "cluster_name": cluster_name["setting_value"] if cluster_name else None, **dictionary}
 
 
 NODE_CONTEXT = {
@@ -805,11 +854,16 @@ def impact_summary(data):
     """Per category: the problems (rules with findings, worst severity) and whether it was checked."""
     evaluated = {r["rule_id"] for r in data["results"]
                  if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED")}
-    summary = {key: {"problems": {}, "checked": False} for key in data["categories"]}
+    # Not assessed, or assessed without some nodes: the area is never "no problems" (review 2026-11-09).
+    incomplete = {r["rule_id"] for r in data["results"]
+                  if r["outcome"] in ("INSUFFICIENT_EVIDENCE", "ERROR") or r.get("unassessed")}
+    summary = {key: {"problems": {}, "checked": False, "incomplete": False} for key in data["categories"]}
     for rule_id, keys in data["rule_categories"].items():
         for key in keys:
             if rule_id in evaluated and key in summary:
                 summary[key]["checked"] = True
+            if rule_id in incomplete and key in summary:
+                summary[key]["incomplete"] = True
     for f in data["findings"]:
         if f["severity"] == "INFO":
             continue                         # recommendations are not problems of an area
@@ -1201,8 +1255,14 @@ def render_impact_chart(data, lang, t):
                 f'{e(rule_text(data, rule_id, lang, "NAME", names.get(rule_id, "")))}</span>'
                 for rule_id, sev in ordered)
         else:
-            value = badge("ok", t["impact_none"]) if s_["checked"] else badge(
-                "unknown", t["impact_not_checked"])
+            if s_["checked"] and s_["incomplete"]:
+                value = badge("partial", t["topic_partial"])
+            elif s_["checked"]:
+                value = badge("ok", t["impact_none"])
+            elif s_["incomplete"]:
+                value = badge("unknown", t["topic_unknown"])
+            else:
+                value = badge("unknown", t["impact_not_checked"])
         rows.append(f'<div class="name" title="{e(localized(entry, lang, "description"))}">'
                     f'{e(name)}</div><div class="val">{value}</div>')
     note = ('<p class="note">' + e(t["scope_note"])
@@ -1248,9 +1308,11 @@ def render_topics(data, lang, t):
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
                 label = t["severity"].get(severity, severity).lower()
+                partial = unassessed_line(r, t)
                 items.append((severity.lower(),
                               f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
-                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))))
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
+                              + (f' <span class="facts">{e(partial)}</span>' if partial else "")))
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
@@ -1347,9 +1409,10 @@ def unassessed_groups(data, lang, t):
 def render_unassessed(data, lang, t):
     """Executive card for checks not done: draws attention without being a finding."""
     groups = unassessed_groups(data, lang, t)
-    count = sum(len(g["rules"]) for g in groups)
-    if not count:
+    if not groups:
         return ""
+    # The same number as the verdict: checks not assessed (settings without data are listed, not counted).
+    count = summarize(data)[0]["not_assessed"]
     items = []
     for g in groups:
         affected = ", ".join(g["rules"])
@@ -1416,9 +1479,12 @@ def profile_line(profile, t):
     if not profile:
         return ""
     items = []
-    for field in ("workload_type", "dedicated", "storage_type"):
+    for field in ("workload_type", "dedicated", "storage_type", "cluster_manager"):
         entry = profile.get(field)
         if not entry:
+            continue
+        if entry["value"] is None:                       # no default: not given, never assumed
+            items.append(e(f'{t["profile_" + field]}: {t["profile_not_given"]}'))
             continue
         text = f'{t["profile_" + field]}: {t["profile_values"].get(entry["value"], entry["value"])}'
         if entry.get("assumed"):
@@ -1637,6 +1703,21 @@ def parameter_line(result, t):
         f"{key} = {fmt_quantity(p['value'], p['unit'], t)}" for key, p in sorted(params.items()))
 
 
+def unassessed_line(result, t):
+    """'Server not assessed: postgre-2 (data not collected)' for a result with partial coverage."""
+    items = [f'{u["node"]} ({t["unassessed_reason"].get(u["reason_code"], u["reason_code"])})'
+             for u in result.get("unassessed") or []]
+    return t["unassessed_line"].format(items=", ".join(items)) if items else ""
+
+
+def hardware_missing_nodes(data):
+    """Nodes whose memory or data disk is unknown, when other nodes' are known (partial host data)."""
+    nodes = [n for n in data["nodes"] if n.get("data_directory")]     # the nodes the engine used
+    missing = [n["name"] for n in nodes
+               if not n.get("memory_total_bytes") or data_disk(n, data["storage"]) is None]
+    return missing if 0 < len(missing) < len(nodes) else []
+
+
 def render_findings_detail(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
@@ -1650,7 +1731,8 @@ def render_findings_detail(data, lang, t):
         shown, rest = findings[:FINDINGS_SHOWN], findings[FINDINGS_SHOWN:]
         more = (f'<details class="more"><summary>{e(t["show_all"].format(n=len(findings)))}</summary>'
                 + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
-        facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
+        facts = [x for x in (threshold_line(result, t), parameter_line(result, t),
+                             unassessed_line(result, t)) if x]
         cards.append(
             f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
             f'{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
@@ -1675,7 +1757,8 @@ def render_results(data, lang, t):
                 note = healthy_text(data, r, lang, t)
             elif r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
-                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
+                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t),
+                                              unassessed_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
             # A rule with findings shows their severity, the word used everywhere else in the report.
@@ -1787,8 +1870,8 @@ def calc_text(row, t, profile):
 def config_inputs(data, t):
     """'Calculated for the smallest server: node (1 CPU, 1.9 GB, data disk 11.2 GB).'"""
     nodes = [n for n in data["nodes"] if n.get("memory_total_bytes")]
-    if not nodes:
-        return ""
+    if not nodes or hardware_missing_nodes(data):
+        return ""                          # no smallest server when one node is unknown
     smallest = min(nodes, key=lambda n: n["memory_total_bytes"])
     facts = [t["config_cpus"].format(n=min(n["logical_cpu_count"] for n in nodes if n.get("logical_cpu_count")))
              if any(n.get("logical_cpu_count") for n in nodes) else "",
@@ -1863,19 +1946,74 @@ def config_row(row, data, lang, t, profile):
             e(acceptable) or "—", config_why(row, data, lang, t, profile)]
 
 
-def config_commands(rows, t):
-    changes = [(r["setting_key"], config_value(r["recommended_value"], r["value_type"], t), r.get("restart_required"))
-               for r in rows if r["status"] == "DEVIATES" and r["recommended_value"]]
+def command_blocks(rows, profile, t, cluster=None):
+    """[(title, text)] of commands for the settings to change (review 2026-11-09).
+
+    Reload and restart apart; ALTER SYSTEM or patronictl by the profile's cluster_manager, both
+    commented out when it is not given; a value resting on an assumed profile field is a comment.
+    """
+    manager = (profile.get("cluster_manager") or {}).get("value")
+    changes = []
+    for r in rows:
+        if r["status"] != "DEVIATES" or not r["recommended_value"]:
+            continue
+        value = config_value(r["recommended_value"], r["value_type"], t)
+        assumed = [t["config_assumed"].format(field=t["config_fields"].get(f, f),
+                                              value=t["profile_values"].get(profile.get(f, {}).get("value"),
+                                                                            profile.get(f, {}).get("value")))
+                   for f in r.get("assumptions") or []]
+        note = t["config_assumed_cmd"].format(items="; ".join(assumed)) if assumed else ""
+        changes.append((r["setting_key"], value, bool(r.get("restart_required")), note))
     if not changes:
+        return []
+    sure = manager is not None
+
+    def sql_line(k, v, note):
+        line = f"ALTER SYSTEM SET {k} = '{v}';"
+        return f"-- {line}  -- {note}" if note else (line if sure else f"-- {line}")
+
+    blocks = []
+    if manager in (None, "NONE"):
+        reload = [sql_line(k, v, n) for k, v, restart, n in changes if not restart]
+        if reload:
+            tail = "SELECT pg_reload_conf();"
+            blocks.append((t["config_block_reload"], "\n".join(reload + [tail if sure else f"-- {tail}"])))
+        restart = [sql_line(k, v, n) for k, v, restart, n in changes if restart]
+        if restart:
+            blocks.append((t["config_block_restart"], "\n".join(restart + [f"-- {t['config_restart_hint']}"])))
+    if manager in (None, "PATRONI"):
+        # patronictl restart needs the cluster name (Patroni 4.1, lab 2026-11-09); Patroni sets cluster_name.
+        name = f" {cluster or '<cluster>'}"
+        direct = [(k, v) for k, v, _, n in changes if not n]
+        lines = []
+        if direct:
+            lines.append(f"patronictl edit-config{name} \\\n"
+                         + " \\\n".join(f"  --pg {k}={v}" for k, v in direct))
+        lines += [f"# patronictl edit-config{name} --pg {k}={v}  # {n}" for k, v, _, n in changes if n]
+        text = "\n".join(lines)
+        if not sure:
+            text = "\n".join(line if line.startswith("#") else f"# {line}" for line in text.split("\n"))
+        blocks.append((t["config_block_patroni"], text))
+        if any(restart and not n for _, _, restart, n in changes):
+            command = f"patronictl restart{name} --pending"
+            blocks.append((t["config_block_patroni_restart"], command if sure else f"# {command}"))
+    return blocks
+
+
+def config_commands(data, rows, t):
+    profile = data["check"].get("target_profile") or {}
+    blocks = command_blocks(rows, profile, t, data.get("cluster_name"))
+    if not blocks:
         return ""
-    sql_ = "\n".join(f"ALTER SYSTEM SET {k} = '{v}';" for k, v, _ in changes) + "\nSELECT pg_reload_conf();"
-    patroni = "patronictl edit-config \\\n" + " \\\n".join(f"  --pg {k}={v}" for k, v, _ in changes)
-    restart = [k for k, _, needs in changes if needs]
-    note = (f'<p class="note">{e(t["config_restart_list"].format(names=", ".join(restart)))}</p>'
-            if restart else "")
-    return (f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"
-            f'<div class="cmd">{e(sql_)}</div>'
-            f"<div class=\"facts\">{e(t['config_patroni'])}:</div><div class=\"cmd\">{e(patroni)}</div>" + note)
+    parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
+    if (profile.get("cluster_manager") or {}).get("value") is None:
+        hint = f" {t['config_patroni_seen']}" if data.get("patroni_seen") else ""
+        parts.append(f'<p class="note">{e(t["config_block_unknown"] + hint)}</p>')
+    for title, text in blocks:
+        parts.append(f'<div class="facts">{e(title)}:</div><div class="cmd">{e(text)}</div>')
+    if any("patronictl" in text for _, text in blocks):
+        parts.append(f'<p class="note">{e(t["config_patroni_config"])}</p>')
+    return "".join(parts)
 
 
 def render_config(data, lang, t):
@@ -1903,11 +2041,14 @@ def render_config(data, lang, t):
     for r in missing:
         code = "no_host" if r["reason_code"] in HOST_REASONS else r["reason_code"]
         by_reason.setdefault(code, []).append(r["setting_key"])
+    partial_hosts = hardware_missing_nodes(data)
     for code, names in by_reason.items():
+        cause = t["config_reason"].get(code, code or "")
+        if code == "no_host" and partial_hosts:
+            cause = t["config_host_partial"].format(nodes=", ".join(partial_hosts))
         parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
-                     f'{e(", ".join(names))}<span class="facts"> — '
-                     f'{e(t["config_reason"].get(code, code or ""))}</span></p>')
-    parts.append(config_commands(rows, t))
+                     f'{e(", ".join(names))}<span class="facts"> — {e(cause)}</span></p>')
+    parts.append(config_commands(data, rows, t))
     if fine:
         parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'
                      + table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in fine])

@@ -48,6 +48,7 @@ Each rule runs in its own transaction. If anything fails, the rule's partial wor
 
 - **Latest snapshot only.** Loaders read the most recent captured snapshot for the target (for NODE-scoped evidence, per node). Rules do not yet use history.
 - **Every row is judged on its own age** (2026-10-21). Rows older than the rule's freshness limit are dropped before evaluation, so a node whose collection failed is not judged on its last snapshot. A health check additionally ignores the rows of every target and collector it failed to collect (`health_check_collection` status other than SUCCESS / PARTIAL_SUCCESS): it judges only what it collected itself. The report shows context on the same basis. Collection status, not capture time, decides, because capture times come from the target clocks (lab: VM clocks 3 minutes behind the laptop). Lab case: postgre-1 was unreachable and its 1.5-hour-old settings produced findings.
+- **A node not judged is never counted as fine** (V051, review 2026-11-09). When a required NODE-scoped source has no current rows for a node (stale, or not collected by this health check), or an evaluator cannot judge a node (PG-CAP-001 without the node's data disk, PG-CONF-007 without its memory), the node is recorded in `assessment_result.unassessed`. Findings on other nodes stay (ATTENTION_REQUIRED, the missing nodes listed with them); without findings the result is INSUFFICIENT_EVIDENCE naming the nodes, never HEALTHY. Configuration recommendations need every node's memory, CPUs and data disk: the smallest node decides, so one unknown node leaves the hardware-dependent settings not assessed.
 - **The current primary** is the node not in recovery with the newest instance inventory; after a failover the old primary's row can linger.
 - **The observed value is what was measured; thresholds only decide the severity** (Hasan, 2026-10-21). A finding never reports a derived or adjusted figure as if it had been measured. When a rule compares an adjusted value (for example lag beyond an intended delay, usage beyond a reserve), the finding shows the measured value, the adjustment and the compared part separately. Applies to every rule.
 - **Thresholds are inclusive.** A value equal to a threshold reaches it (`>=`).
@@ -440,6 +441,8 @@ Known limitations: relative to `autovacuum_multixact_freeze_max_age` not evaluat
 
 Known limitations: whether archiving succeeds is PG-BKP-001 (V041). Backups themselves are detected later by method (catalogue decision 4).
 
+Wording (V053, review 2026-11-09): archiving off means no point-in-time recovery from a WAL archive, not that there is no backup; snapshots, pg_dump or a backup service are not visible to this check. Archiving on does not prove a restorable backup either. Backup verification and restore readiness are separate future checks.
+
 ## PG-SEC-002 — MD5 Password Encryption / PG-SEC-003 — SSL Disabled (PG_SECURITY_HEALTH, topic SECURITY)
 
 | | |
@@ -460,6 +463,8 @@ Unit tests for every condition and boundary. Lab: pending.
 Two new collectors: `PG_WAL_STATUS` (NODE: `pg_stat_archiver`, `archive_mode`, the primary's current timeline from its WAL file name and the modification time of that timeline's history file from `pg_ls_waldir()`) and `PG_PREPARED_TRANSACTIONS` (SYSTEM: one status row, always present, plus one row per `pg_prepared_xacts` entry). Both work with `pg_monitor`.
 
 An evaluator may now raise `InsufficientEvidence(source, code, message)`: the rule ends INSUFFICIENT_EVIDENCE with the reason `SOURCE: [code] message`, and the report explains the code in its language.
+
+Wording (V053): PG-SEC-003 says the server does not accept TLS; encryption elsewhere on the network (VPN, a proxy) is not visible to this check.
 
 ## PG-BKP-001 — WAL Archive Failures (PG_BACKUP_HEALTH, topic BACKUP)
 
@@ -508,6 +513,8 @@ Unit tests for every condition; repository test runs both real collectors on a d
 # Batch of 2026-10-27 — indexes and security objects (V042, PG016)
 
 New collectors: `PG_INDEX_USAGE` (scope NODE_DATABASE, ADR-0009: every database of every node; a DATABASE row per collected database with `pg_is_in_recovery()` and the statistics start, an INDEX row per user index with scans, size, validity, uniqueness, constraint and whether `CREATE INDEX CONCURRENTLY` is still running), `PG_SCHEMA_PRIVILEGES` (DATABASE: PUBLIC usage / create per user schema) and `PG_ROLES` (SYSTEM: role attributes, predefined `pg_*` roles left out, no password hashes). All work with `pg_monitor`.
+
+Wording (V053): the time is the current timeline history file's modification time, approximate (a copy or restore changes it); a planned switchover and a failover look the same. The executive inventory says "none observed" for timeline 1, not "never".
 
 ## PG-IDX-001 — Unused Index (PG_INDEX_HEALTH, topic INDEXES)
 
@@ -606,17 +613,17 @@ Checkpoint evidence (V050, PG_CHECKPOINT_STATS optional): with at least 20 check
 
 Storage type note (PG021): the host collector reads `lsblk` ROTA for the data disk's device and the hypervisor (`systemd-detect-virt --vm`). When the data disk reports another type than the profile, the report says so above the table (assumed profile: asks to set the storage type; given profile: states the conflict); on a virtual machine a rotating report gets a caveat, since virtual disks often report rotating on SSD. Note only: the profile stays the input of `random_page_cost` and `effective_io_concurrency`.
 
-## PG-CONF-007 — Memory Overcommitment
+## PG-CONF-007 — Memory Overcommitment Risk
 
 | | |
 | --- | --- |
 | Evidence | `PG_CONFIGURATION_SNAPSHOT`, `PG_HOST_SNAPSHOT`, required (86400 s) |
 | Condition | On a node, `shared_buffers + max_connections × work_mem` above its physical memory |
-| Severity | CRITICAL (OOM killer restarts the whole database) |
+| Severity | WARNING since V053 (was CRITICAL): a configuration risk indicator, not measured memory use (review 2026-11-09) |
 | Subject | NODE |
 
 **Design notes**  
-Physical memory, not the non-dedicated share. The formula is pessimistic (not every connection uses `work_mem` at once) but a query can use it several times. Each node is judged with its own settings and memory; nodes without host data are skipped.
+Physical memory, not the non-dedicated share. The formula is pessimistic (not every connection uses `work_mem` at once) but a query can use it several times. Each node is judged with its own settings and memory; a node without host data is listed as not assessed (V051), and without findings the rule is INSUFFICIENT_EVIDENCE. Texts (V053) say "potential risk, not measured use"; HEALTHY does not promise memory health: the formula ignores parallel workers and several sort / hash steps per query, and many connections use no `work_mem` at all.
 
 **Verification (PG-CONF-003/007)**  
 Calculation tests on the installed Dictionary (`tests/test_config_recommendations.py`); repository test runs the real configuration collector, two nodes of 16 GB / 4 CPUs and 8 GB / 2 CPUs, and a 100 MB `work_mem` on the smaller one for CRITICAL. Lab: pending.

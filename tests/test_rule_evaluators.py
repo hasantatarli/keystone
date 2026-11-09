@@ -35,7 +35,7 @@ def threshold(severity, value, unit):
 
 
 def rule(default_severity=None):
-    return {"default_severity": default_severity}
+    return {"default_severity": default_severity, "unassessed": []}
 
 
 def severities(findings):
@@ -505,6 +505,18 @@ class DataDiskUsageTests(unittest.TestCase):
         evidence["PG_CONFIGURATION_SNAPSHOT"] = []
         self.assertEqual(engine.evaluate_data_disk_usage(evidence, rule(), DATA_DISK_THRESHOLDS), [])
         self.assertEqual(self.evaluate({1: ("relative/path", [("/data", 95, 100)])}), [])
+
+    def test_node_without_disk_data_is_reported_unassessed_and_findings_stay(self):
+        # Review 2026-11-09: one node missing must not make the system look fine.
+        evidence = self.evidence({1: ("/pg", [("/", 92, 100)]), 2: ("/pg", [])})
+        evidence["PG_CONFIGURATION_SNAPSHOT"] += [{"target_id": 2, "setting_name": "port",
+                                                   "setting_value": "5432", "captured_at": NOW,
+                                                   "node_name": "node-2"}]
+        r = rule()
+        findings = engine.evaluate_data_disk_usage(evidence, r, DATA_DISK_THRESHOLDS)
+        self.assertEqual(severities(findings), ["CRITICAL"])
+        self.assertEqual(r["unassessed"], [{"target_id": 2, "node": "node-2",
+                                            "source": "PG_HOST_SNAPSHOT", "reason_code": "no_disk"}])
 
     def test_root_reserved_blocks_count_as_used_like_df(self):
         # Lab postgre-1: df shows 8.7G used, 2.0G available, Use% 82; used/size alone is 77.
@@ -1181,3 +1193,32 @@ class SequenceExhaustionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryOvercommitmentCoverageTests(unittest.TestCase):
+    """PG-CONF-007 with memory known on some nodes only (review 2026-11-09)."""
+
+    def evidence(self, nodes):
+        hosts, config = [], []
+        for target_id, (memory_gb, work_mem_kb) in nodes.items():
+            name = f"node-{target_id}"
+            for key, value, unit in (("shared_buffers", "16384", "8kB"), ("max_connections", "100", None),
+                                     ("work_mem", str(work_mem_kb), "kB")):
+                config.append({"target_id": target_id, "node_name": name, "setting_name": key,
+                               "setting_value": value, "unit": unit, "vartype": "integer",
+                               "captured_at": NOW})
+            if memory_gb is not None:
+                hosts.append({"record_type": "HOST", "target_id": target_id, "node_name": name,
+                              "memory_total_bytes": memory_gb * GB, "captured_at": NOW})
+        return {"PG_HOST_SNAPSHOT": hosts, "PG_CONFIGURATION_SNAPSHOT": config}
+
+    def test_finding_stays_and_the_node_without_memory_is_reported(self):
+        r = rule("WARNING")
+        findings = engine.evaluate_memory_overcommitment(
+            self.evidence({1: (8, 102400), 2: (None, 4096)}), r, [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["node-1"])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]], [("node-2", "no_memory")])
+
+    def test_no_memory_anywhere_is_not_assessed(self):
+        with self.assertRaises(engine.InsufficientEvidence):
+            engine.evaluate_memory_overcommitment(self.evidence({1: (None, 4096)}), rule(), [])

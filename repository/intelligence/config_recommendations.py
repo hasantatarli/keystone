@@ -7,6 +7,7 @@ numbers or words. Recommended values are written in PostgreSQL syntax (128MB,
 """
 
 import math
+import re
 
 from repository.intelligence.config_dictionary import parameter, settings_for_version
 
@@ -29,6 +30,10 @@ PROFILE_DEPENDS = {
     "max_wal_size": ("workload_type",), "min_wal_size": ("workload_type",),
     "random_page_cost": ("storage_type",), "effective_io_concurrency": ("storage_type",),
 }
+
+
+# Settings PostgreSQL rejects above 0 on Windows (no posix_fadvise): never recommended there.
+WINDOWS_UNSUPPORTED = ("effective_io_concurrency",)
 
 
 class NotAssessed(Exception):
@@ -108,8 +113,15 @@ def server_facts(evidence):
         mount = data_mount(directory, mounts)
         if mount:
             disks[target_id] = mount["total_bytes"]
+    # The smallest node decides: if any node's value is unknown, so is the minimum.
     with_memory = [hosts[t] for t in settings if t in hosts and hosts[t].get("memory_total_bytes")]
     with_cpus = [hosts[t] for t in settings if t in hosts and hosts[t].get("logical_cpu_count")]
+    if len(with_memory) < len(settings):
+        with_memory = []
+    if len(with_cpus) < len(settings):
+        with_cpus = []
+    if len(disks) < len(settings):
+        disks = {}
     version = None
     if primary and primary.get("server_version"):
         version = int(str(primary["server_version"]).split(".")[0])
@@ -122,9 +134,18 @@ def server_facts(evidence):
         "memory_node": min(with_memory, key=lambda h: h["memory_total_bytes"])["target_id"] if with_memory else None,
         "cpus": min((h["logical_cpu_count"] for h in with_cpus), default=None),
         "disk": min(disks.values(), default=None),
-        "nodes_without_host": sorted(names[t] for t in settings if t not in hosts),
+        "nodes_without_host": sorted(names[t] for t in settings
+                                     if t not in hosts or not hosts[t].get("memory_total_bytes")),
         "checkpoints": next((c for c in evidence.get("PG_CHECKPOINT_STATS") or [] if not c["in_recovery"]), None),
+        "windows": on_windows(settings.get(primary_id, {})),
     }
+
+
+def on_windows(settings):
+    """PostgreSQL on Windows: the shared memory type only Windows has, or a drive-letter data directory."""
+    dsm = (settings.get("dynamic_shared_memory_type") or {}).get("setting_value")
+    directory = (settings.get("data_directory") or {}).get("setting_value") or ""
+    return dsm == "windows" or re.match(r"^[A-Za-z]:[\\/]", directory) is not None
 
 
 # ----------------------------------------------------------------- calculations
@@ -161,6 +182,8 @@ def recommend(dictionary, facts, profile):
         try:
             if current is None:
                 raise NotAssessed("setting_not_collected")
+            if key in WINDOWS_UNSUPPORTED and facts.get("windows"):
+                raise NotAssessed("windows", status="NOT_APPLICABLE")
             recommended, calculation = CALCULATIONS.get(key, fixed_value)(p, facts, dedicated, recommended_so_far)
             recommended_so_far[key] = recommended
             acceptable = acceptable_range(p, recommended)

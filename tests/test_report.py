@@ -106,7 +106,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Etkilenen alanlar", executive)
         self.assertIn("Performans", executive)                    # PG-TRAN-001 categories
         self.assertIn("Kapasite", executive)
-        self.assertIn("Bu kontrolde incelenmedi", executive)      # Security has no rules yet
+        # Areas whose rules could not be assessed say so (review 2026-11-09), never "no problems".
+        self.assertNotIn("Sorun bulunmadı</span></div><div class=\"name\" title=\"Yetki", executive)
         self.assertIn("Transaction yönetimi", executive)
         self.assertIn("Değerlendirilemedi", executive)            # replication not assessed
 
@@ -297,6 +298,33 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("/var/lib/postgresql on node-1 is 92% full", row["finding_text"])
         self.assertEqual({t["severity"] for t in row["thresholds_used"]}, {"WARNING", "CRITICAL"})
 
+    def test_data_disk_rule_with_one_node_unknown(self):
+        # Review 2026-11-09: node-2's disk is unknown; healthy node-1 must not make the system healthy.
+        from repository.intelligence import assessment_engine as engine
+        self.add_host(self.node1, 4, 16, [("/", 30, 100)], "/var/lib/postgresql/16/main")
+        self.add_host(self.node2, 4, 16, [], "/var/lib/postgresql/16/main")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+        query = ("SELECT res.outcome, res.reason, res.unassessed FROM keystone.assessment_result res "
+                 "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-CAP-001' "
+                 "ORDER BY res.assessment_result_id DESC LIMIT 1")
+        row = self.conn.execute(query).fetchone()
+        self.assertEqual(row["outcome"], "INSUFFICIENT_EVIDENCE")
+        self.assertIn("[nodes_unassessed]", row["reason"])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in row["unassessed"]], [("node-2", "no_disk")])
+
+        # node-1 fills up: its finding stays, node-2 is still listed as not assessed.
+        self.conn.execute("UPDATE postgresql.storage_snapshot SET used_bytes = total_bytes * 0.92 "
+                          "WHERE target_id = %s", (self.node1,))
+        self.conn.commit()
+        check_id = self.make_check()
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system, health_check_id=check_id)
+        row = self.conn.execute(query).fetchone()
+        self.assertEqual(row["outcome"], "ATTENTION_REQUIRED")
+        self.assertEqual([u["node"] for u in row["unassessed"]], ["node-2"])
+        page = self.render(check_id, "tr")
+        self.assertIn("Değerlendirilemeyen sunucu: node-2 (veri diski bilgisi yok)", page)
+
     def test_data_disk_rule_without_host_evidence_is_not_assessed(self):
         from repository.intelligence import assessment_engine as engine
         engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
@@ -469,7 +497,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(server_profile({"workload_type": "MIXED", "dedicated": False}),
                          {"workload_type": {"value": "MIXED", "assumed": False},
                           "dedicated": {"value": False, "assumed": False},
-                          "storage_type": {"value": "SSD", "assumed": True}})
+                          "storage_type": {"value": "SSD", "assumed": True},
+                          "cluster_manager": {"value": None, "assumed": False}})
         self.assertEqual(report.profile_line(None, report.TEXTS["tr"]), "")
 
     def test_problem_cards_list_causes_and_steps(self):
@@ -573,17 +602,18 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(finding["finding_text"], "shared_buffers is 128MB; recommended for this server: "
                                                   "2GB (acceptable: 1228MB – 3276MB).")
 
-        # 100 connections × 100MB work_mem on the 8GB replica: the OOM risk is CRITICAL.
+        # 100 connections × 100MB work_mem on the 8GB replica: a WARNING risk indicator (review 2026-11-09).
         self.conn.execute("UPDATE postgresql.configuration_snapshot SET setting_value = '102400' "
                           "WHERE target_id = %s AND setting_name = 'work_mem'", (self.node2,))
         self.conn.commit()
         engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
-        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][:2], ("ATTENTION_REQUIRED", "WARNING"))
         text = self.conn.execute("SELECT finding_text FROM keystone.finding f JOIN keystone.rule_definition "
                                  "rd USING (rule_id) WHERE rd.rule_key = 'PG-CONF-007' "
                                  "ORDER BY finding_id DESC LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "On node-2 shared_buffers (128MB) plus max_connections × work_mem "
-                               "(100 × 100MB) is 10128MB, more than its memory (8GB).")
+                               "(100 × 100MB) is 10128MB, more than its memory (8GB): a potential risk, "
+                               "not measured use.")
 
     def test_checkpoint_collector_runs_on_this_version_and_feeds_max_wal_size(self):
         from psycopg.rows import dict_row
@@ -642,7 +672,12 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("<td>log_min_duration_statement</td><td>kapalı</td><td>1s</td>", technical)
         self.assertIn("ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
         self.assertIn("--pg random_page_cost=1.1", technical)
-        self.assertIn("Restart sonrası etkin olur: shared_buffers", technical)
+        # Management type not given: every command a comment, reload and restart apart (review 2026-11-09).
+        self.assertIn("Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı.", technical)
+        self.assertIn("-- ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
+        self.assertIn("Restart gerektirir:", technical)
+        self.assertIn("# patronictl restart", technical)
+        self.assertIn("Ayar yönetimi: belirtilmedi", technical)
         self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
         self.assertNotIn("bildiriyor", technical)                     # rotation not collected: no note
 
@@ -655,6 +690,16 @@ class ReportTests(test_health_check.HealthCheckTests):
                       "Doğruysa profilde disk tipini belirtin. Sanal makinede (VirtualBox) disk, "
                       "altında SSD olsa da dönen disk görünebilir.", technical)
         self.assertIn("--pg random_page_cost=1.1", technical)
+
+        # node-2's server data missing: no calculation from node-1 alone, node-2 named (review 2026-11-09).
+        self.conn.execute("DELETE FROM postgresql.host_snapshot WHERE target_id = %s", (self.node2,))
+        self.conn.execute("DELETE FROM postgresql.storage_snapshot WHERE target_id = %s", (self.node2,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system, health_check_id=check_id)
+        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][0], "INSUFFICIENT_EVIDENCE")
+        partial = report.render_html(report.load_report_data(self.conn, check_id), "tr")
+        self.assertIn("Bilgisi eksik sunucu: node-2. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
+                      partial)
 
         # Without server data the settings that need it are said, in the card of the missing data.
         self.conn.execute("DELETE FROM postgresql.host_snapshot")
@@ -674,6 +719,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertNotIn("<td>shared_buffers ↻</td>", technical)       # no table row per missing setting
         groups = report.unassessed_groups(data, "tr", report.TEXTS["tr"])
         self.assertIn("Konfigürasyon önerileri (10 ayar)", [name for g in groups for name in g["rules"]])
+        # The card counts what the verdict counts: checks, not the settings listed with them.
+        count = report.summarize(data)[0]["not_assessed"]
+        self.assertIn(f'Değerlendirilemeyen kontroller<span class="note">{count}</span>',
+                      report.render_html(data, "tr"))
         self.assertEqual(dict(report.topic_summary(data))["CONFIGURATION"]["status"], "partial")
 
     def test_recommendations_stay_out_of_the_executive_part(self):
@@ -1135,7 +1184,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.commit()
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Sorun bulunmadı", executive)
+        # PG-CONN-001 healthy, other rules of the same areas not assessed: partly, not "no problems".
+        impact = executive[executive.index("Etkilenen alanlar"):executive.index("Alanlara göre durum")]
+        self.assertIn("Kısmen değerlendirildi", impact)
+        self.assertNotIn("Sorun bulunmadı", impact)
         self.assertNotIn("Sorun yok", executive)
         self.assertIn("Yalnızca bu kontrolde değerlendirilen kurallara göre.", executive)
 

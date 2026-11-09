@@ -154,7 +154,7 @@ EXPECTED_RULES = {
     },
     "PG-CONF-007": {
         "assessment": "PG_CONFIGURATION_TUNING",
-        "default_severity": "CRITICAL",
+        "default_severity": "WARNING",
         "thresholds": {},
         "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400),
                      "PG_HOST_SNAPSHOT": (True, 86400)},

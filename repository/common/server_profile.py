@@ -5,6 +5,9 @@ NULL on the target means "not given"; the default is used and marked as assumed.
 
 PROFILE_DEFAULTS = {"workload_type": "OLTP", "dedicated": True, "storage_type": "SSD"}
 
+# Fields without a default: never assumed, only known or not given (value None).
+PROFILE_UNKNOWN = ("cluster_manager",)
+
 
 def server_profile(target):
     """{field: {"value": ..., "assumed": bool}} from a target row; missing fields count as not given."""
@@ -12,4 +15,6 @@ def server_profile(target):
     for field, default in PROFILE_DEFAULTS.items():
         value = target.get(field)
         profile[field] = {"value": default if value is None else value, "assumed": value is None}
+    for field in PROFILE_UNKNOWN:
+        profile[field] = {"value": target.get(field), "assumed": False}
     return profile
