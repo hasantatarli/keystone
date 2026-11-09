@@ -707,7 +707,7 @@ def parse_host_snapshot_output(output):
             "captured_at": captured_at,
             "source_type": "AUTOMATED",
             "hostname": hostname,
-            "os_family": "LINUX",
+            "os_family": (" ".join(sections.get("OS_FAMILY", [])).strip() or "LINUX"),
             "os_name": os_release.get(
                 "PRETTY_NAME",
                 os_release.get("NAME"),

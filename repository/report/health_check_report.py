@@ -43,6 +43,7 @@ TEXTS = {
     "tr": {
         "title": "Veritabanı Sağlık Kontrolü Raporu",
         "target": "Sistem", "date": "Tarih", "check_no": "Kontrol no", "requested_by": "Talep eden",
+        "evidence": "Kanıt", "evidence_offline": "offline toplandı (müşteri tarafında salt okunur script'lerle), içe aktarıldı {imported}",
         "part_exec": "Yönetici Özeti", "part_tech": "Teknik Detaylar",
         "verdict_critical": "Acil müdahale gerektiren sorunlar var.",
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
@@ -226,6 +227,7 @@ TEXTS = {
     "en": {
         "title": "Database Health Check Report",
         "target": "System", "date": "Date", "check_no": "Check no", "requested_by": "Requested by",
+        "evidence": "Evidence", "evidence_offline": "collected offline (read-only scripts on the customer side), imported {imported}",
         "part_exec": "Executive Summary", "part_tech": "Technical Details",
         "verdict_critical": "There are problems that need immediate action.",
         "verdict_warning": "There are problems that need attention.",
@@ -1051,6 +1053,10 @@ def render_header(data, t):
             (t["check_no"], check["health_check_id"])]
     if check["requested_by"]:
         meta.append((t["requested_by"], check["requested_by"]))
+    if check.get("source") == "OFFLINE":
+        # Offline: the date above is the capture; when it was imported is said apart.
+        meta.append((t["evidence"], t["evidence_offline"].format(
+            imported=fmt_time(check["imported_at"]) if check.get("imported_at") else "-")))
     return ('<header><div class="brand">Keystone</div>'
             f"<h1>{e(t['title'])}</h1><div class=\"meta\">"
             + "".join(f"<span>{e(label)}: <b>{e(value)}</b></span>" for label, value in meta)

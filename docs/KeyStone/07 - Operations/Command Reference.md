@@ -189,6 +189,35 @@ ORDER BY ad.assessment_key, rd.rule_key;
 
 ---
 
+### Offline health check (no Keystone connection, ADR-0018)
+
+For customers where Keystone cannot connect (jump server, GUI client only). The customer side runs read-only scripts; the files are imported here and judged as of their capture time.
+
+1. Generate the scripts (from the collector files; never edited by hand) and give the folder to whoever runs them. `KILAVUZ_TOPLAMA.md` inside explains the steps in Turkish:
+
+```powershell
+python -m repository.offline.bundle --out C:\keystone-offline
+```
+
+2. Register the system without connections (once). Name the nodes as the files will be named:
+
+```sql
+INSERT INTO keystone.target (name, provider, target_type, environment) VALUES ('musteri-db', 'PostgreSQL', 'SYSTEM', 'PROD') RETURNING target_id;   -- e.g. 20
+INSERT INTO keystone.target (name, provider, target_type, environment, parent_target_id) VALUES ('db-1', 'PostgreSQL', 'NODE', 'PROD', 20), ('db-2', 'PostgreSQL', 'NODE', 'PROD', 20);
+-- A standalone server can be one NODE target without a SYSTEM.
+```
+
+3. Import the files and write the report:
+
+```powershell
+python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_postgres.json db-1_app.json db-2_node.json --host db-1=db-1_host.txt --report tr
+```
+
+- Files are matched to nodes by a connection address if one is defined, else by the file name starting with the node name; `--node db-2=file.json` says it explicitly. One node: any name works.
+- Refused before anything is written: files of different systems (`system_identifier`), a system different from what Keystone knew, the same script twice for one server and database.
+- A collector changed since the scripts were generated is not imported (FAILED: generate the scripts again). Missing files make their collections NOT_COLLECTED; the rules then say "not assessed".
+- The report header says "collected offline" with the import time; the date is the capture time.
+
 ## 7. Credential tool
 
 Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.credential_data`. The password is typed hidden.

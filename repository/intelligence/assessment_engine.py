@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 import psycopg
@@ -1534,13 +1535,21 @@ def node_name_of(evidence, target_id):
     return str(target_id)
 
 
+def comparable_path(path):
+    """Windows paths (C:\\data, C:/data, c:\\) compared like POSIX ones; POSIX paths unchanged."""
+    if re.match(r"^[A-Za-z]:[\\/]", path or ""):
+        return path[0].lower() + path[1:].replace("\\", "/")
+    return path
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
         return None
+    data_directory = comparable_path(data_directory)
     best = None
     for m in mounts:
-        point = m["mount_point"]
+        point = comparable_path(m["mount_point"])
         if data_directory == point or data_directory.startswith(point.rstrip("/") + "/"):
             if best is None or len(point) > len(best["mount_point"]):
                 best = m

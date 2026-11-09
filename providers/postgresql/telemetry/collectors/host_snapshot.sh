@@ -18,6 +18,9 @@
 # Pseudo filesystems (size 0) are skipped by the parser.
 # =============================================================================
 
+echo "===CAPTURED_AT==="
+date -u +%Y-%m-%dT%H:%M:%SZ
+
 echo "===HOSTNAME==="
 hostname
 
