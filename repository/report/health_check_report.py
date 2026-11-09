@@ -186,7 +186,7 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
                          "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
-                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yetki, ilgili veritabanında: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <kullanıcı>."},
+                         "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yalnızca bu sequence'ler için, ilgili veritabanında: GRANT SELECT ON SEQUENCE <sequence> TO <kullanıcı>; (SELECT değeri okumaya yeter, sequence'i ilerletemez; şemadaki bütün sequence'lere toplu yetki gerekmez)."},
         "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
         "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
         "detail_limit_source": "Sınırı belirleyen", "limit_source_column": "kolon tipi",
@@ -195,8 +195,8 @@ TEXTS = {
         "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
         "detail_valid_until": "Geçerlilik sonu",
-        "inv_failover": "Son failover", "inv_failover_ago": "{ago} önce",
-        "inv_failover_never": "Hiç olmamış", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
+        "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
+        "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
@@ -368,7 +368,7 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
                          "no_index_usage": "Index usage was not collected from any server.",
-                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant, in that database: GRANT SELECT ON ALL SEQUENCES IN SCHEMA <schema> TO <user>."},
+                         "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant only these, in that database: GRANT SELECT ON SEQUENCE <sequence> TO <user>; (SELECT reads the value and cannot advance the sequence; no schema-wide grant is needed)."},
         "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
         "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
         "detail_limit_source": "Limit set by", "limit_source_column": "column type",
@@ -377,8 +377,8 @@ TEXTS = {
         "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
         "detail_valid_until": "Valid until",
-        "inv_failover": "Last failover", "inv_failover_ago": "{ago} ago",
-        "inv_failover_never": "Never", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
+        "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
+        "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
@@ -854,11 +854,16 @@ def impact_summary(data):
     """Per category: the problems (rules with findings, worst severity) and whether it was checked."""
     evaluated = {r["rule_id"] for r in data["results"]
                  if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED")}
-    summary = {key: {"problems": {}, "checked": False} for key in data["categories"]}
+    # Not assessed, or assessed without some nodes: the area is never "no problems" (review 2026-11-09).
+    incomplete = {r["rule_id"] for r in data["results"]
+                  if r["outcome"] in ("INSUFFICIENT_EVIDENCE", "ERROR") or r.get("unassessed")}
+    summary = {key: {"problems": {}, "checked": False, "incomplete": False} for key in data["categories"]}
     for rule_id, keys in data["rule_categories"].items():
         for key in keys:
             if rule_id in evaluated and key in summary:
                 summary[key]["checked"] = True
+            if rule_id in incomplete and key in summary:
+                summary[key]["incomplete"] = True
     for f in data["findings"]:
         if f["severity"] == "INFO":
             continue                         # recommendations are not problems of an area
@@ -1250,8 +1255,14 @@ def render_impact_chart(data, lang, t):
                 f'{e(rule_text(data, rule_id, lang, "NAME", names.get(rule_id, "")))}</span>'
                 for rule_id, sev in ordered)
         else:
-            value = badge("ok", t["impact_none"]) if s_["checked"] else badge(
-                "unknown", t["impact_not_checked"])
+            if s_["checked"] and s_["incomplete"]:
+                value = badge("partial", t["topic_partial"])
+            elif s_["checked"]:
+                value = badge("ok", t["impact_none"])
+            elif s_["incomplete"]:
+                value = badge("unknown", t["topic_unknown"])
+            else:
+                value = badge("unknown", t["impact_not_checked"])
         rows.append(f'<div class="name" title="{e(localized(entry, lang, "description"))}">'
                     f'{e(name)}</div><div class="val">{value}</div>')
     note = ('<p class="note">' + e(t["scope_note"])
@@ -1398,9 +1409,10 @@ def unassessed_groups(data, lang, t):
 def render_unassessed(data, lang, t):
     """Executive card for checks not done: draws attention without being a finding."""
     groups = unassessed_groups(data, lang, t)
-    count = sum(len(g["rules"]) for g in groups)
-    if not count:
+    if not groups:
         return ""
+    # The same number as the verdict: checks not assessed (settings without data are listed, not counted).
+    count = summarize(data)[0]["not_assessed"]
     items = []
     for g in groups:
         affected = ", ".join(g["rules"])

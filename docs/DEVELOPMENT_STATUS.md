@@ -236,7 +236,7 @@ Done since 2026-10-29:
 Reliability package after the external review (2026-11-09, `docs/KeyStone/15 - ChatGPT Review`), three steps, each its own pull request and lab check:
 - A) partial coverage (V051, `fix/unassessed-coverage`): a node not judged is never counted as fine; findings on other nodes stay; configuration recommendations need every node's hardware. Found by the review for PG-CONF-003/007; the same gap was in PG-CAP-001 and in every rule whose NODE-scoped evidence was dropped for one node.
 - B) commands (V052, `fix/config-commands`, stacked on A): management type in the server profile (Patroni / none / not given → comments), reload and restart blocks, assumed values commented out, `ALTER SYSTEM` blocks applied on a disposable PostgreSQL in tests, Windows (`effective_io_concurrency` not applicable). PG-CONF-007 severity moves to C with its texts.
-- C) texts and summaries: WAL archiving, SSL, timeline / failover time, sequence grant, scoped HEALTHY of PG-CONF-007, affected areas partly assessed.
+- C) texts and summaries (V053, `fix/report-wording`, stacked on B): PG-CONF-007 WARNING risk indicator with scoped HEALTHY, WAL archiving (no PITR ≠ no backup), SSL (server does not accept TLS), failover time approximate and "none observed", sequence grant per sequence, affected areas "partly assessed", the not-assessed card counts like the verdict.
 Then the offline evidence bundle (both pilots need it: Hasan's customer via jump server, a DBA friend on Windows servers over remote desktop), then validation on a realistic lab with 15 scenarios and 5 negative controls (review), then the customer pilot.
 
 Next (to be chosen, 2026-11-09, superseded by the reliability package above):
