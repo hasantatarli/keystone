@@ -607,17 +607,17 @@ Checkpoint evidence (V050, PG_CHECKPOINT_STATS optional): with at least 20 check
 
 Storage type note (PG021): the host collector reads `lsblk` ROTA for the data disk's device and the hypervisor (`systemd-detect-virt --vm`). When the data disk reports another type than the profile, the report says so above the table (assumed profile: asks to set the storage type; given profile: states the conflict); on a virtual machine a rotating report gets a caveat, since virtual disks often report rotating on SSD. Note only: the profile stays the input of `random_page_cost` and `effective_io_concurrency`.
 
-## PG-CONF-007 — Memory Overcommitment
+## PG-CONF-007 — Memory Overcommitment Risk
 
 | | |
 | --- | --- |
 | Evidence | `PG_CONFIGURATION_SNAPSHOT`, `PG_HOST_SNAPSHOT`, required (86400 s) |
 | Condition | On a node, `shared_buffers + max_connections × work_mem` above its physical memory |
-| Severity | CRITICAL (OOM killer restarts the whole database) |
+| Severity | WARNING since V053 (was CRITICAL): a configuration risk indicator, not measured memory use (review 2026-11-09) |
 | Subject | NODE |
 
 **Design notes**  
-Physical memory, not the non-dedicated share. The formula is pessimistic (not every connection uses `work_mem` at once) but a query can use it several times. Each node is judged with its own settings and memory; nodes without host data are skipped.
+Physical memory, not the non-dedicated share. The formula is pessimistic (not every connection uses `work_mem` at once) but a query can use it several times. Each node is judged with its own settings and memory; a node without host data is listed as not assessed (V051), and without findings the rule is INSUFFICIENT_EVIDENCE. Texts (V053) say "potential risk, not measured use"; HEALTHY does not promise memory health: the formula ignores parallel workers and several sort / hash steps per query, and many connections use no `work_mem` at all.
 
 **Verification (PG-CONF-003/007)**  
 Calculation tests on the installed Dictionary (`tests/test_config_recommendations.py`); repository test runs the real configuration collector, two nodes of 16 GB / 4 CPUs and 8 GB / 2 CPUs, and a 100 MB `work_mem` on the smaller one for CRITICAL. Lab: pending.

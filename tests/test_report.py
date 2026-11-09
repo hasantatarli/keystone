@@ -106,7 +106,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Etkilenen alanlar", executive)
         self.assertIn("Performans", executive)                    # PG-TRAN-001 categories
         self.assertIn("Kapasite", executive)
-        self.assertIn("Bu kontrolde incelenmedi", executive)      # Security has no rules yet
+        # Areas whose rules could not be assessed say so (review 2026-11-09), never "no problems".
+        self.assertNotIn("Sorun bulunmadı</span></div><div class=\"name\" title=\"Yetki", executive)
         self.assertIn("Transaction yönetimi", executive)
         self.assertIn("Değerlendirilemedi", executive)            # replication not assessed
 
@@ -601,17 +602,18 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(finding["finding_text"], "shared_buffers is 128MB; recommended for this server: "
                                                   "2GB (acceptable: 1228MB – 3276MB).")
 
-        # 100 connections × 100MB work_mem on the 8GB replica: the OOM risk is CRITICAL.
+        # 100 connections × 100MB work_mem on the 8GB replica: a WARNING risk indicator (review 2026-11-09).
         self.conn.execute("UPDATE postgresql.configuration_snapshot SET setting_value = '102400' "
                           "WHERE target_id = %s AND setting_name = 'work_mem'", (self.node2,))
         self.conn.commit()
         engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system)
-        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][:2], ("ATTENTION_REQUIRED", "CRITICAL"))
+        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][:2], ("ATTENTION_REQUIRED", "WARNING"))
         text = self.conn.execute("SELECT finding_text FROM keystone.finding f JOIN keystone.rule_definition "
                                  "rd USING (rule_id) WHERE rd.rule_key = 'PG-CONF-007' "
                                  "ORDER BY finding_id DESC LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "On node-2 shared_buffers (128MB) plus max_connections × work_mem "
-                               "(100 × 100MB) is 10128MB, more than its memory (8GB).")
+                               "(100 × 100MB) is 10128MB, more than its memory (8GB): a potential risk, "
+                               "not measured use.")
 
     def test_checkpoint_collector_runs_on_this_version_and_feeds_max_wal_size(self):
         from psycopg.rows import dict_row
@@ -717,6 +719,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertNotIn("<td>shared_buffers ↻</td>", technical)       # no table row per missing setting
         groups = report.unassessed_groups(data, "tr", report.TEXTS["tr"])
         self.assertIn("Konfigürasyon önerileri (10 ayar)", [name for g in groups for name in g["rules"]])
+        # The card counts what the verdict counts: checks, not the settings listed with them.
+        count = report.summarize(data)[0]["not_assessed"]
+        self.assertIn(f'Değerlendirilemeyen kontroller<span class="note">{count}</span>',
+                      report.render_html(data, "tr"))
         self.assertEqual(dict(report.topic_summary(data))["CONFIGURATION"]["status"], "partial")
 
     def test_recommendations_stay_out_of_the_executive_part(self):
@@ -1178,7 +1184,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.commit()
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Sorun bulunmadı", executive)
+        # PG-CONN-001 healthy, other rules of the same areas not assessed: partly, not "no problems".
+        impact = executive[executive.index("Etkilenen alanlar"):executive.index("Alanlara göre durum")]
+        self.assertIn("Kısmen değerlendirildi", impact)
+        self.assertNotIn("Sorun bulunmadı", impact)
         self.assertNotIn("Sorun yok", executive)
         self.assertIn("Yalnızca bu kontrolde değerlendirilen kurallara göre.", executive)
 
