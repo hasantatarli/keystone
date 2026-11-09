@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 29 | 1 | 22 | 10 |
-| of which evidence ready | 29 | 1 | 9 | 5 |
+| Checks | 31 | 0 | 22 | 10 |
+| of which evidence ready | 31 | 0 | 9 | 5 |
 
-Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
