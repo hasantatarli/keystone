@@ -441,6 +441,8 @@ Known limitations: relative to `autovacuum_multixact_freeze_max_age` not evaluat
 
 Known limitations: whether archiving succeeds is PG-BKP-001 (V041). Backups themselves are detected later by method (catalogue decision 4).
 
+Wording (V053, review 2026-11-09): archiving off means no point-in-time recovery from a WAL archive, not that there is no backup; snapshots, pg_dump or a backup service are not visible to this check. Archiving on does not prove a restorable backup either. Backup verification and restore readiness are separate future checks.
+
 ## PG-SEC-002 — MD5 Password Encryption / PG-SEC-003 — SSL Disabled (PG_SECURITY_HEALTH, topic SECURITY)
 
 | | |
@@ -461,6 +463,8 @@ Unit tests for every condition and boundary. Lab: pending.
 Two new collectors: `PG_WAL_STATUS` (NODE: `pg_stat_archiver`, `archive_mode`, the primary's current timeline from its WAL file name and the modification time of that timeline's history file from `pg_ls_waldir()`) and `PG_PREPARED_TRANSACTIONS` (SYSTEM: one status row, always present, plus one row per `pg_prepared_xacts` entry). Both work with `pg_monitor`.
 
 An evaluator may now raise `InsufficientEvidence(source, code, message)`: the rule ends INSUFFICIENT_EVIDENCE with the reason `SOURCE: [code] message`, and the report explains the code in its language.
+
+Wording (V053): PG-SEC-003 says the server does not accept TLS; encryption elsewhere on the network (VPN, a proxy) is not visible to this check.
 
 ## PG-BKP-001 — WAL Archive Failures (PG_BACKUP_HEALTH, topic BACKUP)
 
@@ -509,6 +513,8 @@ Unit tests for every condition; repository test runs both real collectors on a d
 # Batch of 2026-10-27 — indexes and security objects (V042, PG016)
 
 New collectors: `PG_INDEX_USAGE` (scope NODE_DATABASE, ADR-0009: every database of every node; a DATABASE row per collected database with `pg_is_in_recovery()` and the statistics start, an INDEX row per user index with scans, size, validity, uniqueness, constraint and whether `CREATE INDEX CONCURRENTLY` is still running), `PG_SCHEMA_PRIVILEGES` (DATABASE: PUBLIC usage / create per user schema) and `PG_ROLES` (SYSTEM: role attributes, predefined `pg_*` roles left out, no password hashes). All work with `pg_monitor`.
+
+Wording (V053): the time is the current timeline history file's modification time, approximate (a copy or restore changes it); a planned switchover and a failover look the same. The executive inventory says "none observed" for timeline 1, not "never".
 
 ## PG-IDX-001 — Unused Index (PG_INDEX_HEALTH, topic INDEXES)
 
