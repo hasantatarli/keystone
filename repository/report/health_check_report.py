@@ -163,7 +163,12 @@ TEXTS = {
         "detail_last_archived_time": "Son başarılı arşiv", "detail_stats_reset": "İstatistik sıfırlama",
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History dosyası",
         "detail_timeline_started_at": "Primary olma zamanı",
-        "reason_codes": {"no_primary": "Toplanan sunucular arasında primary yok.",
+        "unassessed_line": "Değerlendirilemeyen sunucu: {items}",
+        "unassessed_reason": {"not_collected": "veri toplanamadı", "no_disk": "veri diski bilgisi yok",
+                              "no_memory": "bellek bilgisi yok"},
+        "config_host_partial": "Bilgisi eksik sunucu: {nodes}. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
+        "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
+                         "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
@@ -329,7 +334,12 @@ TEXTS = {
         "detail_last_archived_time": "Last success", "detail_stats_reset": "Statistics reset",
         "detail_timeline": "Timeline", "detail_timeline_history_file": "History file",
         "detail_timeline_started_at": "Became primary at",
-        "reason_codes": {"no_primary": "There is no primary among the collected servers.",
+        "unassessed_line": "Server not assessed: {items}",
+        "unassessed_reason": {"not_collected": "data not collected", "no_disk": "no data disk information",
+                              "no_memory": "no memory information"},
+        "config_host_partial": "Server data missing: {nodes}. Without the smallest server these settings are not calculated.",
+        "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
+                         "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
@@ -436,7 +446,7 @@ def load_report_data(conn, health_check_id):
     results = conn.execute(
         """
         SELECT ad.assessment_key, rd.rule_id, rd.rule_key, rd.name AS rule_name, rd.topic_key,
-               res.outcome, res.max_severity, res.reason, ar.assessment_run_id,
+               res.outcome, res.max_severity, res.reason, res.unassessed, ar.assessment_run_id,
                COALESCE(res.thresholds_used, (
                    SELECT jsonb_agg(jsonb_build_object('severity', th.severity,
                                                        'value', th.threshold_value,
@@ -1248,9 +1258,11 @@ def render_topics(data, lang, t):
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
                 label = t["severity"].get(severity, severity).lower()
+                partial = unassessed_line(r, t)
                 items.append((severity.lower(),
                               f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
-                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))))
+                              + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
+                              + (f' <span class="facts">{e(partial)}</span>' if partial else "")))
             elif r["outcome"] == "HEALTHY":
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
@@ -1637,6 +1649,21 @@ def parameter_line(result, t):
         f"{key} = {fmt_quantity(p['value'], p['unit'], t)}" for key, p in sorted(params.items()))
 
 
+def unassessed_line(result, t):
+    """'Server not assessed: postgre-2 (data not collected)' for a result with partial coverage."""
+    items = [f'{u["node"]} ({t["unassessed_reason"].get(u["reason_code"], u["reason_code"])})'
+             for u in result.get("unassessed") or []]
+    return t["unassessed_line"].format(items=", ".join(items)) if items else ""
+
+
+def hardware_missing_nodes(data):
+    """Nodes whose memory or data disk is unknown, when other nodes' are known (partial host data)."""
+    nodes = [n for n in data["nodes"] if n.get("data_directory")]     # the nodes the engine used
+    missing = [n["name"] for n in nodes
+               if not n.get("memory_total_bytes") or data_disk(n, data["storage"]) is None]
+    return missing if 0 < len(missing) < len(nodes) else []
+
+
 def render_findings_detail(data, lang, t):
     cards = []
     for result, findings in findings_by_rule(data):
@@ -1650,7 +1677,8 @@ def render_findings_detail(data, lang, t):
         shown, rest = findings[:FINDINGS_SHOWN], findings[FINDINGS_SHOWN:]
         more = (f'<details class="more"><summary>{e(t["show_all"].format(n=len(findings)))}</summary>'
                 + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
-        facts = [x for x in (threshold_line(result, t), parameter_line(result, t)) if x]
+        facts = [x for x in (threshold_line(result, t), parameter_line(result, t),
+                             unassessed_line(result, t)) if x]
         cards.append(
             f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
             f'{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
@@ -1675,7 +1703,8 @@ def render_results(data, lang, t):
                 note = healthy_text(data, r, lang, t)
             elif r["outcome"] == "ATTENTION_REQUIRED":
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
-                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t)) if x)
+                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t),
+                                              unassessed_line(r, t)) if x)
             else:
                 note = explain_reason(r["reason"], data, t)
             # A rule with findings shows their severity, the word used everywhere else in the report.
@@ -1787,8 +1816,8 @@ def calc_text(row, t, profile):
 def config_inputs(data, t):
     """'Calculated for the smallest server: node (1 CPU, 1.9 GB, data disk 11.2 GB).'"""
     nodes = [n for n in data["nodes"] if n.get("memory_total_bytes")]
-    if not nodes:
-        return ""
+    if not nodes or hardware_missing_nodes(data):
+        return ""                          # no smallest server when one node is unknown
     smallest = min(nodes, key=lambda n: n["memory_total_bytes"])
     facts = [t["config_cpus"].format(n=min(n["logical_cpu_count"] for n in nodes if n.get("logical_cpu_count")))
              if any(n.get("logical_cpu_count") for n in nodes) else "",
@@ -1903,10 +1932,13 @@ def render_config(data, lang, t):
     for r in missing:
         code = "no_host" if r["reason_code"] in HOST_REASONS else r["reason_code"]
         by_reason.setdefault(code, []).append(r["setting_key"])
+    partial_hosts = hardware_missing_nodes(data)
     for code, names in by_reason.items():
+        cause = t["config_reason"].get(code, code or "")
+        if code == "no_host" and partial_hosts:
+            cause = t["config_host_partial"].format(nodes=", ".join(partial_hosts))
         parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
-                     f'{e(", ".join(names))}<span class="facts"> — '
-                     f'{e(t["config_reason"].get(code, code or ""))}</span></p>')
+                     f'{e(", ".join(names))}<span class="facts"> — {e(cause)}</span></p>')
     parts.append(config_commands(rows, t))
     if fine:
         parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'

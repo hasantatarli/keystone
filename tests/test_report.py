@@ -297,6 +297,33 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("/var/lib/postgresql on node-1 is 92% full", row["finding_text"])
         self.assertEqual({t["severity"] for t in row["thresholds_used"]}, {"WARNING", "CRITICAL"})
 
+    def test_data_disk_rule_with_one_node_unknown(self):
+        # Review 2026-11-09: node-2's disk is unknown; healthy node-1 must not make the system healthy.
+        from repository.intelligence import assessment_engine as engine
+        self.add_host(self.node1, 4, 16, [("/", 30, 100)], "/var/lib/postgresql/16/main")
+        self.add_host(self.node2, 4, 16, [], "/var/lib/postgresql/16/main")
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
+        query = ("SELECT res.outcome, res.reason, res.unassessed FROM keystone.assessment_result res "
+                 "JOIN keystone.rule_definition rd USING (rule_id) WHERE rd.rule_key = 'PG-CAP-001' "
+                 "ORDER BY res.assessment_result_id DESC LIMIT 1")
+        row = self.conn.execute(query).fetchone()
+        self.assertEqual(row["outcome"], "INSUFFICIENT_EVIDENCE")
+        self.assertIn("[nodes_unassessed]", row["reason"])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in row["unassessed"]], [("node-2", "no_disk")])
+
+        # node-1 fills up: its finding stays, node-2 is still listed as not assessed.
+        self.conn.execute("UPDATE postgresql.storage_snapshot SET used_bytes = total_bytes * 0.92 "
+                          "WHERE target_id = %s", (self.node1,))
+        self.conn.commit()
+        check_id = self.make_check()
+        engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system, health_check_id=check_id)
+        row = self.conn.execute(query).fetchone()
+        self.assertEqual(row["outcome"], "ATTENTION_REQUIRED")
+        self.assertEqual([u["node"] for u in row["unassessed"]], ["node-2"])
+        page = self.render(check_id, "tr")
+        self.assertIn("Değerlendirilemeyen sunucu: node-2 (veri diski bilgisi yok)", page)
+
     def test_data_disk_rule_without_host_evidence_is_not_assessed(self):
         from repository.intelligence import assessment_engine as engine
         engine.run_assessment(self.conn, "PG_CAPACITY_HEALTH", self.system)
@@ -655,6 +682,16 @@ class ReportTests(test_health_check.HealthCheckTests):
                       "Doğruysa profilde disk tipini belirtin. Sanal makinede (VirtualBox) disk, "
                       "altında SSD olsa da dönen disk görünebilir.", technical)
         self.assertIn("--pg random_page_cost=1.1", technical)
+
+        # node-2's server data missing: no calculation from node-1 alone, node-2 named (review 2026-11-09).
+        self.conn.execute("DELETE FROM postgresql.host_snapshot WHERE target_id = %s", (self.node2,))
+        self.conn.execute("DELETE FROM postgresql.storage_snapshot WHERE target_id = %s", (self.node2,))
+        self.conn.commit()
+        engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system, health_check_id=check_id)
+        self.assertEqual(self.latest_outcomes()["PG-CONF-007"][0], "INSUFFICIENT_EVIDENCE")
+        partial = report.render_html(report.load_report_data(self.conn, check_id), "tr")
+        self.assertIn("Bilgisi eksik sunucu: node-2. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
+                      partial)
 
         # Without server data the settings that need it are said, in the card of the missing data.
         self.conn.execute("DELETE FROM postgresql.host_snapshot")

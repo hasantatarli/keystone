@@ -77,6 +77,35 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(rec.acceptable_text({"low": 2.4 * GB, "high": 6.4 * GB}, "BYTE"), "2457MB – 6553MB")
 
 
+class ServerFactsTests(unittest.TestCase):
+    """The smallest node decides: one node without hardware data makes the minimum unknown."""
+
+    def evidence(self, hosts):
+        config, host_rows = [], []
+        for target_id in (1, 2):
+            config.append({"target_id": target_id, "node_name": f"node-{target_id}",
+                           "setting_name": "data_directory", "setting_value": "/pg"})
+        for target_id, memory in hosts.items():
+            host_rows.append({"record_type": "HOST", "target_id": target_id, "node_name": f"node-{target_id}",
+                              "memory_total_bytes": memory, "logical_cpu_count": 4})
+            host_rows.append({"record_type": "STORAGE", "target_id": target_id, "mount_point": "/",
+                              "total_bytes": 100 * GB})
+        inventory = [{"target_id": 1, "node_name": "node-1", "in_recovery": False, "server_version": "17.2"}]
+        return {"PG_INSTANCE_INVENTORY": inventory, "PG_CONFIGURATION_SNAPSHOT": config,
+                "PG_HOST_SNAPSHOT": host_rows}
+
+    def test_every_node_known(self):
+        facts = rec.server_facts(self.evidence({1: 16 * GB, 2: 8 * GB}))
+        self.assertEqual((facts["memory"], facts["cpus"], facts["disk"]), (8 * GB, 4, 100 * GB))
+        self.assertEqual(facts["nodes_without_host"], [])
+
+    def test_one_node_missing_means_no_minimum(self):
+        # Review 2026-11-09: node-2 may be the smallest; never calculate from the others.
+        facts = rec.server_facts(self.evidence({1: 16 * GB}))
+        self.assertEqual((facts["memory"], facts["cpus"], facts["disk"]), (None, None, None))
+        self.assertEqual(facts["nodes_without_host"], ["node-2"])
+
+
 class RecommendationTests(unittest.TestCase):
     """Calculations on the Dictionary installed by the migrations."""
 

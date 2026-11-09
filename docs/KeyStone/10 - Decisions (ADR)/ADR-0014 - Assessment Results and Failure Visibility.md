@@ -67,3 +67,17 @@ Reports leave it out of the totals and tiles, note it next to them ("2 checks do
 
 First use, PG-REP-003 and PG-REP-004: a system with no replica connected to the primary (`pg_stat_replication` empty) and no node known in recovery. Both conditions are needed: a replica the customer did not register in Keystone still streams from the primary and is still judged. Rules that stay meaningful on a single server keep their outcome: the slot rules (backup tools and CDC use slots), PG-REP-006 (synchronous_standby_names set without a standby blocks commits) and PG-HA-001 (a new timeline on a standalone server means a restore).
 
+
+
+## Addendum 3 (2026-11-09, review): partial coverage
+
+A rule judging several nodes can miss some of them (evidence not collected or stale on that node, no disk or memory data). Before V051 such nodes were skipped silently and the result could be HEALTHY. Now:
+
+| Situation | Outcome |
+| --- | --- |
+| Every node judged, no problem | HEALTHY |
+| A problem on a node | ATTENTION_REQUIRED |
+| No problem, a node not judged | INSUFFICIENT_EVIDENCE, the nodes named |
+| A problem, and another node not judged | ATTENTION_REQUIRED; the finding stays and the nodes not judged are listed with it |
+
+The nodes not judged are stored per result in `assessment_result.unassessed` ([{target_id, node, source, reason_code}]). The engine records nodes whose required NODE-scoped evidence was dropped; evaluators add the nodes they cannot judge. The report shows the list on the finding card, in the status by area and in the results table.

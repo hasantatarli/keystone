@@ -215,6 +215,7 @@ def insert_assessment_result(
     evaluated_at,
     thresholds=None,
     parameters=None,
+    unassessed=None,
 ):
     """Persist the outcome of one rule in one run (ADR-0014), with the thresholds and parameters used."""
     with conn.cursor() as cur:
@@ -230,9 +231,10 @@ def insert_assessment_result(
                 reason,
                 evaluated_at,
                 thresholds_used,
-                parameters_used
+                parameters_used,
+                unassessed
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING assessment_result_id
             """,
             (
@@ -245,6 +247,7 @@ def insert_assessment_result(
                 evaluated_at,
                 Jsonb(thresholds_snapshot(thresholds)) if thresholds is not None else None,
                 Jsonb(parameters) if parameters else None,
+                Jsonb(unassessed) if unassessed else None,
             ),
         )
         row = cur.fetchone()
@@ -510,6 +513,22 @@ def load_latest_connection_activity_snapshot(conn, target_id):
         return []
 
     return [row]
+
+
+def node_names(conn, target_id):
+    """{target_id: name} of the nodes evidence is expected from (see node_target_ids)."""
+    rows = conn.execute(
+        "SELECT target_id, name FROM keystone.target WHERE (target_id = %s AND target_type = 'NODE') "
+        "OR (parent_target_id = %s AND target_type = 'NODE' AND is_active) ORDER BY target_id",
+        (target_id, target_id)).fetchall()
+    return {r["target_id"]: r["name"] for r in rows}
+
+
+def add_unassessed(unassessed, target_id, node, source, reason_code):
+    """Record a node a rule could not judge, once per node."""
+    if all(u["target_id"] != target_id for u in unassessed):
+        unassessed.append({"target_id": target_id, "node": node, "source": source,
+                           "reason_code": reason_code})
 
 
 def node_target_ids(conn, target_id):
@@ -1506,6 +1525,15 @@ def evaluate_stale_statistics(rows, rule, thresholds):
     return findings
 
 
+def node_name_of(evidence, target_id):
+    """A node's name from any evidence row of it."""
+    for rows in evidence.values():
+        for r in rows:
+            if r.get("target_id") == target_id and r.get("node_name"):
+                return r["node_name"]
+    return str(target_id)
+
+
 def data_mount(data_directory, mounts):
     """The mount holding data_directory: longest mount point that contains it, or None."""
     if not data_directory:
@@ -1531,6 +1559,9 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
                   and m["target_id"] == target_id and m["total_bytes"]]
         mount = data_mount(directory, mounts)
         if mount is None:
+            # No disk data for this node: not judged, never counted as fine.
+            add_unassessed(rule["unassessed"], target_id, node_name_of(evidence, target_id),
+                           "PG_HOST_SNAPSHOT", "no_disk")
             continue
         used_percent = round(usage_percent(mount["used_bytes"], mount["available_bytes"],
                                            mount["total_bytes"]), 1)
@@ -1970,7 +2001,12 @@ def evaluate_memory_overcommitment(evidence, rule, thresholds):
     findings = []
     for target_id, s in settings.items():
         host = hosts.get(target_id)
-        if host is None or not all(k in s for k in ("shared_buffers", "max_connections", "work_mem")):
+        if host is None:
+            # Memory unknown on this node: not judged; findings on other nodes stay.
+            add_unassessed(rule["unassessed"], target_id, next(iter(s.values()))["node_name"],
+                           "PG_HOST_SNAPSHOT", "no_memory")
+            continue
+        if not all(k in s for k in ("shared_buffers", "max_connections", "work_mem")):
             continue
         shared_buffers = config_rec.canonical(s["shared_buffers"], "BYTE")
         connections = config_rec.canonical(s["max_connections"], "COUNT")
@@ -2119,9 +2155,11 @@ def current_rows(rows, requirement, evaluation_time, source=None, uncollected=No
 
 def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncollected=None,
                   context=None):
-    """Evaluate one rule -> (outcome, findings, reason).
+    """Evaluate one rule -> (outcome, findings, reason, unassessed).
 
     Missing/stale evidence returns INSUFFICIENT_EVIDENCE; real problems raise.
+    unassessed: nodes the rule could not judge ([{target_id, node, source, reason_code}]).
+    Findings stay when some nodes are missing; no findings with nodes missing is not HEALTHY.
     """
     evaluator = RULE_EVALUATORS.get(rule["rule_key"])
     if evaluator is None:
@@ -2130,7 +2168,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
         )
 
     thresholds = load_thresholds(conn, rule["rule_id"])
-    rule = {**rule, "parameters": load_parameters(conn, rule["rule_id"]), "context": context}
+    unassessed = []                         # evaluators add nodes they cannot judge
+    rule = {**rule, "parameters": load_parameters(conn, rule["rule_id"]), "context": context,
+            "unassessed": unassessed}
+    nodes = None
     evidence_requirements = load_evidence_requirements(
         conn,
         rule["rule_id"],
@@ -2182,23 +2223,41 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
                 OUTCOME_INSUFFICIENT_EVIDENCE,
                 [],
                 f"{evidence_source}: {reason}",
+                [],
             )
 
         evidence_sets[evidence_source] = rows
+
+        if requirement["is_required"]:
+            # A node whose rows were dropped (stale, or not collected by this check) is not judged.
+            if nodes is None:
+                nodes = node_names(conn, target_id)
+            present = {r.get("target_id") for r in rows}
+            dropped = ({r.get("target_id") for r in loaded}
+                       | {t for t, source in (uncollected or ()) if source == evidence_source})
+            for node_id in sorted((dropped - present) & set(nodes)):
+                add_unassessed(unassessed, node_id, nodes[node_id], evidence_source, "not_collected")
 
     evidence = (next(iter(evidence_sets.values()))
                 if len(evidence_sets) == 1 else evidence_sets)
     try:
         findings = evaluator(evidence, rule, thresholds)
     except InsufficientEvidence as exc:
-        return OUTCOME_INSUFFICIENT_EVIDENCE, [], str(exc)
+        return OUTCOME_INSUFFICIENT_EVIDENCE, [], str(exc), unassessed
     except NotApplicable as exc:
-        return OUTCOME_NOT_APPLICABLE, [], str(exc)
+        return OUTCOME_NOT_APPLICABLE, [], str(exc), unassessed
 
     if findings:
-        return OUTCOME_ATTENTION_REQUIRED, findings, None
+        return OUTCOME_ATTENTION_REQUIRED, findings, None, unassessed
+    if unassessed:
+        first = unassessed[0]
+        names = ", ".join(u["node"] for u in unassessed)
+        return (OUTCOME_INSUFFICIENT_EVIDENCE, [],
+                f'{first["source"]}: [nodes_unassessed] No problem on the other servers; '
+                f'not judged on: {names} {json.dumps({"nodes": names}, ensure_ascii=False)}',
+                unassessed)
 
-    return OUTCOME_HEALTHY, [], None
+    return OUTCOME_HEALTHY, [], None, []
 
 
 def mark_run_failed(conn, assessment_run_id, exc):
@@ -2279,7 +2338,7 @@ def run_assessment(
 
             try:
                 with conn.transaction():
-                    outcome, findings, reason = evaluate_rule(
+                    outcome, findings, reason, unassessed = evaluate_rule(
                         conn,
                         rule,
                         target_id,
@@ -2314,6 +2373,7 @@ def run_assessment(
                         evaluation_time,
                         load_thresholds(conn, rule["rule_id"]),
                         load_parameters(conn, rule["rule_id"]),
+                        unassessed,
                     )
                     recommendations = context.recommendations.pop(rule["rule_key"], None)
                     if recommendations and outcome in (OUTCOME_HEALTHY, OUTCOME_ATTENTION_REQUIRED):

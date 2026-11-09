@@ -108,8 +108,15 @@ def server_facts(evidence):
         mount = data_mount(directory, mounts)
         if mount:
             disks[target_id] = mount["total_bytes"]
+    # The smallest node decides: if any node's value is unknown, so is the minimum.
     with_memory = [hosts[t] for t in settings if t in hosts and hosts[t].get("memory_total_bytes")]
     with_cpus = [hosts[t] for t in settings if t in hosts and hosts[t].get("logical_cpu_count")]
+    if len(with_memory) < len(settings):
+        with_memory = []
+    if len(with_cpus) < len(settings):
+        with_cpus = []
+    if len(disks) < len(settings):
+        disks = {}
     version = None
     if primary and primary.get("server_version"):
         version = int(str(primary["server_version"]).split(".")[0])
@@ -122,7 +129,8 @@ def server_facts(evidence):
         "memory_node": min(with_memory, key=lambda h: h["memory_total_bytes"])["target_id"] if with_memory else None,
         "cpus": min((h["logical_cpu_count"] for h in with_cpus), default=None),
         "disk": min(disks.values(), default=None),
-        "nodes_without_host": sorted(names[t] for t in settings if t not in hosts),
+        "nodes_without_host": sorted(names[t] for t in settings
+                                     if t not in hosts or not hosts[t].get("memory_total_bytes")),
         "checkpoints": next((c for c in evidence.get("PG_CHECKPOINT_STATS") or [] if not c["in_recovery"]), None),
     }
 
