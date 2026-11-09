@@ -84,7 +84,7 @@ class DiskTypeNoteTests(unittest.TestCase):
 
     def test_assumed_profile_asks_for_the_storage_type(self):
         self.assertEqual(self.note({"storage_type": {"value": "SSD", "assumed": True}}, True),
-                         "Disk tipi girilmedi, SSD varsayıldı; veri diski node-1 sunucusunda HDD bildiriyor. "
+                         "Disk tipi girilmedi, SSD varsayıldı; veri diski HDD bildiriyor (node-1). "
                          "Doğruysa profilde disk tipini belirtin.")
 
     def test_given_profile_states_the_conflict_and_a_virtual_disk_caveat(self):

@@ -651,8 +651,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.execute("UPDATE postgresql.host_snapshot SET virtualization = 'oracle'")
         self.conn.commit()
         technical = self.render(check_id, "tr")
-        self.assertIn("Disk tipi girilmedi, SSD varsayıldı; veri diski node-1, node-2 sunucusunda HDD "
-                      "bildiriyor. Doğruysa profilde disk tipini belirtin. Sanal makinede (VirtualBox) disk, "
+        self.assertIn("Disk tipi girilmedi, SSD varsayıldı; veri diski HDD bildiriyor (node-1, node-2). "
+                      "Doğruysa profilde disk tipini belirtin. Sanal makinede (VirtualBox) disk, "
                       "altında SSD olsa da dönen disk görünebilir.", technical)
         self.assertIn("--pg random_page_cost=1.1", technical)
 
