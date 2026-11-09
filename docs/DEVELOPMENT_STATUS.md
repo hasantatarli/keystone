@@ -28,7 +28,7 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 
 ## Engineering Intelligence Implemented
 
-29 PostgreSQL rules in 9 assessments (2026-10-29, V016–V044). Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
+31 PostgreSQL rules in 10 assessments (2026-11-09, V016–V050); every P1 check of the Assessment Catalogue is done. Each is documented in the Rule Catalog (`docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`); the check list with priorities is the PostgreSQL V1 Assessment Catalogue.
 
 | Assessment | Rules |
 | --- | --- |
@@ -41,6 +41,7 @@ AI is not the core intelligence layer. The PostgreSQL MVP first establishes dete
 | PG_SECURITY_HEALTH | PG-SEC-001 login superuser, PG-SEC-002 md5 password encryption, PG-SEC-003 SSL disabled, PG-SEC-004 PUBLIC can create in schema |
 | PG_MAINTENANCE_HEALTH | PG-MAINT-001 dead tuples, PG-MAINT-002 stale statistics |
 | PG_INDEX_HEALTH | PG-IDX-001 unused index (scans summed over all nodes), PG-IDX-002 invalid index |
+| PG_CONFIGURATION_TUNING | PG-CONF-003 setting outside recommendation (18 settings computed from the smallest node, server profile and workload; INFO), PG-CONF-007 memory overcommitment (CRITICAL) |
 
 The Dictionary contains assessment definitions, rules, thresholds, rule parameters, evidence requirements, topics, impact categories and rule texts in Turkish and English. Runtime results are persisted as assessment runs and findings.
 
@@ -148,7 +149,7 @@ The checksum is a SHA-256 of the raw file bytes. A Windows checkout (CRLF) and a
 
 ### 7. Migration header Description is limited to 500 characters
 
-The installer stores the header `Description` in `keystone.migration_history`, a `VARCHAR(500)` column. A longer description fails the installation. Keep the header description short and put detailed rationale in a separate SQL comment block (see V021).
+The installer stores the header `Description` in `keystone.migration_history`, a `VARCHAR(500)` column. A longer description fails the installation. Keep the header description short and put detailed rationale in a separate SQL comment block (see V021). The same limit applies to collector headers (`collector_definition.description`, hit on 2026-11-06 by `host_snapshot.sh`): notes go below the header block.
 
 ### 8. Empty evidence vs missing evidence — partly resolved (V041)
 
@@ -179,7 +180,11 @@ Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through 
 
 ## Active Work
 
-Current checkpoint (2026-10-26): MVP Plan Phase 0 and Phase 1 scheduling, one-command health check and HTML report are done; rule coverage continues from the PostgreSQL V1 Assessment Catalogue (29 checks done; P1 remaining: configuration recommendations, ADR-0017). Open in Phase 1: offline evidence bundle.
+Current checkpoint (2026-11-09): MVP Plan Phase 0 done; Phase 1 done except the offline evidence bundle. Every P1 check is done (31 checks in 10 assessments), including configuration recommendations (ADR-0017, PR #27–#32). Verified on the multi-system lab (Patroni cluster on PostgreSQL 17 with SSH, PostgreSQL 15, 16, 18 standalone and 17 primary + replica in Docker). 353 automated tests (unit and disposable PostgreSQL).
+
+Open before a first real engagement (MVP Plan → Readiness Criteria): offline evidence bundle; a side-by-side run with a manual health check on a real system; a short customer document on what Keystone collects and does not do; report delivery (customer name / logo, PDF).
+
+Retrospective (Hasan, 2026-11-09): configuration recommendations took six pull requests and many polish rounds (2026-10-29 → 11-09) with little visible progress in the last ones. From now on: larger pieces, one design table approved at once for a batch of rules, lab rounds only for what must be verified, cosmetic fixes folded into the same pull request.
 
 Done:
 
@@ -224,10 +229,17 @@ Rule batches 2026-10-26:
 - PR #23 merged: PG-BKP-001, PG-TRAN-005, PG-HA-001 with collectors PG_WAL_STATUS and PG_PREPARED_TRANSACTIONS (V041, PG015); evaluators can end a rule INSUFFICIENT_EVIDENCE with a coded reason. Last failover shown in the executive inventory.
 - PR #24 merged (2026-10-29): PG-IDX-001/002, PG-SEC-001/004 with collectors PG_INDEX_USAGE (new scope NODE_DATABASE), PG_SCHEMA_PRIVILEGES, PG_ROLES (V042, PG016). Report: "status by area" lists one bullet per rule, coloured by severity and with the severity in words (problems, rules not assessed with the reason, then healthy statements); before, rules not assessed were missing from that section. Main problems (executive), findings and collected data (technical) are collapsible: one line each, details on demand, closed by default; printing opens them where the browser supports it (no script, by design). Extension-owned indexes are left out of the index rules (PG017).
 
-Next:
+Done since 2026-10-29:
 
-1. PG-CAP-002 sequence exhaustion (V044, PG018) in progress: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege. Lab moved from `postgres` to a `pg_monitor` user `keystone_monitor` (2026-10-29); first run found PG-IDX-001 healthy with no index evidence (fixed) and long collection errors repeated in the executive part (now short there, full in the technical part). With pg_hba opened for `keystone_monitor`, all 26 collections succeed with `pg_monitor` only; results match the superuser runs, PG-CAP-002 is INSUFFICIENT_EVIDENCE naming the grant. An area with a rule not assessed is labelled "partly assessed", never "no problems". Report wording: a rule or area with findings shows the severity (Critical / Warning) everywhere; the separate "Attention" label is gone. Checks not assessed are not findings (Hasan, 2026-10-30) but get attention: an executive card "Checks not assessed" groups them by cause (one failed collection or missing source listed once with every check it stopped) with what to do, and the verdict says how many checks could not be done.
-2. Configuration recommendation capability (PG-CONF-003): ADR-0017 approved 2026-10-29 (server profile on the target, weakest node for hardware limits, version-aware settings, ranges with WARNING and combination rules with CRITICAL, formulas in code and numbers in the Dictionary); implementation in four steps after PG-CAP-002. Step 1 (server profile, V046) merged (PR #27). Step 2 (configuration Dictionary, V047) merged (PR #28): 18 settings by the best-practice criterion (Hasan, 2026-11-02: documentation or widely accepted practice only; experience-based settings left to the later intelligence layer), results stored per check without copying inputs, configuration tuning runnable on its own. Step 3a (V048) on `feat/config-recommendations`: `PG_CONFIGURATION_TUNING` with PG-CONF-003 (INFO: a recommendation is not a problem; executives see only CRITICAL configuration risk, Hasan 2026-11-02) and PG-CONF-007 memory overcommitment (CRITICAL); results stored per rule result in `config_recommendation`. Merged (PR #29); lab hc71-72 and every system (pg-cluster, pg15-18): results consistent, Patroni nodes without setting differences. Step 4 (report, V049) merged (PR #30): settings not assessed in one line per cause, profile only in System Overview (Hasan). Step 3b in two parts: 3b-1 checkpoint evidence (V050, PG020) merged (PR #31); the health check now collects optional evidence too; lab: requested share ≤ 2 % on every system, `max_wal_size` fits. 3b-2 in two parts (Hasan 2026-11-06: Claude's choices): 3b-2a storage type note (PG021: lsblk ROTA, hypervisor; note only, caveat on VMs, a note also when a given profile conflicts) on `feat/disk-type-note`; 3b-2b hardware change since the previous configuration tuning next.
+1. PG-CAP-002 sequence exhaustion (V044, PG018) done: without SELECT on the sequences the rule ends INSUFFICIENT_EVIDENCE naming the missing privilege. Lab moved from `postgres` to a `pg_monitor` user `keystone_monitor` (2026-10-29); first run found PG-IDX-001 healthy with no index evidence (fixed) and long collection errors repeated in the executive part (now short there, full in the technical part). With pg_hba opened for `keystone_monitor`, all 26 collections succeed with `pg_monitor` only; results match the superuser runs, PG-CAP-002 is INSUFFICIENT_EVIDENCE naming the grant. An area with a rule not assessed is labelled "partly assessed", never "no problems". Report wording: a rule or area with findings shows the severity (Critical / Warning) everywhere; the separate "Attention" label is gone. Checks not assessed are not findings (Hasan, 2026-10-30) but get attention: an executive card "Checks not assessed" groups them by cause (one failed collection or missing source listed once with every check it stopped) with what to do, and the verdict says how many checks could not be done.
+2. Configuration recommendation capability (PG-CONF-003) — **done 2026-11-09**: ADR-0017 approved 2026-10-29 (server profile on the target, weakest node for hardware limits, version-aware settings, ranges with WARNING and combination rules with CRITICAL, formulas in code and numbers in the Dictionary); implementation in four steps after PG-CAP-002. Step 1 (server profile, V046) merged (PR #27). Step 2 (configuration Dictionary, V047) merged (PR #28): 18 settings by the best-practice criterion (Hasan, 2026-11-02: documentation or widely accepted practice only; experience-based settings left to the later intelligence layer), results stored per check without copying inputs, configuration tuning runnable on its own. Step 3a (V048) on `feat/config-recommendations`: `PG_CONFIGURATION_TUNING` with PG-CONF-003 (INFO: a recommendation is not a problem; executives see only CRITICAL configuration risk, Hasan 2026-11-02) and PG-CONF-007 memory overcommitment (CRITICAL); results stored per rule result in `config_recommendation`. Merged (PR #29); lab hc71-72 and every system (pg-cluster, pg15-18): results consistent, Patroni nodes without setting differences. Step 4 (report, V049) merged (PR #30): settings not assessed in one line per cause, profile only in System Overview (Hasan). Step 3b in two parts: 3b-1 checkpoint evidence (V050, PG020) merged (PR #31); the health check now collects optional evidence too; lab: requested share ≤ 2 % on every system, `max_wal_size` fits. 3b-2 in two parts (Hasan 2026-11-06: Claude's choices): 3b-2a storage type note (PG021: lsblk ROTA, hypervisor; note only, caveat on VMs named as products, e.g. VirtualBox for `oracle`; a note also when a given profile conflicts) merged (PR #32), lab hc89: all three Patroni nodes report rotating under VirtualBox. 3b-2b hardware change since the previous configuration tuning moved to the backlog (2026-11-09): recommendations are already recomputed from current hardware on every check.
+Next (to be chosen, 2026-11-09):
+
+- P2 checks whose evidence is already collected, as one batch: PG-HA-002 recent restart, PG-HA-003 replica smaller than primary, PG-HA-004 mixed minor versions, PG-CAP-004 swap in use, PG-MAINT-003 never vacuumed / analyzed, PG-TRAN-006 XID age vs `autovacuum_freeze_max_age`, PG-TRAN-007 long-running query.
+- Offline evidence bundle (last open Phase 1 item).
+
+Further open items:
+
 3. Report follow-ups: customer overview across targets (ADR-0016), logo / customer name, PDF output; a web application later.
 4. Offline evidence bundle (MVP Plan Phase 1), default collector intervals from collector metadata, Windows service for the agent.
 
@@ -250,7 +262,7 @@ Concurrent health checks (hc65-68, 2026-11-02): pg15, pg16, pg18 and pg17 starte
 
 Multi-system lab done (`feat/multi-system-lab`). Open from it: the customer overview (ADR-0016), report and repository size with many targets, a database with many objects.
 
-Backlog (2026-10-29/30): `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
+Backlog (2026-10-29/30, 2026-11-09): hardware change detection (ADR-0017 3b-2b); PG-IDX-003 duplicate indexes; template1 not collected for PG-SEC-004; PG-CONF-005 must not judge `log_min_duration_statement` again; `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
 Hardening backlog:
 

@@ -36,10 +36,12 @@ This catalog tracks the planned PostgreSQL collection capabilities. Collector sc
 | PG-030 | Unlogged / Risky Objects | DATABASE | SNAPSHOT | High | Planned |
 | PG-031 | Provider-specific Telemetry | SYSTEM / NODE | SNAPSHOT | Variable | Later |
 | PG-032 | WAL Archiving & Timeline | NODE | SNAPSHOT | Very High | **Done** — `PG_WAL_STATUS` (archiver statistics, current timeline and when it began) |
+| PG-033 | Checkpoint Statistics | SYSTEM | SNAPSHOT | High | **Done** — `PG_CHECKPOINT_STATS` (`pg_stat_bgwriter` 15–16, `pg_stat_checkpointer` 17+) |
+| PG-034 | Host (SSH) | NODE | SNAPSHOT | High | **Done** — `PG_HOST_SNAPSHOT` (OS, CPU, memory, swap, filesystems, disk rotation, hypervisor) |
 
 ## Current Development Focus
 
-Implemented (2026-10-29): PG-001 to PG-008, PG-010, PG-019, PG-020, PG-029, PG-032, parts of PG-009, PG-011, PG-016, PG-017 and PG-018, plus Linux host evidence (`PG_HOST_SNAPSHOT`) and per-session activity (`PG_ACTIVITY_SNAPSHOT`). PG-019 sequences done; reading their values needs SELECT on the sequences.
+Implemented (2026-11-09): PG-001 to PG-008, PG-010, PG-019, PG-020, PG-029, PG-032, PG-033, PG-034, parts of PG-009, PG-011, PG-016, PG-017 and PG-018, plus per-session activity (`PG_ACTIVITY_SNAPSHOT`). PG-019 sequences done; reading their values needs SELECT on the sequences.
 
 Since 2026-10-05, new collector work is prioritised by the MVP Plan and by evidence needs of new rules rather than by this sequence.
 

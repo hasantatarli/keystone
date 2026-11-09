@@ -1,7 +1,7 @@
 # PostgreSQL MVP Plan
 
 **Status:** Current  
-**Last Updated:** 2026-10-29
+**Last Updated:** 2026-11-09
 
 ## Purpose
 
@@ -9,7 +9,15 @@ Order the work required to turn the current PostgreSQL implementation into somet
 
 This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMENT_STATUS.md` in the repository.
 
-## Where We Are (2026-10-26)
+## Where We Are (2026-11-09)
+
+- Phase 0 done. Phase 1 done except the offline evidence bundle.
+- 31 checks in 10 assessments; every P1 check of the PostgreSQL V1 Assessment Catalogue is done. The last one, configuration recommendations (PG-CONF-003, ADR-0017), computes 18 settings from the smallest node's memory, CPUs and data disk, the server profile (workload, dedicated, storage type) and checkpoint statistics, and writes the `ALTER SYSTEM` / `patronictl` commands; PG-CONF-007 flags memory overcommitment.
+- Verified on the multi-system lab: Patroni cluster (PostgreSQL 17, three VMs, SSH) and Docker systems on PostgreSQL 15, 16, 17 (primary + replica) and 18; four health checks at once.
+- Next candidates: P2 checks whose evidence is already collected (one batch), then the offline evidence bundle. Readiness criteria status below.
+
+### Earlier state (2026-10-26)
+
 
 - Phase 0 done. Phase 1: collector and assessment scheduling, the one-command health check and the HTML report (executive summary and technical details, Turkish and English) are done and lab-verified. Offline evidence is open.
 - 29 rules in 9 assessments from the PostgreSQL V1 Assessment Catalogue; rule texts (meaning, causes, impact, steps, finding sentences) in Turkish and English; rule parameters besides thresholds (V039).
@@ -78,8 +86,9 @@ The threshold model limitation was resolved with the first rules that needed it:
 
 - Verified on more than one system at once (multi-system lab: standalone and clustered, several PostgreSQL versions), not only on the single lab cluster. Done 2026-11-02: PostgreSQL 15, 16, 18 standalone and 17 primary + replica, with and without SSH, four health checks at once.
 
-- One command performs a health check without hand-written SQL.
-- The report is understandable without the founder present.
-- Rule coverage is at least comparable to one-off tools for the covered areas.
-- Keystone has been run side by side with a manual health check on at least one real system, and the differences have been reviewed.
-- A short "what Keystone collects and does not do" document exists for customers (read-only access, no agent, collector SQL is visible).
+- One command performs a health check without hand-written SQL. Done (PR #15, 2026-10-14).
+- The report is understandable without the founder present. Largely done: executive and technical parts, Turkish and English, causes and steps per problem; customer name / logo and PDF output open.
+- Rule coverage is at least comparable to one-off tools for the covered areas. P1 done (31 checks); P2 continues.
+- Keystone has been run side by side with a manual health check on at least one real system, and the differences have been reviewed. Open.
+- A short "what Keystone collects and does not do" document exists for customers (read-only access, no agent, collector SQL is visible). Open.
+- Offline evidence for customers who allow only a GUI client (Phase 1). Open.

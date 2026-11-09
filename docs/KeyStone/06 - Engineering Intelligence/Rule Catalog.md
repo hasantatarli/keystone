@@ -1,7 +1,7 @@
 # Engineering Intelligence Rule Catalog
 
 **Status:** Current  
-**Last Updated:** 2026-10-29  
+**Last Updated:** 2026-11-09  
 **Provider:** PostgreSQL (15+)
 
 ## Purpose

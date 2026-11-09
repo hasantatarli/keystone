@@ -1,7 +1,7 @@
 # PostgreSQL V1 Assessment Catalogue
 
 **Status:** Draft — review decisions of 2026-10-20 below  
-**Last Updated:** 2026-10-20
+**Last Updated:** 2026-11-09
 
 ## Purpose
 
