@@ -274,7 +274,7 @@ class RunContext:
                 row = row and (row["target_profile"] if isinstance(row, dict) else row[0])
             if not row:
                 with self.conn.cursor(row_factory=dict_row) as cur:
-                    target = cur.execute("SELECT workload_type, dedicated, storage_type FROM keystone.target "
+                    target = cur.execute("SELECT workload_type, dedicated, storage_type, cluster_manager FROM keystone.target "
                                          "WHERE target_id = %s", (self.target_id,)).fetchone()
                 row = server_profile(target or {})
             self._profile = row

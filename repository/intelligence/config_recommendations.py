@@ -7,6 +7,7 @@ numbers or words. Recommended values are written in PostgreSQL syntax (128MB,
 """
 
 import math
+import re
 
 from repository.intelligence.config_dictionary import parameter, settings_for_version
 
@@ -29,6 +30,10 @@ PROFILE_DEPENDS = {
     "max_wal_size": ("workload_type",), "min_wal_size": ("workload_type",),
     "random_page_cost": ("storage_type",), "effective_io_concurrency": ("storage_type",),
 }
+
+
+# Settings PostgreSQL rejects above 0 on Windows (no posix_fadvise): never recommended there.
+WINDOWS_UNSUPPORTED = ("effective_io_concurrency",)
 
 
 class NotAssessed(Exception):
@@ -132,7 +137,15 @@ def server_facts(evidence):
         "nodes_without_host": sorted(names[t] for t in settings
                                      if t not in hosts or not hosts[t].get("memory_total_bytes")),
         "checkpoints": next((c for c in evidence.get("PG_CHECKPOINT_STATS") or [] if not c["in_recovery"]), None),
+        "windows": on_windows(settings.get(primary_id, {})),
     }
+
+
+def on_windows(settings):
+    """PostgreSQL on Windows: the shared memory type only Windows has, or a drive-letter data directory."""
+    dsm = (settings.get("dynamic_shared_memory_type") or {}).get("setting_value")
+    directory = (settings.get("data_directory") or {}).get("setting_value") or ""
+    return dsm == "windows" or re.match(r"^[A-Za-z]:[\\/]", directory) is not None
 
 
 # ----------------------------------------------------------------- calculations
@@ -169,6 +182,8 @@ def recommend(dictionary, facts, profile):
         try:
             if current is None:
                 raise NotAssessed("setting_not_collected")
+            if key in WINDOWS_UNSUPPORTED and facts.get("windows"):
+                raise NotAssessed("windows", status="NOT_APPLICABLE")
             recommended, calculation = CALCULATIONS.get(key, fixed_value)(p, facts, dedicated, recommended_so_far)
             recommended_so_far[key] = recommended
             acceptable = acceptable_range(p, recommended)
