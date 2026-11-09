@@ -99,6 +99,7 @@ TEXTS = {
         "config_block_patroni_restart": "Patroni: restart bekleyen sunucuları yeniden başlatır",
         "config_block_unknown": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Patroni kullanılıyorsa ALTER SYSTEM kullanmayın: ayar DCS'ten sapar. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'PATRONI' (ya da 'NONE').",
         "config_patroni_seen": "Bu kontrolde Patroni oturumları görüldü.",
+        "config_patroni_config": "Cluster adı PostgreSQL'in cluster_name ayarından alındı; Patroni scope'u farklıysa değiştirin. patronictl yapılandırma dosyasını varsayılan yerde bulamazsa -c <dosya> ekleyin (örneğin -c /etc/patroni/config.yml).",
         "config_assumed_cmd": "varsayım: {items}; profili doğrulayınca kullanın",
         "config_restart_hint": "Sonra PostgreSQL'i bakım penceresinde yeniden başlatın.",
         "config_restart_list": "Restart sonrası etkin olur: {names}",
@@ -281,6 +282,7 @@ TEXTS = {
         "config_block_patroni_restart": "Patroni: restarts the servers with a pending restart",
         "config_block_unknown": "The management type is not given in the profile, so the commands are written as comments. With Patroni do not use ALTER SYSTEM: the setting drifts from the DCS. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'PATRONI' (or 'NONE').",
         "config_patroni_seen": "Patroni sessions were seen in this check.",
+        "config_patroni_config": "The cluster name comes from PostgreSQL's cluster_name; change it if the Patroni scope differs. If patronictl does not find its configuration file, add -c <file> (for example -c /etc/patroni/config.yml).",
         "config_assumed_cmd": "assumed: {items}; use after confirming the profile",
         "config_restart_hint": "Then restart PostgreSQL in a maintenance window.",
         "config_restart_list": "Take effect after a restart: {names}",
@@ -594,6 +596,15 @@ def load_report_data(conn, health_check_id):
                        WHERE (t.target_id = %s OR t.parent_target_id = %s)
                          AND a.captured_at BETWEEN %s AND %s AND a.application_name ILIKE 'patroni%%')
         """, (check["target_id"], check["target_id"], since, as_of)).fetchone()["exists"]
+    # Patroni's scope is PostgreSQL's cluster_name unless changed; for patronictl restart.
+    cluster_name = conn.execute(
+        """
+        SELECT cs.setting_value FROM postgresql.configuration_snapshot cs
+        JOIN keystone.target t USING (target_id)
+        WHERE (t.target_id = %s OR t.parent_target_id = %s) AND cs.setting_name = 'cluster_name'
+          AND cs.captured_at BETWEEN %s AND %s AND cs.setting_value <> ''
+        ORDER BY cs.captured_at DESC LIMIT 1
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchone()
     config_reasons = {}
     for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
                           "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
@@ -611,7 +622,8 @@ def load_report_data(conn, health_check_id):
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
             "databases": databases, "wal_status": wal_status, "as_of": finished,
-            "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen, **dictionary}
+            "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen,
+            "cluster_name": cluster_name["setting_value"] if cluster_name else None, **dictionary}
 
 
 NODE_CONTEXT = {
@@ -1922,7 +1934,7 @@ def config_row(row, data, lang, t, profile):
             e(acceptable) or "—", config_why(row, data, lang, t, profile)]
 
 
-def command_blocks(rows, profile, t):
+def command_blocks(rows, profile, t, cluster=None):
     """[(title, text)] of commands for the settings to change (review 2026-11-09).
 
     Reload and restart apart; ALTER SYSTEM or patronictl by the profile's cluster_manager, both
@@ -1958,7 +1970,8 @@ def command_blocks(rows, profile, t):
         if restart:
             blocks.append((t["config_block_restart"], "\n".join(restart + [f"-- {t['config_restart_hint']}"])))
     if manager in (None, "PATRONI"):
-        name = ""                          # patronictl takes the cluster from its configuration file
+        # patronictl restart needs the cluster name (Patroni 4.1, lab 2026-11-09); Patroni sets cluster_name.
+        name = f" {cluster or '<cluster>'}"
         direct = [(k, v) for k, v, _, n in changes if not n]
         lines = []
         if direct:
@@ -1977,7 +1990,7 @@ def command_blocks(rows, profile, t):
 
 def config_commands(data, rows, t):
     profile = data["check"].get("target_profile") or {}
-    blocks = command_blocks(rows, profile, t)
+    blocks = command_blocks(rows, profile, t, data.get("cluster_name"))
     if not blocks:
         return ""
     parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
@@ -1986,6 +1999,8 @@ def config_commands(data, rows, t):
         parts.append(f'<p class="note">{e(t["config_block_unknown"] + hint)}</p>')
     for title, text in blocks:
         parts.append(f'<div class="facts">{e(title)}:</div><div class="cmd">{e(text)}</div>')
+    if any("patronictl" in text for _, text in blocks):
+        parts.append(f'<p class="note">{e(t["config_patroni_config"])}</p>')
     return "".join(parts)
 
 
