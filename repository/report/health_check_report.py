@@ -93,7 +93,14 @@ TEXTS = {
         "config_disk_virtual": "Sanal makinede ({virt}) disk, altında SSD olsa da dönen disk görünebilir.",
         "config_commands": "Komutlar",
         "config_commands_note": "Keystone bu komutları yalnızca yazar, çalıştırmaz. Bakım penceresinde, değişikliği onaylayarak uygulayın.",
-        "config_patroni": "Patroni kullanılıyorsa",
+        "config_block_reload": "Reload ile etkinleşir",
+        "config_block_restart": "Restart gerektirir",
+        "config_block_patroni": "Patroni (DCS'teki ayarlar; reload Patroni tarafından yapılır)",
+        "config_block_patroni_restart": "Patroni: restart bekleyen sunucuları yeniden başlatır",
+        "config_block_unknown": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Patroni kullanılıyorsa ALTER SYSTEM kullanmayın: ayar DCS'ten sapar. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'PATRONI' (ya da 'NONE').",
+        "config_patroni_seen": "Bu kontrolde Patroni oturumları görüldü.",
+        "config_assumed_cmd": "varsayım: {items}; profili doğrulayınca kullanın",
+        "config_restart_hint": "Sonra PostgreSQL'i bakım penceresinde yeniden başlatın.",
         "config_restart_list": "Restart sonrası etkin olur: {names}",
         "config_connections": "bağlantı",
         "config_calc_min": "en az", "config_calc_max": "en fazla",
@@ -105,6 +112,7 @@ TEXTS = {
                           "no_cpus": "CPU sayısı bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "no_disk": "Veri diskinin boyutu bilinmiyor (SSH ile sunucu bilgisi toplanamadı).",
                           "few_cpus": "4'ten az CPU var; paralellik ayarları varsayılanda kalır.",
+                          "windows": "Windows'ta PostgreSQL bu ayarı desteklemez; 0 kalmalı.",
                           "setting_not_collected": "Ayar bu kontrolde toplanamadı.",
                           "no_recommendation": "Bu sürüm için öneri yok."},
         "topics_title": "Alanlara göre durum",
@@ -119,7 +127,9 @@ TEXTS = {
         "profile_title": "Sunucu profili", "profile_assumed": "belirtilmedi, varsayıldı",
         "profile_workload_type": "İş yükü", "profile_dedicated": "PostgreSQL'e ayrılmış",
         "profile_storage_type": "Disk",
-        "profile_values": {"OLTP": "OLTP", "OLAP": "Raporlama (OLAP)", "MIXED": "Karma",
+        "profile_cluster_manager": "Ayar yönetimi", "profile_not_given": "belirtilmedi",
+        "profile_values": {"PATRONI": "Patroni", "NONE": "ALTER SYSTEM (Patroni yok)",
+                           "OLTP": "OLTP", "OLAP": "Raporlama (OLAP)", "MIXED": "Karma",
                            "SSD": "SSD", "HDD": "HDD", True: "evet", False: "hayır"},
         "nodes": "Sunucular", "node": "Sunucu", "address": "Adres", "role": "Rol",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -265,7 +275,14 @@ TEXTS = {
         "config_disk_virtual": "On a virtual machine ({virt}) a disk can appear rotating even when SSD is underneath.",
         "config_commands": "Commands",
         "config_commands_note": "Keystone only writes these commands and never runs them. Apply them in a maintenance window after review.",
-        "config_patroni": "With Patroni",
+        "config_block_reload": "Takes effect with a reload",
+        "config_block_restart": "Needs a restart",
+        "config_block_patroni": "Patroni (settings in the DCS; Patroni reloads)",
+        "config_block_patroni_restart": "Patroni: restarts the servers with a pending restart",
+        "config_block_unknown": "The management type is not given in the profile, so the commands are written as comments. With Patroni do not use ALTER SYSTEM: the setting drifts from the DCS. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'PATRONI' (or 'NONE').",
+        "config_patroni_seen": "Patroni sessions were seen in this check.",
+        "config_assumed_cmd": "assumed: {items}; use after confirming the profile",
+        "config_restart_hint": "Then restart PostgreSQL in a maintenance window.",
         "config_restart_list": "Take effect after a restart: {names}",
         "config_connections": "connections",
         "config_calc_min": "at least", "config_calc_max": "at most",
@@ -277,6 +294,7 @@ TEXTS = {
                           "no_cpus": "The number of CPUs is unknown (no server data over SSH).",
                           "no_disk": "The data disk size is unknown (no server data over SSH).",
                           "few_cpus": "Fewer than 4 CPUs; parallelism settings stay at their defaults.",
+                          "windows": "PostgreSQL does not support this setting on Windows; it stays 0.",
                           "setting_not_collected": "The setting was not collected in this check.",
                           "no_recommendation": "No recommendation for this version."},
         "topics_title": "Status by area",
@@ -291,7 +309,9 @@ TEXTS = {
         "profile_title": "Server profile", "profile_assumed": "not given, assumed",
         "profile_workload_type": "Workload", "profile_dedicated": "Dedicated to PostgreSQL",
         "profile_storage_type": "Storage",
-        "profile_values": {"OLTP": "OLTP", "OLAP": "Reporting (OLAP)", "MIXED": "Mixed",
+        "profile_cluster_manager": "Settings managed by", "profile_not_given": "not given",
+        "profile_values": {"PATRONI": "Patroni", "NONE": "ALTER SYSTEM (no Patroni)",
+                           "OLTP": "OLTP", "OLAP": "Reporting (OLAP)", "MIXED": "Mixed",
                            "SSD": "SSD", "HDD": "HDD", True: "yes", False: "no"},
         "nodes": "Servers", "node": "Server", "address": "Address", "role": "Role",
         "role_primary": "Primary", "role_replica": "Replica", "version": "PostgreSQL",
@@ -567,6 +587,13 @@ def load_report_data(conn, health_check_id):
         WHERE ar.health_check_id = %s
         ORDER BY cr.config_recommendation_id
         """, (health_check_id,)).fetchall()
+    # A hint only (review 2026-11-09): Patroni's own sessions seen by this check.
+    patroni_seen = conn.execute(
+        """
+        SELECT EXISTS (SELECT 1 FROM postgresql.activity_snapshot a JOIN keystone.target t USING (target_id)
+                       WHERE (t.target_id = %s OR t.parent_target_id = %s)
+                         AND a.captured_at BETWEEN %s AND %s AND a.application_name ILIKE 'patroni%%')
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchone()["exists"]
     config_reasons = {}
     for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
                           "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
@@ -584,7 +611,7 @@ def load_report_data(conn, health_check_id):
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
             "databases": databases, "wal_status": wal_status, "as_of": finished,
-            "config": config, "config_reasons": config_reasons, **dictionary}
+            "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen, **dictionary}
 
 
 NODE_CONTEXT = {
@@ -1428,9 +1455,12 @@ def profile_line(profile, t):
     if not profile:
         return ""
     items = []
-    for field in ("workload_type", "dedicated", "storage_type"):
+    for field in ("workload_type", "dedicated", "storage_type", "cluster_manager"):
         entry = profile.get(field)
         if not entry:
+            continue
+        if entry["value"] is None:                       # no default: not given, never assumed
+            items.append(e(f'{t["profile_" + field]}: {t["profile_not_given"]}'))
             continue
         text = f'{t["profile_" + field]}: {t["profile_values"].get(entry["value"], entry["value"])}'
         if entry.get("assumed"):
@@ -1892,19 +1922,71 @@ def config_row(row, data, lang, t, profile):
             e(acceptable) or "—", config_why(row, data, lang, t, profile)]
 
 
-def config_commands(rows, t):
-    changes = [(r["setting_key"], config_value(r["recommended_value"], r["value_type"], t), r.get("restart_required"))
-               for r in rows if r["status"] == "DEVIATES" and r["recommended_value"]]
+def command_blocks(rows, profile, t):
+    """[(title, text)] of commands for the settings to change (review 2026-11-09).
+
+    Reload and restart apart; ALTER SYSTEM or patronictl by the profile's cluster_manager, both
+    commented out when it is not given; a value resting on an assumed profile field is a comment.
+    """
+    manager = (profile.get("cluster_manager") or {}).get("value")
+    changes = []
+    for r in rows:
+        if r["status"] != "DEVIATES" or not r["recommended_value"]:
+            continue
+        value = config_value(r["recommended_value"], r["value_type"], t)
+        assumed = [t["config_assumed"].format(field=t["config_fields"].get(f, f),
+                                              value=t["profile_values"].get(profile.get(f, {}).get("value"),
+                                                                            profile.get(f, {}).get("value")))
+                   for f in r.get("assumptions") or []]
+        note = t["config_assumed_cmd"].format(items="; ".join(assumed)) if assumed else ""
+        changes.append((r["setting_key"], value, bool(r.get("restart_required")), note))
     if not changes:
+        return []
+    sure = manager is not None
+
+    def sql_line(k, v, note):
+        line = f"ALTER SYSTEM SET {k} = '{v}';"
+        return f"-- {line}  -- {note}" if note else (line if sure else f"-- {line}")
+
+    blocks = []
+    if manager in (None, "NONE"):
+        reload = [sql_line(k, v, n) for k, v, restart, n in changes if not restart]
+        if reload:
+            tail = "SELECT pg_reload_conf();"
+            blocks.append((t["config_block_reload"], "\n".join(reload + [tail if sure else f"-- {tail}"])))
+        restart = [sql_line(k, v, n) for k, v, restart, n in changes if restart]
+        if restart:
+            blocks.append((t["config_block_restart"], "\n".join(restart + [f"-- {t['config_restart_hint']}"])))
+    if manager in (None, "PATRONI"):
+        name = ""                          # patronictl takes the cluster from its configuration file
+        direct = [(k, v) for k, v, _, n in changes if not n]
+        lines = []
+        if direct:
+            lines.append(f"patronictl edit-config{name} \\\n"
+                         + " \\\n".join(f"  --pg {k}={v}" for k, v in direct))
+        lines += [f"# patronictl edit-config{name} --pg {k}={v}  # {n}" for k, v, _, n in changes if n]
+        text = "\n".join(lines)
+        if not sure:
+            text = "\n".join(line if line.startswith("#") else f"# {line}" for line in text.split("\n"))
+        blocks.append((t["config_block_patroni"], text))
+        if any(restart and not n for _, _, restart, n in changes):
+            command = f"patronictl restart{name} --pending"
+            blocks.append((t["config_block_patroni_restart"], command if sure else f"# {command}"))
+    return blocks
+
+
+def config_commands(data, rows, t):
+    profile = data["check"].get("target_profile") or {}
+    blocks = command_blocks(rows, profile, t)
+    if not blocks:
         return ""
-    sql_ = "\n".join(f"ALTER SYSTEM SET {k} = '{v}';" for k, v, _ in changes) + "\nSELECT pg_reload_conf();"
-    patroni = "patronictl edit-config \\\n" + " \\\n".join(f"  --pg {k}={v}" for k, v, _ in changes)
-    restart = [k for k, _, needs in changes if needs]
-    note = (f'<p class="note">{e(t["config_restart_list"].format(names=", ".join(restart)))}</p>'
-            if restart else "")
-    return (f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"
-            f'<div class="cmd">{e(sql_)}</div>'
-            f"<div class=\"facts\">{e(t['config_patroni'])}:</div><div class=\"cmd\">{e(patroni)}</div>" + note)
+    parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
+    if (profile.get("cluster_manager") or {}).get("value") is None:
+        hint = f" {t['config_patroni_seen']}" if data.get("patroni_seen") else ""
+        parts.append(f'<p class="note">{e(t["config_block_unknown"] + hint)}</p>')
+    for title, text in blocks:
+        parts.append(f'<div class="facts">{e(title)}:</div><div class="cmd">{e(text)}</div>')
+    return "".join(parts)
 
 
 def render_config(data, lang, t):
@@ -1939,7 +2021,7 @@ def render_config(data, lang, t):
             cause = t["config_host_partial"].format(nodes=", ".join(partial_hosts))
         parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
                      f'{e(", ".join(names))}<span class="facts"> — {e(cause)}</span></p>')
-    parts.append(config_commands(rows, t))
+    parts.append(config_commands(data, rows, t))
     if fine:
         parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'
                      + table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in fine])

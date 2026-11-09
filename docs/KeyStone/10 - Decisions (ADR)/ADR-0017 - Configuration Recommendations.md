@@ -115,3 +115,14 @@ The configuration collector keeps every `pg_settings` row (about 350, with defau
 4. Report: area line, technical inputs, table of settings needing action, commands (see Report layout). Done 2026-11-02 (V049): `restart_required` (`pg_settings.context = postmaster`) and `assumptions` (profile fields the value rests on that were not given) stored with each result; executive line in the configuration area, settings not assessed added to the card of the missing data; technical section "Configuration recommendations" replaces the PG-CONF-003 finding card: inputs (smallest server), table of settings needing action with reason, calculation, assumption and node notes, `ALTER SYSTEM` and `patronictl edit-config` commands with the restart list, the settings that fit closed.
 
 Each step is its own pull request and is reviewed in the lab.
+
+
+## Addendum (2026-11-09, external review): safe commands
+
+The commands were only checked as text. Changes (V052, reliability package step B):
+
+- **Management type in the server profile** (`target.cluster_manager`: PATRONI, NONE, NULL not given). With Patroni only `patronictl edit-config` is written (ALTER SYSTEM would make the node drift from the DCS); without it only `ALTER SYSTEM`. Not given: both sets, every line a comment, with how to set the profile; Patroni sessions seen in `pg_stat_activity` are mentioned as a hint only, never used to choose (review: `application_name` is reported by the client and not always present).
+- **Reload and restart apart.** `ALTER SYSTEM` settings that take effect with a reload end with `SELECT pg_reload_conf();`; settings that need a restart are a block of their own, without the reload. With Patroni: `patronictl restart --pending` after the edit when a restart setting is applied.
+- **Assumed values are comments.** A recommendation resting on a profile field that was not given is written as a comment with the assumption, in both command sets, so a block copied as it is never applies a guess.
+- **Windows.** PostgreSQL rejects `effective_io_concurrency` above 0 on Windows (no `posix_fadvise`): NOT_APPLICABLE there. Windows is recognised from `dynamic_shared_memory_type = windows` or a drive-letter data directory.
+- **Applied in tests.** The `ALTER SYSTEM` blocks are run on a disposable PostgreSQL, reloaded and restarted, and `pg_settings` is compared with the recommendation. The `patronictl` commands are applied on the lab Patroni cluster during the lab check.

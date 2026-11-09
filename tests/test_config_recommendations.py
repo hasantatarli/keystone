@@ -188,6 +188,15 @@ class RecommendationTests(unittest.TestCase):
         self.assertNotIn("effective_io_concurrency", self.recommend(version=18))
         self.assertIn("effective_io_concurrency", self.recommend(version=15))
 
+    def test_windows_never_gets_effective_io_concurrency(self):
+        # PostgreSQL on Windows rejects values above 0 (no posix_fadvise); 200 would be a failing command.
+        facts = self.facts()
+        facts["windows"] = True
+        result = {r["setting_key"]: r for r in rec.recommend(self.dictionary, facts, server_profile({}))}
+        self.assertEqual((result["effective_io_concurrency"]["status"],
+                          result["effective_io_concurrency"]["reason_code"]), ("NOT_APPLICABLE", "windows"))
+        self.assertEqual(result["random_page_cost"]["status"], "DEVIATES")       # the rest unchanged
+
     def test_disabled_slow_query_log_deviates(self):
         r = self.recommend(settings={"log_min_duration_statement": ("-1", "ms")})
         self.assertEqual(r["log_min_duration_statement"]["status"], "DEVIATES")

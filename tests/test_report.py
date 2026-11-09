@@ -496,7 +496,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(server_profile({"workload_type": "MIXED", "dedicated": False}),
                          {"workload_type": {"value": "MIXED", "assumed": False},
                           "dedicated": {"value": False, "assumed": False},
-                          "storage_type": {"value": "SSD", "assumed": True}})
+                          "storage_type": {"value": "SSD", "assumed": True},
+                          "cluster_manager": {"value": None, "assumed": False}})
         self.assertEqual(report.profile_line(None, report.TEXTS["tr"]), "")
 
     def test_problem_cards_list_causes_and_steps(self):
@@ -669,7 +670,12 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("<td>log_min_duration_statement</td><td>kapalı</td><td>1s</td>", technical)
         self.assertIn("ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
         self.assertIn("--pg random_page_cost=1.1", technical)
-        self.assertIn("Restart sonrası etkin olur: shared_buffers", technical)
+        # Management type not given: every command a comment, reload and restart apart (review 2026-11-09).
+        self.assertIn("Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı.", technical)
+        self.assertIn("-- ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
+        self.assertIn("Restart gerektirir:", technical)
+        self.assertIn("# patronictl restart --pending", technical)
+        self.assertIn("Ayar yönetimi: belirtilmedi", technical)
         self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
         self.assertNotIn("bildiriyor", technical)                     # rotation not collected: no note
 
