@@ -37,8 +37,8 @@ def profile(manager, assumed=True):
             "workload_type": {"value": "OLTP", "assumed": assumed}}
 
 
-def blocks(manager, rows=ROWS):
-    return dict(report.command_blocks(rows, profile(manager), T))
+def blocks(manager, rows=ROWS, cluster="pg-cluster"):
+    return dict(report.command_blocks(rows, profile(manager), T, cluster))
 
 
 class CommandBlockTests(unittest.TestCase):
@@ -68,9 +68,12 @@ class CommandBlockTests(unittest.TestCase):
         self.assertEqual(list(got), [T["config_block_patroni"], T["config_block_patroni_restart"]])
         text = got[T["config_block_patroni"]]
         self.assertNotIn("ALTER SYSTEM", "".join(got.values()))
-        self.assertTrue(text.startswith("patronictl edit-config \\\n  --pg maintenance_work_mem=128MB"))
-        self.assertIn("# patronictl edit-config --pg random_page_cost=1.1  # assumed:", text)
-        self.assertEqual(got[T["config_block_patroni_restart"]], "patronictl restart --pending")
+        self.assertTrue(text.startswith("patronictl edit-config pg-cluster \\\n  --pg maintenance_work_mem=128MB"))
+        self.assertIn("# patronictl edit-config pg-cluster --pg random_page_cost=1.1  # assumed:", text)
+        # Patroni 4.1 requires the cluster name for restart (lab 2026-11-09).
+        self.assertEqual(got[T["config_block_patroni_restart"]], "patronictl restart pg-cluster --pending")
+        self.assertEqual(blocks("PATRONI", cluster=None)[T["config_block_patroni_restart"]],
+                         "patronictl restart <cluster> --pending")
 
     def test_unknown_management_writes_every_command_as_a_comment(self):
         got = blocks(None)

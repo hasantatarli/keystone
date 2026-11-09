@@ -676,7 +676,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı.", technical)
         self.assertIn("-- ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
         self.assertIn("Restart gerektirir:", technical)
-        self.assertIn("# patronictl restart --pending", technical)
+        self.assertIn("# patronictl restart", technical)
         self.assertIn("Ayar yönetimi: belirtilmedi", technical)
         self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
         self.assertNotIn("bildiriyor", technical)                     # rotation not collected: no note
