@@ -90,7 +90,8 @@ class DiskTypeNoteTests(unittest.TestCase):
     def test_given_profile_states_the_conflict_and_a_virtual_disk_caveat(self):
         self.assertEqual(self.note({"storage_type": {"value": "SSD"}}, True, "vmware", "en"),
                          "The profile says SSD; the data disk reports HDD on node-1. On a virtual machine "
-                         "(vmware) a disk can appear rotating even when SSD is underneath.")
+                         "(VMware) a disk can appear rotating even when SSD is underneath.")
+        self.assertIn("(VirtualBox)", self.note({"storage_type": {"value": "SSD"}}, True, "oracle", "en"))
         self.assertNotIn("virtual", self.note({"storage_type": {"value": "SSD"}}, True, "none", "en"))
         self.assertNotIn("virtual", self.note({"storage_type": {"value": "HDD"}}, False, "kvm", "en"))
 

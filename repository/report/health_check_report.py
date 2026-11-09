@@ -1799,6 +1799,14 @@ def config_inputs(data, t):
     return t["config_inputs"].format(node=smallest["name"], facts=", ".join(f for f in facts if f))
 
 
+# systemd-detect-virt codes as people know them ("oracle" is VirtualBox, not the database).
+HYPERVISOR_NAMES = {
+    "oracle": "VirtualBox", "vmware": "VMware", "kvm": "KVM", "qemu": "QEMU", "microsoft": "Hyper-V",
+    "xen": "Xen", "amazon": "AWS Nitro", "google": "Google Compute Engine", "parallels": "Parallels",
+    "bhyve": "bhyve", "zvm": "z/VM", "powervm": "PowerVM", "apple": "Apple Virtualization",
+}
+
+
 def config_disk_note(data, t, profile):
     """A note when the data disk reports another type than the profile (lsblk ROTA); '' otherwise.
 
@@ -1822,7 +1830,7 @@ def config_disk_note(data, t, profile):
     text = t["config_disk_assumed" if entry.get("assumed") else "config_disk_conflict"].format(
         profile=values.get(entry["value"], entry["value"]), observed=values.get(observed, observed),
         nodes=", ".join(n["name"] for n, _ in differing))
-    virtual = sorted({n["virtualization"] for n, o in differing
+    virtual = sorted({HYPERVISOR_NAMES.get(n["virtualization"], n["virtualization"]) for n, o in differing
                       if o == "HDD" and n.get("virtualization") not in (None, "none")})
     if virtual:
         text += " " + t["config_disk_virtual"].format(virt=", ".join(virtual))
