@@ -604,6 +604,8 @@ Values are compared in bytes, seconds, numbers or words; `pg_settings` units (8k
 **Known limitations**  
 Checkpoint evidence (V050, PG_CHECKPOINT_STATS optional): with at least 20 checkpoints over at least a day since the statistics reset and more than 20 % of them requested, `max_wal_size` is recommended at twice its current value (still at most 10 % of the data disk) and the setting is outside its recommendation whatever the range says. Statistics since the last reset can cover a long, mixed period; the report states the counts and the reset.
 
+Storage type note (PG021): the host collector reads `lsblk` ROTA for the data disk's device and the hypervisor (`systemd-detect-virt --vm`). When the data disk reports another type than the profile, the report says so above the table (assumed profile: asks to set the storage type; given profile: states the conflict); on a virtual machine a rotating report gets a caveat, since virtual disks often report rotating on SSD. Note only: the profile stays the input of `random_page_cost` and `effective_io_concurrency`.
+
 ## PG-CONF-007 — Memory Overcommitment
 
 | | |
