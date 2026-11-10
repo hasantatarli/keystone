@@ -749,7 +749,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         problems = executive[executive.index("Öne çıkan sorunlar"):]
         self.assertNotIn("Öneriden farklı ayar", problems[:problems.index("<h2>", 5)])
-        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 öneri)', executive)
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', executive)
         self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
         self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
 
