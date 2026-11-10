@@ -39,3 +39,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON SEQUENCES TO keystone;   
 Files ending in `.aql` (`database_stats_snapshot`, `query_stats_snapshot`, `replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
 
 Rules and their evidence: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`. Planned collectors: `docs/KeyStone/02 - Roadmap/Roadmap.md`.
+
+
+## Offline evidence (ADR-0018)
+
+The same collector files are wrapped into two read-only scripts by `python -m repository.offline.bundle --out <folder>` (node script: SYSTEM and NODE collectors; database script: DATABASE and NODE_DATABASE collectors). Collectors must therefore stay single SQL statements. The host collector prints a `CAPTURED_AT` section for offline use; `host_snapshot_windows.ps1` in `repository/offline` prints the same sections on Windows (`OS_FAMILY` WINDOWS, drive letters as devices and mount points).

@@ -43,6 +43,7 @@ TEXTS = {
     "tr": {
         "title": "Veritabanı Sağlık Kontrolü Raporu",
         "target": "Sistem", "date": "Tarih", "check_no": "Kontrol no", "requested_by": "Talep eden",
+        "evidence": "Kanıt", "evidence_offline": "offline toplandı (müşteri tarafında salt okunur script'lerle), içe aktarıldı {imported}",
         "part_exec": "Yönetici Özeti", "part_tech": "Teknik Detaylar",
         "verdict_critical": "Acil müdahale gerektiren sorunlar var.",
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
@@ -56,6 +57,7 @@ TEXTS = {
         "unassessed_action": "Yapılması gereken",
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
         "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
+        "action_NOT_COLLECTED_offline": "Eksik dosyayı toplayın: sunucu bilgisi için veritabanı sunucusunda host script'ini (host_snapshot.sh ya da host_snapshot_windows.ps1) çalıştırın; diğerleri için toplayıcıyı yeniden çalıştırın.",
         "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
@@ -226,6 +228,7 @@ TEXTS = {
     "en": {
         "title": "Database Health Check Report",
         "target": "System", "date": "Date", "check_no": "Check no", "requested_by": "Requested by",
+        "evidence": "Evidence", "evidence_offline": "collected offline (read-only scripts on the customer side), imported {imported}",
         "part_exec": "Executive Summary", "part_tech": "Technical Details",
         "verdict_critical": "There are problems that need immediate action.",
         "verdict_warning": "There are problems that need attention.",
@@ -239,6 +242,7 @@ TEXTS = {
         "unassessed_action": "What to do",
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
         "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
+        "action_NOT_COLLECTED_offline": "Collect the missing file: for server data run the host script (host_snapshot.sh or host_snapshot_windows.ps1) on the database server; for the rest run the collector again.",
         "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
@@ -1051,6 +1055,10 @@ def render_header(data, t):
             (t["check_no"], check["health_check_id"])]
     if check["requested_by"]:
         meta.append((t["requested_by"], check["requested_by"]))
+    if check.get("source") == "OFFLINE":
+        # Offline: the date above is the capture; when it was imported is said apart.
+        meta.append((t["evidence"], t["evidence_offline"].format(
+            imported=fmt_time(check["imported_at"]) if check.get("imported_at") else "-")))
     return ('<header><div class="brand">Keystone</div>'
             f"<h1>{e(t['title'])}</h1><div class=\"meta\">"
             + "".join(f"<span>{e(label)}: <b>{e(value)}</b></span>" for label, value in meta)
@@ -1125,11 +1133,16 @@ def or_unknown(value, t):
     return e(value)
 
 
+def host_port(host, port):
+    """'10.0.0.5:5432', '[::1]:5432' (IPv6 in brackets, so the port is not read as part of it)."""
+    return f"[{host}]:{port}" if ":" in str(host) else f"{host}:{port}"
+
+
 def address_cell(node):
     """The address Keystone connects to; the server's own (NAT, Docker, proxy) as a tooltip if different."""
-    registered = (f"{node['connection_host']}:{node['connection_port'] or 5432}"
+    registered = (host_port(node["connection_host"], node["connection_port"] or 5432)
                   if node.get("connection_host") else "")
-    reported = f"{node['server_address']}:{node['server_port']}" if node.get("server_address") else ""
+    reported = host_port(node["server_address"], node["server_port"]) if node.get("server_address") else ""
     if registered and reported and registered != reported:
         return f'<span title="{e(reported)}">{e(registered)}</span>'
     return e(registered or reported)
@@ -1384,7 +1397,8 @@ def unassessed_groups(data, lang, t):
             cause = t["unassessed_collect"].format(
                 targets=targets, source=match.group("source"), status=status_suffix(status, t))
             key = (targets, status)
-            action = t.get("action_" + status, t["action_other"])
+            offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
+            action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
         else:
             cause = explain_reason(r.get("reason"), data, t) or name
             key = ("cause", cause)                 # the same missing source is one item
@@ -1400,7 +1414,9 @@ def unassessed_groups(data, lang, t):
         host_group = next((g for g in groups.values() if g.get("source") == "PG_HOST_SNAPSHOT"), None)
         if host_group is None:
             host_group = groups.setdefault(("config", "host"), {
-                "cause": t["config_reason"]["no_memory"], "action": t["action_NOT_COLLECTED"],
+                "cause": t["config_reason"]["no_memory"],
+                "action": t["action_NOT_COLLECTED_offline" if data["check"].get("source") == "OFFLINE"
+                            else "action_NOT_COLLECTED"],
                 "rules": [], "source": "PG_HOST_SNAPSHOT"})
         host_group["rules"].append(label)
     return list(groups.values())

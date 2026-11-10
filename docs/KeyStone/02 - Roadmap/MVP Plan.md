@@ -11,7 +11,7 @@ This plan is product-oriented. Detailed working status lives in `docs/DEVELOPMEN
 
 ## Where We Are (2026-11-09)
 
-- Phase 0 done. Phase 1 done except the offline evidence bundle.
+- Phase 0 done. Phase 1: offline evidence bundle built 2026-11-09 (ADR-0018, `feat/offline-bundle`), lab check pending; everything else done.
 - 31 checks in 10 assessments; every P1 check of the PostgreSQL V1 Assessment Catalogue is done. The last one, configuration recommendations (PG-CONF-003, ADR-0017), computes 18 settings from the smallest node's memory, CPUs and data disk, the server profile (workload, dedicated, storage type) and checkpoint statistics, and writes the `ALTER SYSTEM` / `patronictl` commands; PG-CONF-007 flags memory overcommitment.
 - Verified on the multi-system lab: Patroni cluster (PostgreSQL 17, three VMs, SSH) and Docker systems on PostgreSQL 15, 16, 17 (primary + replica) and 18; four health checks at once.
 - Next candidates: P2 checks whose evidence is already collected (one batch), then the offline evidence bundle. Readiness criteria status below.
@@ -91,4 +91,4 @@ The threshold model limitation was resolved with the first rules that needed it:
 - Rule coverage is at least comparable to one-off tools for the covered areas. P1 done (31 checks); P2 continues.
 - Keystone has been run side by side with a manual health check on at least one real system, and the differences have been reviewed. Open.
 - A short "what Keystone collects and does not do" document exists for customers (read-only access, no agent, collector SQL is visible). Open.
-- Offline evidence for customers who allow only a GUI client (Phase 1). Open.
+- Offline evidence for customers who allow only a GUI client (Phase 1). Built (ADR-0018); first real use: Hasan's customer (jump server) and a DBA friend's Windows servers.

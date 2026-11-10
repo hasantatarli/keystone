@@ -189,6 +189,42 @@ ORDER BY ad.assessment_key, rd.rule_key;
 
 ---
 
+### Offline health check (no Keystone connection, ADR-0018)
+
+For customers where Keystone cannot connect (jump server, GUI client only). The customer side runs read-only scripts; the files are imported here and judged as of their capture time.
+
+1. Generate the scripts (from the collector files; never edited by hand) and give the folder to whoever runs them. `KILAVUZ_TOPLAMA.md` inside explains the steps in Turkish:
+
+```powershell
+python -m repository.offline.bundle --out C:\keystone-offline
+```
+
+2. Nothing to register: the import recognises a system by its `system_identifier` or creates it (a SYSTEM and a NODE per server, named as the customer typed the servers).
+
+   The customer runs one collector (asks servers, port, user, password and an optional SSH user; walks every database; host facts directly on this machine, over SSH on the other Linux servers; one archive):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File keystone_collect.ps1     # Windows (psql from pgAdmin or PostgreSQL)
+sh keystone_collect.sh                                            # Linux
+powershell -ExecutionPolicy Bypass -File keystone_collect.ps1 -Servers 10.0.0.1,10.0.0.2 -User postgres -SshUser admin
+```
+
+- Host facts over SSH: the host script goes on stdin (`ssh user@server "sh -s"`), nothing is copied to the server; SSH asks its own password unless a key is set up. A server SSH cannot reach is skipped with a warning; its SQL evidence still goes. Without SSH access, the host script runs on the server separately and its `<server>_host.txt` is passed with `--host`.
+
+3. Import the archive (or single files from the pgAdmin fallback) and write the report:
+
+```powershell
+python -m repository.offline.import_bundle keystone_evidence_20261110-1300.zip --name "Musteri DB" --environment PROD --report tr
+python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
+```
+
+- Without `--target`: a system seen before (live or offline) is found by its identifier; a server by any name it was reached by before (typed, resolved address, address PostgreSQL reports, connection address; with the port, `keystone.target_identity`); new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
+
+- With `--target`: files are matched to nodes by the server in the file name (node name or connection address), the address PostgreSQL reports, or `--node db-2=file.json`. One node: any name works.
+- Refused before anything is written: files of different systems (`system_identifier`), a system different from what Keystone knew, the same script twice for one server and database.
+- A collector changed since the scripts were generated is not imported (FAILED: generate the scripts again). Missing files make their collections NOT_COLLECTED; the rules then say "not assessed".
+- The report header says "collected offline" with the import time; the date is the capture time.
+
 ## 7. Credential tool
 
 Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.credential_data`. The password is typed hidden.
