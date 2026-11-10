@@ -73,5 +73,5 @@ elseif ($model -match "QEMU|KVM") { "kvm" }
 elseif ($model -match "Xen") { "xen" }
 elseif ($model -match "Amazon EC2") { "amazon" }
 elseif ($model -match "Google") { "google" }
-elseif ($cs.HypervisorPresent) { "unknown" }
-else { "none" }
+elseif ($model -match "Virtual") { "unknown" }
+else { "none" }    # HypervisorPresent is also true on physical hosts with Hyper-V, WSL or VBS
