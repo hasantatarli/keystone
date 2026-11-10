@@ -342,6 +342,45 @@ class OfflineImportTests(unittest.TestCase):
         self.assertEqual(targets[first], targets[second])
         self.assertEqual([(n["name"], n["environment"]) for n in nodes], [("dbsrv7", "PROD")])
 
+    def test_a_server_is_one_node_whether_typed_by_address_or_name(self):
+        # Hasan 2026-11-10: first by IP, then by host name; the collector records what the name resolves to.
+        files, _ = self.evidence_files()
+        with self.connect() as conn:
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
+            conn.commit()
+
+        def bundle(label, resolved):
+            folder = self.dir / f"bundle_{label}"
+            folder.mkdir(exist_ok=True)
+            out = []
+            for f in files:
+                kind = Path(f).stem.split("_", 1)[1]                    # node / app / postgres
+                name = f"{label}_node.json" if kind == "node" else f"{label}_db_{kind}.json"
+                text = imp.document_text(Path(f).read_text(encoding="utf-8"))
+                (folder / name).write_text(text, encoding="utf-8")
+                out.append(str(folder / name))
+            (folder / f"{label}_server.json").write_text(json.dumps(
+                {"typed": label, "label": label, "port": self.server.port, "resolved": resolved}), encoding="utf-8")
+            return out
+
+        first, notes = imp.import_bundle(self.connect, None, bundle("10.9.8.7", []))
+        self.assertIn("10.9.8.7", notes[0])
+        second, notes = imp.import_bundle(self.connect, None, bundle("dbhost", ["10.9.8.7"]))
+        self.assertFalse(any(n.startswith("created") for n in notes), notes)
+        third, notes = imp.import_bundle(self.connect, None, bundle("dbhost", []))   # the name is known now
+        self.assertFalse(any(n.startswith("created") for n in notes), notes)
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT c.target_id FROM keystone.health_check_collection c "
+                "WHERE c.health_check_id = ANY(%s) AND c.collector_key = 'PG_CONFIGURATION_SNAPSHOT'",
+                ([first, second, third],)).fetchall()
+            system = conn.execute("SELECT parent_target_id FROM keystone.target WHERE target_id = %s",
+                                  (rows[0]["target_id"],)).fetchone()["parent_target_id"]
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s "
+                         "OR parent_target_id = %s", (system, system))
+            conn.commit()
+        self.assertEqual(len(rows), 1)
+
     def test_windows_files_and_doubled_quotes_are_read(self):
         doc = '{"keystone_bundle": 1}'
         self.assertEqual(imp.decode(doc.encode("utf-16")).lstrip("\ufeff"), doc)   # PowerShell 5 '>'

@@ -18,6 +18,7 @@ import io
 import json
 import re
 import shutil
+import socket
 import tarfile
 import tempfile
 import zipfile
@@ -122,6 +123,8 @@ def expand(paths, workdir):
         else:
             found = [path]
         for f in found:
+            if f.name.lower().endswith("_server.json"):
+                continue                                # read by server_manifests
             if f.name.lower().endswith("_host.txt"):
                 hosts.append(str(f))
             elif f.suffix.lower() in (".json", ".csv", ".txt"):
@@ -143,38 +146,143 @@ def split_mapping(values):
     return mapping
 
 
-def match_node(conn, doc_or_file, nodes, explicit, address=None, port=None):
-    """The node target a file belongs to: explicit, the only node, the connection address, or the file name."""
-    file = doc_or_file
+def server_label(path):
+    """The server a collector file belongs to, from its name: <server>_node.json, <server>_db_<db>.json,
+    <server>_host.txt, <server>_server.json (the server as the customer typed it)."""
+    name = Path(path).name
+    for marker in ("_node.", "_db_", "_host.", "_server."):
+        if marker in name:
+            return name[:name.index(marker)]
+    return None
+
+
+LOOPBACK = re.compile(r"^(127\.|::1$|localhost$)", re.IGNORECASE)
+
+
+def server_manifests(files):
+    """{label: manifest} from the collectors' <server>_server.json next to the evidence files."""
+    manifests = {}
+    folders = {Path(f).parent for f in files}
+    for folder in folders:
+        for path in folder.glob("*_server.json"):
+            try:
+                manifests[server_label(path)] = json.loads(decode(path.read_bytes()))
+            except ValueError:
+                continue
+    return manifests
+
+
+def file_identities(label, docs, manifest, server_of):
+    """Every name a server was reached by in this bundle, with the port: as typed, as resolved,
+    as PostgreSQL reports itself. A server is the same node if any of them was seen before."""
+    qualified, bare = set(), set()
+    mine = [d for d in docs if server_of.get(d["file"]) == label]
+    ports = {str(d["server"]["port"]) for d in mine if d["server"].get("port")}
+    if manifest and manifest.get("port"):
+        ports.add(str(manifest["port"]))
+    names = {label} if label else set()
+    if manifest:
+        names.add(str(manifest.get("typed") or ""))
+        names.update(str(a) for a in manifest.get("resolved") or [])
+    names = {n.lower() for n in names if n and not LOOPBACK.match(n)}
+    bare |= names
+    for port in ports:
+        qualified |= {f"{n}:{port}" for n in names}
+    for d in mine:
+        address = d["server"].get("address")
+        if address and not LOOPBACK.match(address):
+            qualified.add(f"{address.lower()}:{d['server']['port']}")
+    return qualified, bare
+
+
+def resolve(host):
+    """IP addresses of a host name; none when it does not resolve here."""
+    try:
+        return {a[4][0].lower() for a in socket.getaddrinfo(host, None)}
+    except (OSError, UnicodeError):
+        return set()
+
+
+def node_identities(conn, nodes):
+    """{target_id: (qualified, bare)} from earlier imports, connections and node names."""
+    known = {n["target_id"]: (set(), {n["name"].lower()}) for n in nodes}
+    ids = list(known)
+    for r in conn.execute("SELECT target_id, identity FROM keystone.target_identity WHERE target_id = ANY(%s)",
+                          (ids,)):
+        (known[r["target_id"]][0] if ":" in r["identity"] else known[r["target_id"]][1]).add(r["identity"])
+    for r in conn.execute("SELECT target_id, host, port FROM keystone.target_connection "
+                          "WHERE target_id = ANY(%s) AND is_active AND host IS NOT NULL", (ids,)):
+        host, port = r["host"].lower(), r["port"] or 5432
+        known[r["target_id"]][1].add(host)
+        for name in {host} | resolve(host):
+            known[r["target_id"]][0].add(f"{name}:{port}")
+    return known
+
+
+def map_servers(conn, labels, docs, manifests, nodes, explicit, server_of):
+    """{label: node or None}: explicit, then any identity seen before (with port, then without),
+    then one server on a one-node target."""
     by_name = {n["name"].lower(): n for n in nodes}
-    name = explicit.get(str(Path(file)))
-    if name:
-        if name.lower() not in by_name:
-            raise BundleError(f"{file}: no node named {name} in this target")
-        return by_name[name.lower()]
-    if len(nodes) == 1:
-        return nodes[0]
-    label = server_label(file)
+    known = node_identities(conn, nodes)
+    mapping = {}
+    for label in labels:
+        name = explicit.get(label)
+        if name:
+            if name.lower() not in by_name:
+                raise BundleError(f"no node named {name} in this target")
+            mapping[label] = by_name[name.lower()]
+            continue
+        qualified, bare = file_identities(label, docs, manifests.get(label), server_of)
+        found = [n for n in nodes if qualified & known[n["target_id"]][0]]
+        if not found:
+            found = [n for n in nodes if bare & known[n["target_id"]][1]]
+        mapping[label] = found[0] if len(found) == 1 else None
+    if len(nodes) == 1 and len(labels) == 1 and mapping[labels[0]] is None:
+        mapping[labels[0]] = nodes[0]          # one server, one node: the same, whatever it was called
+    return mapping
+
+
+def remember_identities(conn, mapping, docs, manifests, server_of):
+    """Keep every name a node was reached by, so the next import finds it however it is typed."""
+    for label, node in mapping.items():
+        if node is None:
+            continue
+        qualified, bare = file_identities(label, docs, manifests.get(label), server_of)
+        for identity in qualified | bare:
+            conn.execute(
+                "INSERT INTO keystone.target_identity (target_id, identity, source) VALUES (%s, %s, 'OFFLINE') "
+                "ON CONFLICT (target_id, identity) DO UPDATE SET last_seen = clock_timestamp()",
+                (node["target_id"], identity))
+
+
+def file_server(path, known_labels):
+    """The server of one file: its marker (<server>_node / _db_ / _host / _server), else a known server's
+    name it starts with (files saved by hand as <server>_<db>.json), else the only server, else the file."""
+    label = server_label(path)
     if label:
-        row = conn.execute(
-            "SELECT target_id FROM keystone.target_connection WHERE target_id = ANY(%s) "
-            "AND lower(host) = lower(%s) AND is_active LIMIT 1",
-            ([n["target_id"] for n in nodes], label)).fetchone()
-        if row:
-            return next(n for n in nodes if n["target_id"] == row["target_id"])
-    if address:
-        row = conn.execute(
-            "SELECT target_id FROM keystone.target_connection WHERE target_id = ANY(%s) "
-            "AND host = %s AND (port IS NULL OR port = %s) AND is_active LIMIT 1",
-            ([n["target_id"] for n in nodes], address, port)).fetchone()
-        if row:
-            return next(n for n in nodes if n["target_id"] == row["target_id"])
-    base = Path(file).name.lower()
-    found = [n for n in nodes if re.match(re.escape(n["name"].lower()) + r"(?![a-z0-9])", base)]
-    if len(found) == 1:
-        return found[0]
-    raise BundleError(f"{file}: cannot tell which server it comes from; name the file after the server "
-                      f"(for example {nodes[0]['name']}_node.json) or use --node NAME=FILE")
+        return label
+    name = Path(path).name.lower()
+    starts = sorted((l for l in known_labels if name.startswith(l.lower() + "_")), key=len, reverse=True)
+    if starts:
+        return starts[0]
+    return known_labels[0] if len(known_labels) == 1 else Path(path).name
+
+
+def bundle_labels(docs, host_files, node_map):
+    """({file: server}, servers in order, explicit names); --node NAME=FILE gives a server a Keystone name."""
+    paths = [d["file"] for d in docs] + list(host_files)
+    marked = []
+    for f in paths:
+        label = server_label(f)
+        if label and label not in marked:
+            marked.append(label)
+    server_of = {f: file_server(f, marked) for f in paths}
+    labels = list(dict.fromkeys(server_of.values()))
+    explicit = {}
+    for file, name in split_mapping(node_map).items():
+        if name:
+            explicit[file_server(file, marked)] = name
+    return server_of, labels, explicit
 
 
 def check_identity(conn, docs, node_of):
@@ -196,35 +304,18 @@ def check_identity(conn, docs, node_of):
 
 # ----------------------------------------------------------------------------- targets
 
-def server_label(path):
-    """The server a collector file belongs to, from its name: <server>_node.json, <server>_db_<db>.json,
-    <server>_host.txt (the server as the customer typed it)."""
-    name = Path(path).name
-    for marker in ("_node.", "_db_", "_host."):
-        if marker in name:
-            return name[:name.index(marker)]
-    return None
-
-
-def resolve_target(conn, docs, host_files, name=None, environment="UNKNOWN"):
+def resolve_target(conn, docs, host_files, manifests, node_map, name=None, environment="UNKNOWN"):
     """(target_id, created) for the system the files come from, found by system_identifier or created.
 
     The customer never needs Keystone's names: a system seen before is recognised by its
-    identifier; a new one gets a SYSTEM target and a NODE per server named as in the files.
+    identifier and its servers by any name they were reached by; new servers become new nodes.
     """
     identifiers = {d["server"]["system_identifier"] for d in docs}
     if len(identifiers) != 1:
         raise BundleError("the files come from different PostgreSQL systems (system_identifier "
                           + ", ".join(sorted(identifiers)) + ")")
     identifier = next(iter(identifiers))
-    labels = []
-    for f in [d["file"] for d in docs] + list(host_files):
-        label = server_label(f)
-        if label is None:
-            raise BundleError(f"{f}: cannot tell the server from the file name "
-                              "(<server>_node.json, <server>_db_<database>.json, <server>_host.txt)")
-        if label not in labels:
-            labels.append(label)
+    server_of, labels, explicit = bundle_labels(docs, host_files, node_map)
     known = conn.execute(
         """
         SELECT DISTINCT COALESCE(t.parent_target_id, t.target_id) AS target_id
@@ -245,24 +336,11 @@ def resolve_target(conn, docs, host_files, name=None, environment="UNKNOWN"):
             "VALUES (%s, 'PostgreSQL', 'SYSTEM', %s, %s) RETURNING target_id",
             (display, environment, f"Offline evidence, system {identifier}")).fetchone()["target_id"]
         created.append(display)
-    system = conn.execute("SELECT target_type FROM keystone.target WHERE target_id = %s",
-                          (system_id,)).fetchone()
-    if system["target_type"] == "SYSTEM":
-        # A node is known by its name or, for systems also collected live, by its connection address.
-        existing = set()
-        for r in conn.execute(
-                "SELECT t.name, c.host FROM keystone.target t LEFT JOIN keystone.target_connection c "
-                "ON c.target_id = t.target_id AND c.is_active WHERE t.parent_target_id = %s AND t.is_active",
-                (system_id,)):
-            existing.add(r["name"].lower())
-            if r["host"]:
-                existing.add(r["host"].lower())
-        nodes_now = conn.execute("SELECT count(*) AS n FROM keystone.target WHERE parent_target_id = %s "
-                                 "AND is_active", (system_id,)).fetchone()["n"]
-        # One server, one known node: the same server, whatever name the customer typed.
-        single = nodes_now == 1 and len(labels) == 1
+    target, nodes = hc.load_target_tree(conn, system_id)
+    if target["target_type"] == "SYSTEM":
+        mapping = map_servers(conn, labels, docs, manifests, nodes, explicit, server_of) if nodes else {}
         for label in labels:
-            if label.lower() not in existing and not single:
+            if mapping.get(label) is None:
                 conn.execute("INSERT INTO keystone.target (name, provider, target_type, environment, "
                              "parent_target_id) SELECT %s, provider, 'NODE', environment, target_id "
                              "FROM keystone.target WHERE target_id = %s", (label, system_id))
@@ -299,22 +377,26 @@ def import_bundle(connect, target_id, files, hosts=None, node_map=None, host_map
     """
     docs = [read_evidence(f) for f in files]
     host_files = list(hosts or ())
+    manifests = server_manifests(list(files) + host_files)
     current = {c["collector_key"]: c for c in installer.discover_collectors()}
     warnings = []
 
     with connect() as conn:
         if target_id is None:
-            target_id, created = resolve_target(conn, docs, host_files, name, environment)
+            target_id, created = resolve_target(conn, docs, host_files, manifests, node_map, name, environment)
             if created:
                 warnings.append("created in Keystone: " + ", ".join(created))
         target, nodes = hc.load_target_tree(conn, target_id)
         node_targets = nodes or ([target] if target["target_type"] == "NODE" else [])
         if not node_targets:
             raise BundleError(f"target {target_id} has no node to import into")
-        explicit = split_mapping(node_map)
-        node_of = {d["file"]: match_node(conn, d["file"], node_targets, explicit,
-                                         d["server"].get("address"), d["server"].get("port"))
-                   for d in docs}
+        server_of, labels, explicit = bundle_labels(docs, host_files, list(node_map or ()) + list(host_map or ()))
+        mapping = map_servers(conn, labels, docs, manifests, node_targets, explicit, server_of)
+        unknown = [label for label in labels if mapping[label] is None]
+        if unknown:
+            raise BundleError(f"cannot tell which server {', '.join(unknown)} is: name the files after the "
+                              f"server (for example {node_targets[0]['name']}_node.json) or use --node NAME=FILE")
+        node_of = {d["file"]: mapping[server_of[d["file"]]] for d in docs}
         identifier = check_identity(conn, docs, node_of)
 
         seen = {}
@@ -332,11 +414,8 @@ def import_bundle(connect, target_id, files, hosts=None, node_map=None, host_map
         if primary_id is None:
             warnings.append("no node file of a primary: system-wide evidence is missing")
 
-        hosts_by_node = {}
-        explicit_hosts = split_mapping(host_map)
-        for f in host_files:
-            node = match_node(conn, f, node_targets, explicit_hosts)
-            hosts_by_node[node["target_id"]] = read_host(f)
+        hosts_by_node = {mapping[server_of[f]]["target_id"]: read_host(f) for f in host_files}
+        remember_identities(conn, mapping, docs, manifests, server_of)
 
         times = [d["server"]["captured_at"] for d in docs]
         first, last = min(times), max(times)

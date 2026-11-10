@@ -64,6 +64,12 @@ try {
         $Name = Safe $Label
         $Conn = @("-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-h", $HostName, "-p", $Port, "-U", $User)
 
+        # Every name this server is reached by, so Keystone knows it however it is typed next time.
+        $Resolved = @()
+        try { $Resolved = @([System.Net.Dns]::GetHostAddresses($Label) | ForEach-Object { $_.IPAddressToString }) } catch { }
+        @{ typed = $HostName; label = $Label; port = [int]$Port; resolved = $Resolved } |
+            ConvertTo-Json -Compress | Out-File -Encoding utf8 (Join-Path $Out "${Name}_server.json")
+
         Write-Host "[$Label] node script..."
         & $Psql @Conn -d postgres -f (Join-Path $Here "keystone_node.sql") -o (Join-Path $Out "${Name}_node.json")
         if ($LASTEXITCODE -ne 0) {

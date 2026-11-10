@@ -57,6 +57,7 @@ TEXTS = {
         "unassessed_action": "Yapılması gereken",
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
         "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
+        "action_NOT_COLLECTED_offline": "Eksik dosyayı toplayın: sunucu bilgisi için veritabanı sunucusunda host script'ini (host_snapshot.sh ya da host_snapshot_windows.ps1) çalıştırın; diğerleri için toplayıcıyı yeniden çalıştırın.",
         "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
@@ -241,6 +242,7 @@ TEXTS = {
         "unassessed_action": "What to do",
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
         "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
+        "action_NOT_COLLECTED_offline": "Collect the missing file: for server data run the host script (host_snapshot.sh or host_snapshot_windows.ps1) on the database server; for the rest run the collector again.",
         "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
         "coverage": "{total} checks were run, {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
@@ -1390,7 +1392,8 @@ def unassessed_groups(data, lang, t):
             cause = t["unassessed_collect"].format(
                 targets=targets, source=match.group("source"), status=status_suffix(status, t))
             key = (targets, status)
-            action = t.get("action_" + status, t["action_other"])
+            offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
+            action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
         else:
             cause = explain_reason(r.get("reason"), data, t) or name
             key = ("cause", cause)                 # the same missing source is one item
@@ -1406,7 +1409,9 @@ def unassessed_groups(data, lang, t):
         host_group = next((g for g in groups.values() if g.get("source") == "PG_HOST_SNAPSHOT"), None)
         if host_group is None:
             host_group = groups.setdefault(("config", "host"), {
-                "cause": t["config_reason"]["no_memory"], "action": t["action_NOT_COLLECTED"],
+                "cause": t["config_reason"]["no_memory"],
+                "action": t["action_NOT_COLLECTED_offline" if data["check"].get("source") == "OFFLINE"
+                            else "action_NOT_COLLECTED"],
                 "rules": [], "source": "PG_HOST_SNAPSHOT"})
         host_group["rules"].append(label)
     return list(groups.values())

@@ -215,7 +215,7 @@ python -m repository.offline.import_bundle keystone_evidence_20261110-1300.zip -
 python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
 ```
 
-- Without `--target`: a system seen before (live or offline) is found by its identifier; its nodes by name or connection address; new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
+- Without `--target`: a system seen before (live or offline) is found by its identifier; a server by any name it was reached by before (typed, resolved address, address PostgreSQL reports, connection address; with the port, `keystone.target_identity`); new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
 
 - With `--target`: files are matched to nodes by the server in the file name (node name or connection address), the address PostgreSQL reports, or `--node db-2=file.json`. One node: any name works.
 - Refused before anything is written: files of different systems (`system_identifier`), a system different from what Keystone knew, the same script twice for one server and database.

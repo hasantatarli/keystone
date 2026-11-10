@@ -46,6 +46,11 @@ for HOST in $(echo "$HOSTS" | tr ',' ' '); do
     NAME=$(safe "$LABEL")
     if [ "$HOST" = "local" ]; then CONN="-p $PORT -U $PGUSER_IN"; else CONN="-h $HOST -p $PORT -U $PGUSER_IN"; fi
 
+    # Every name this server is reached by, so Keystone knows it however it is typed next time.
+    RESOLVED=$(getent ahosts "$LABEL" 2>/dev/null | awk '{print "\"" $1 "\""}' | sort -u | paste -sd, -)
+    printf '{"typed":"%s","label":"%s","port":%s,"resolved":[%s]}\n' "$HOST" "$LABEL" "$PORT" "$RESOLVED" \
+        > "$OUT/${NAME}_server.json"
+
     echo "[$LABEL] node script..."
     # shellcheck disable=SC2086
     if ! "$PSQL" -X -q -At -v ON_ERROR_STOP=1 $CONN -d postgres -f "$HERE/keystone_node.sql" \
