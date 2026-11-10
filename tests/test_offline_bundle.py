@@ -381,6 +381,19 @@ class OfflineImportTests(unittest.TestCase):
             conn.commit()
         self.assertEqual(len(rows), 1)
 
+    def test_primary_only_collectors_are_skipped_on_a_replica(self):
+        # Lab 2026-11-10: on Patroni replicas the node script failed (WAL control functions in recovery).
+        node = (self.dir / "scripts" / "keystone_node.sql").read_text(encoding="utf-8")
+        database = (self.dir / "scripts" / "keystone_database.sql").read_text(encoding="utf-8")
+        guarded = "CASE WHEN pg_is_in_recovery() THEN NULL ELSE"
+        self.assertEqual(node.count(guarded), 8)          # the SYSTEM collectors, not the 3 NODE ones
+        self.assertEqual(database.count(guarded), 5)      # the DATABASE collectors, not PG_INDEX_USAGE
+        # The guard is what PostgreSQL skips at run time: a failing subquery behind it does not run.
+        with self.server.connect("postgres") as conn:
+            skipped = conn.execute("SELECT CASE WHEN NOT pg_is_in_recovery() THEN NULL ELSE "
+                                   "(SELECT 1 / (random() * 0)::int) END").fetchone()[0]
+        self.assertIsNone(skipped)
+
     def test_windows_files_and_doubled_quotes_are_read(self):
         doc = '{"keystone_bundle": 1}'
         self.assertEqual(imp.decode(doc.encode("utf-16")).lstrip("\ufeff"), doc)   # PowerShell 5 '>'

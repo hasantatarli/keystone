@@ -498,6 +498,8 @@ def collector_rows(chosen, key, current):
         if current.get(key) and entry["checksum"] != current[key]["checksum"]:
             raise BundleError(f"{key} changed since {Path(d['file']).name} was generated; "
                               "generate the scripts again and collect anew")
+        if entry["rows"] is None:
+            raise BundleError(f"{key} is collected on the primary; {Path(d['file']).name} is from a replica")
         rows.extend(entry["rows"])
     if len(chosen) > 1:
         # Handlers expect one capture per collection, as the live fan-out over databases gives.

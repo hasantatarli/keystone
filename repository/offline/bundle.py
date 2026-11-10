@@ -26,6 +26,10 @@ SCRIPT_SCOPES = {"node": ("SYSTEM", "NODE"), "database": ("DATABASE", "NODE_DATA
 # Data minimisation: never leaves the customer (MVP Plan, offline evidence).
 REDACTED_COLUMNS = {"PG_ACTIVITY_SNAPSHOT": ("query_text",)}
 
+# Collected from the primary only, as live: on a replica they are skipped (rows null), and some
+# (WAL control functions) would fail there. CASE never evaluates the skipped subquery.
+PRIMARY_ONLY_SCOPES = ("SYSTEM", "DATABASE")
+
 HOST_SCRIPTS = ("host_snapshot.sh", "host_snapshot_windows.ps1")
 COLLECT_SCRIPTS = ("keystone_collect.ps1", "keystone_collect.sh")
 OFFLINE_DIR = Path(__file__).resolve().parent
@@ -56,12 +60,15 @@ def script_sql(kind, generated_at):
         row = "to_jsonb(c)"
         for column in REDACTED_COLUMNS.get(c["collector_key"], ()):
             row += f" || jsonb_build_object('{column}', NULL)"
+        rows = (f"(SELECT COALESCE(jsonb_agg({row}), '[]'::jsonb) FROM (\n"
+                f"{collector_body(c['path'])}\n"
+                f"        ) AS c)")
+        if c["execution_scope"] in PRIMARY_ONLY_SCOPES:
+            rows = f"CASE WHEN pg_is_in_recovery() THEN NULL ELSE {rows} END"
         parts.append(
             f"'{c['collector_key']}', jsonb_build_object(\n"
             f"        'checksum', '{c['checksum']}',\n"
-            f"        'rows', (SELECT COALESCE(jsonb_agg({row}), '[]'::jsonb) FROM (\n"
-            f"{collector_body(c['path'])}\n"
-            f"        ) AS c))")
+            f"        'rows', {rows})")
     run_on = ("once on every server, in database postgres" if kind == "node"
               else "once in every database (postgres included) on every server")
     return f"""/*
