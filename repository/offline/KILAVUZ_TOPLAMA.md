@@ -9,46 +9,50 @@ Bu klasördeki script'ler, Keystone'un PostgreSQL sağlık kontrolü için gerek
 - **Toplananlar:** PostgreSQL ayarları, veritabanı ve tablo adları ile boyutları, bakım ve istatistik sayaçları, oturum durumları (sorgu metni olmadan), replikasyon durumu, rol adları ve yetkileri, index kullanımı. Ne toplandığını SQL dosyalarının içinde görebilirsiniz.
 - Gereken yetki: superuser ya da `pg_monitor` rolü yeterlidir.
 
-## Dosyalar
+## En kolay yol: toplayıcı script (önerilen)
+
+Tek bir script sunucuya bağlanır, **bütün veritabanlarını kendisi bulup dolaşır** ve her şeyi tek bir arşiv dosyasında toplar. Veritabanı sayısı ne olursa olsun bir kez çalıştırmak yeter.
+
+Gereken tek şey `psql`. Windows'ta pgAdmin kurulumunun içinde gelir (`pgAdmin 4\runtime\psql.exe`); script onu ve PostgreSQL kurulum klasörünü kendisi arar. Linux'ta PostgreSQL sunucusunda zaten vardır.
+
+**Windows** (PowerShell):
+
+```
+powershell -ExecutionPolicy Bypass -File keystone_collect.ps1
+```
+
+**Linux:**
+
+```
+sh keystone_collect.sh
+```
+
+Script şunları sorar:
+
+| Soru | Açıklama |
+|---|---|
+| Sunucu(lar) | Adres ya da ad. Birden fazla sunucu virgülle (örn. Patroni node'ları: `db-1,db-2,db-3`). Linux'ta sunucunun kendisinde `local` yerel bağlantı kullanır. |
+| Port | Varsayılan 5432 |
+| Kullanıcı | Superuser ya da `pg_monitor` rolü olan bir kullanıcı |
+| Şifre | Ekranda görünmez, hiçbir yere kaydedilmez, iş bitince bellekten silinir |
+| Çıktı klasörü | Varsayılanı script'in yanında yeni bir klasör |
+| Keystone'daki sunucu adı | Her sunucu için; dosyalar bu adla adlandırılır. Size verilen adı yazın. |
+| Bu makine mi? | Script veritabanı sunucusunun kendisinde çalışıyorsa "e": bellek, CPU ve disk bilgisi de toplanır |
+
+Sonunda tek bir dosya oluşur: Windows'ta `.zip`, Linux'ta `.tar.gz`. **Gönderilecek dosya budur.**
+
+Script'leri aynı anda, birbirine yakın zamanda çalıştırın (ideal olarak 10 dakika içinde); oturum ve replikasyon bilgileri kısa ömürlüdür.
+
+## psql yoksa: pgAdmin ile elle (yedek yol)
 
 | Dosya | Nerede çalışır | Kaç kez |
 |---|---|---|
 | `keystone_node.sql` | Her sunucuda, `postgres` veritabanında | Sunucu başına 1 |
 | `keystone_database.sql` | Her sunucuda, **her veritabanında** (`postgres` dahil) | Sunucu × veritabanı |
-| `host_snapshot.sh` | Linux sunucuda, işletim sistemi kabuğunda (isteğe bağlı) | Sunucu başına 1 |
-| `host_snapshot_windows.ps1` | Windows sunucuda, PowerShell'de (isteğe bağlı) | Sunucu başına 1 |
 
-Örnek: 3 veritabanlı tek bir sunucu → 1 node + 4 veritabanı (`postgres` dahil) = 5 çalıştırma. Patroni cluster'ında her node için aynısı yapılır.
-
-Script'leri **aynı oturumda, birbirine yakın zamanda** (ideal olarak 10 dakika içinde) çalıştırın; oturum ve replikasyon bilgileri kısa ömürlüdür.
-
-## pgAdmin ile
-
-1. Sunucuda `postgres` veritabanını seçip **Query Tool**'u açın.
-2. `keystone_node.sql` dosyasını açın (Open File) ya da içeriğini yapıştırın ve çalıştırın (F5).
-3. Sonuç tek satır, tek hücredir (`keystone_evidence`). İki yoldan biriyle alın:
-   - **Kopyala:** Hücreyi seçip kopyalayın, bir metin dosyasına yapıştırın.
-   - **Dosyaya kaydet:** Sonuç alanındaki "Save results to file" düğmesiyle CSV olarak kaydedin. Kopyalanan metin kesik görünüyorsa bu yolu kullanın.
-4. Aynı işlemi `keystone_database.sql` ile **her veritabanında** tekrarlayın (Query Tool'u o veritabanında açarak).
-
-## Dosya adları
-
-Dosyaları sunucu ve veritabanı adıyla adlandırın; Keystone dosyanın hangi sunucudan geldiğini adından anlar:
-
-```
-<sunucu>_node.json
-<sunucu>_<veritabanı>.json
-<sunucu>_host.txt
-```
-
-Örnek: `postgre-1_node.json`, `postgre-1_postgres.json`, `postgre-1_app.json`, `postgre-1_host.txt`. CSV olarak kaydedilen dosyaların uzantısı `.csv` kalabilir.
-
-## psql ile (varsa)
-
-```
-psql -h <sunucu> -d postgres -At -f keystone_node.sql -o postgre-1_node.json
-psql -h <sunucu> -d app      -At -f keystone_database.sql -o postgre-1_app.json
-```
+1. Veritabanında **Query Tool**'u açın, script'i açıp çalıştırın (F5).
+2. Sonuç tek hücredir (`keystone_evidence`). Sonuç alanındaki "Save results to file" ile kaydedin ya da hücreyi kopyalayıp bir metin dosyasına yapıştırın.
+3. Dosyaları sunucu ve veritabanı adıyla adlandırın: `<sunucu>_node.json`, `<sunucu>_db_<veritabanı>.json`.
 
 ## Sunucu bilgisi (isteğe bağlı)
 
@@ -66,7 +70,7 @@ sh host_snapshot.sh > postgre-1_host.txt
 powershell -ExecutionPolicy Bypass -File host_snapshot_windows.ps1 > DBSRV01_host.txt
 ```
 
-Bu script'ler de yalnızca okur (Linux'ta `/proc`, `df`, `lsblk`; Windows'ta `Get-CimInstance`, `Get-Partition`, `Get-PhysicalDisk`).
+Toplayıcı script "bu makine" denildiğinde bunu kendisi yapar. Ayrıca çalıştırmak isterseniz bu script'ler de yalnızca okur (Linux'ta `/proc`, `df`, `lsblk`; Windows'ta `Get-CimInstance`, `Get-Partition`, `Get-PhysicalDisk`).
 
 Script çalıştırılamıyorsa her sunucu için şu bilgiler yeterlidir: bellek (GB), CPU çekirdek sayısı, veri diskinin boyutu ve doluluğu, disk tipi (SSD/HDD).
 

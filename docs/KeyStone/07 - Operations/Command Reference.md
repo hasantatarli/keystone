@@ -207,10 +207,18 @@ INSERT INTO keystone.target (name, provider, target_type, environment, parent_ta
 -- A standalone server can be one NODE target without a SYSTEM.
 ```
 
-3. Import the files and write the report:
+   The customer runs one collector (asks servers, port, user, password; walks every database; one archive):
 
 ```powershell
-python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_postgres.json db-1_app.json db-2_node.json --host db-1=db-1_host.txt --report tr
+powershell -ExecutionPolicy Bypass -File keystone_collect.ps1     # Windows (psql from pgAdmin or PostgreSQL)
+sh keystone_collect.sh                                            # Linux
+```
+
+3. Import the archive (or single files from the pgAdmin fallback) and write the report:
+
+```powershell
+python -m repository.offline.import_bundle --target 20 keystone_evidence_20261110-1300.zip --report tr
+python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
 ```
 
 - Files are matched to nodes by a connection address if one is defined, else by the file name starting with the node name; `--node db-2=file.json` says it explicitly. One node: any name works.

@@ -17,6 +17,10 @@ import hashlib
 import io
 import json
 import re
+import shutil
+import tarfile
+import tempfile
+import zipfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -41,10 +45,19 @@ class BundleError(Exception):
 
 # ----------------------------------------------------------------------------- reading
 
+def decode(raw):
+    """File bytes as text: UTF-8 (with or without BOM) or UTF-16 (Windows PowerShell 5 '>')."""
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig")
+
+
 def document_text(raw):
     """The JSON text of one result, whether pasted, saved by pgAdmin (CSV) or written by psql -At."""
-    text = raw.lstrip("﻿").strip()
+    text = raw.lstrip("\ufeff").strip()
     if text.startswith("{"):
+        if text.startswith('{""'):                 # copied with CSV quoting: quotes doubled, no outer pair
+            return text.replace('""', '"')
         return text
     for row in csv.reader(io.StringIO(text)):
         for cell in row:
@@ -67,7 +80,7 @@ def typed(value):
 def read_evidence(path):
     raw = Path(path).read_bytes()
     try:
-        doc = json.loads(document_text(raw.decode("utf-8")), parse_float=Decimal)
+        doc = json.loads(document_text(decode(raw)), parse_float=Decimal)
     except (UnicodeDecodeError, ValueError) as exc:
         raise BundleError(f"{path}: not readable as Keystone evidence ({exc})") from exc
     if doc.get("keystone_bundle") != BUNDLE_FORMAT or doc.get("kind") not in ("node", "database"):
@@ -80,7 +93,7 @@ def read_evidence(path):
 
 def read_host(path):
     """Host script output (Linux or Windows) as collector rows, at the time the script ran."""
-    text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    text = decode(Path(path).read_bytes())
     rows = worker.parse_host_snapshot_output(text)
     match = re.search(r"^===CAPTURED_AT===\s*\n\s*(\S+)", text, re.MULTILINE)
     if match:
@@ -91,6 +104,29 @@ def read_host(path):
         for r in rows:
             r["captured_at"] = None                     # set from the node's evidence below
     return {"file": str(path), "rows": rows, "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+
+
+def expand(paths, workdir):
+    """Evidence and host files from the given paths; archives of the collector scripts are unpacked."""
+    evidence, hosts = [], []
+    for path in map(Path, paths):
+        if path.suffix.lower() == ".zip" or path.name.lower().endswith((".tar.gz", ".tgz")):
+            target = Path(workdir) / path.name
+            if path.suffix.lower() == ".zip":
+                with zipfile.ZipFile(path) as archive:
+                    archive.extractall(target)
+            else:
+                with tarfile.open(path) as archive:
+                    archive.extractall(target, filter="data")
+            found = sorted(p for p in target.rglob("*") if p.is_file())
+        else:
+            found = [path]
+        for f in found:
+            if f.name.lower().endswith("_host.txt"):
+                hosts.append(str(f))
+            elif f.suffix.lower() in (".json", ".csv", ".txt"):
+                evidence.append(str(f))
+    return evidence, hosts
 
 
 # ----------------------------------------------------------------------------- matching
@@ -305,7 +341,8 @@ def collector_rows(chosen, key, current):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Import Keystone offline evidence into a health check.")
     parser.add_argument("--target", type=int, required=True, help="target_id (SYSTEM includes its nodes)")
-    parser.add_argument("files", nargs="+", help="evidence files from keystone_node.sql / keystone_database.sql")
+    parser.add_argument("files", nargs="+",
+                        help="the collector's archive (.zip / .tar.gz) or evidence files")
     parser.add_argument("--host", action="append", default=[], metavar="[NODE=]FILE",
                         help="host script output (Linux or Windows); NODE= when the system has several")
     parser.add_argument("--node", action="append", default=[], metavar="NODE=FILE",
@@ -321,13 +358,17 @@ def main(argv=None):
         user = getpass.getuser()
     except Exception:
         user = None
-    hosts = [h.partition("=")[2] if "=" in h else h for h in args.host]
+    workdir = tempfile.mkdtemp(prefix="keystone_import_")
     try:
+        files, found_hosts = expand(args.files, workdir)
+        hosts = [h.partition("=")[2] if "=" in h else h for h in args.host] + found_hosts
         health_check_id, warnings = import_bundle(
-            worker.connect_repository, args.target, args.files, hosts, args.node,
+            worker.connect_repository, args.target, files, hosts, args.node,
             [h for h in args.host if "=" in h], args.assessment, user)
     except BundleError as exc:
         raise SystemExit(f"Import refused: {exc}")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
     for w in warnings:
         print(f"Warning: {w}")
     with worker.connect_repository() as conn:

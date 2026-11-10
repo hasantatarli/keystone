@@ -289,6 +289,33 @@ class OfflineImportTests(unittest.TestCase):
         self.assertGreater(len(stored[live_target]), 300)
         self.assertEqual(stored[live_target], stored[self.target])
 
+    def test_linux_collector_walks_every_database_into_one_archive(self):
+        # Answers to the prompts: server, port, user, password, output folder, Keystone name, host? (h)
+        import subprocess
+        out = self.dir / "collected"
+        answers = f"127.0.0.1\n{self.server.port}\nkeystone_test\n\n{out}\npg-off\nh\n"
+        result = subprocess.run(["sh", str(self.dir / "scripts" / "keystone_collect.sh")], input=answers,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        archive = Path(f"{out}.tar.gz")
+        self.assertTrue(archive.exists(), result.stdout)
+        names = sorted(p.name for p in out.iterdir())
+        self.assertIn("pg-off_node.json", names)
+        self.assertTrue({"pg-off_db_app.json", "pg-off_db_postgres.json"} <= set(names), names)
+        with tempfile.TemporaryDirectory() as work:
+            files, hosts = imp.expand([str(archive)], work)
+            check_id, _ = imp.import_bundle(self.connect, self.target, files, hosts)
+            with self.connect() as conn:
+                statuses = {r["status"] for r in conn.execute(
+                    "SELECT status FROM keystone.health_check_collection WHERE health_check_id = %s "
+                    "AND collector_key <> 'PG_HOST_SNAPSHOT'", (check_id,))}
+        self.assertEqual(statuses, {"SUCCESS"})
+
+    def test_windows_files_and_doubled_quotes_are_read(self):
+        doc = '{"keystone_bundle": 1}'
+        self.assertEqual(imp.decode(doc.encode("utf-16")).lstrip("\ufeff"), doc)   # PowerShell 5 '>'
+        self.assertEqual(imp.document_text(doc.replace('"', '""')), doc)          # pgAdmin copy quoting
+
     def test_the_scripts_create_nothing_and_need_only_pg_monitor(self):
         with self.server.connect(autocommit=True) as admin:
             admin.execute("DROP ROLE IF EXISTS offline_monitor")

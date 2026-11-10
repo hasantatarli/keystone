@@ -27,6 +27,7 @@ SCRIPT_SCOPES = {"node": ("SYSTEM", "NODE"), "database": ("DATABASE", "NODE_DATA
 REDACTED_COLUMNS = {"PG_ACTIVITY_SNAPSHOT": ("query_text",)}
 
 HOST_SCRIPTS = ("host_snapshot.sh", "host_snapshot_windows.ps1")
+COLLECT_SCRIPTS = ("keystone_collect.ps1", "keystone_collect.sh")
 OFFLINE_DIR = Path(__file__).resolve().parent
 
 
@@ -106,6 +107,9 @@ def write_bundle(out_dir):
         source = (installer.POSTGRESQL_COLLECTORS_DIR / name if name.endswith(".sh")
                   else OFFLINE_DIR / name)
         shutil.copyfile(source, out / name)
+        written.append(out / name)
+    for name in COLLECT_SCRIPTS:
+        shutil.copyfile(OFFLINE_DIR / name, out / name)
         written.append(out / name)
     for guide in sorted(OFFLINE_DIR.glob("KILAVUZ_*.md")):
         shutil.copyfile(guide, out / guide.name)

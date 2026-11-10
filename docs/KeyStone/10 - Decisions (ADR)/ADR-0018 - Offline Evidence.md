@@ -12,8 +12,8 @@ Both first pilots cannot give Keystone a connection: Hasan's customer allows onl
 | # | Topic | Decision |
 | --- | --- | --- |
 | 1 | Source of the SQL | Generated from the collector files (`repository.offline.bundle`); never a hand-kept copy. |
-| 2 | Runs | Per server: `keystone_node.sql` once in `postgres` (SYSTEM and NODE collectors), `keystone_database.sql` once per database (DATABASE and NODE_DATABASE). |
-| 3 | Output | One `SELECT`, one JSON document in one cell. Copy, pgAdmin "save results to file" (CSV) or `psql -At`; the importer reads all three. |
+| 2 | Runs | One collector run per batch of servers: `keystone_collect.ps1` (Windows) / `keystone_collect.sh` (Linux) ask servers, port, user and password, run `keystone_node.sql` once per server in `postgres` and `keystone_database.sql` in every database they find, add the host script on the server itself, and pack one archive. Needs `psql` (shipped with pgAdmin on Windows). Running the two scripts by hand in pgAdmin is the fallback. Changed 2026-11-10 (Hasan): running a script per database by hand does not scale (50 databases). |
+| 3 | Output | One `SELECT`, one JSON document in one cell; the collector writes it with `psql -At`. The importer also reads pasted text, pgAdmin CSV, doubled quotes and UTF-16 files (Windows PowerShell 5 redirection), and unpacks `.zip` / `.tar.gz`. |
 | 4 | Host | Optional: the Linux host collector script or a Windows PowerShell script printing the same sections, so one parser reads both. Without it, hardware-dependent checks are not assessed. |
 | 5 | Provenance | Every file: `system_identifier`, address and port, version, recovery state, database, `cluster_name`, user, capture time, and the checksum of every collector. Stored with the check (`health_check.bundle_info`, `source = OFFLINE`, `imported_at`). |
 | 6 | Import | `repository.offline.import_bundle`: files to nodes by connection address, file name or `--node`; refused for mixed or unknown systems and duplicates; a collector whose checksum changed is not imported. Rows go through the live handlers; one capture time per collection when several files feed it. |
