@@ -10,7 +10,9 @@ Description
 -----------
 Collects raw table-level vacuum and analyze statistics including live/dead
 tuple estimates, modification counters, last maintenance timestamps and
-vacuum/analyze execution counters.
+vacuum/analyze execution counters. A DATABASE row per collected database
+marks it as read even when it has no tables, so an old snapshot is not taken
+for the present.
 ===============================================================================
 */
 
@@ -19,6 +21,34 @@ WITH snapshot AS
     SELECT statement_timestamp() AS captured_at
 )
 SELECT
+    'DATABASE'::text AS record_type,
+    d.oid AS database_oid,
+    current_database() AS database_name,
+    NULL::name AS schema_name,
+    NULL::oid AS object_oid,
+    NULL::name AS object_name,
+    NULL::boolean AS is_partition,
+    NULL::bigint AS n_live_tup,
+    NULL::bigint AS n_dead_tup,
+    NULL::bigint AS n_mod_since_analyze,
+    NULL::bigint AS n_ins_since_vacuum,
+    NULL::timestamptz AS last_vacuum,
+    NULL::timestamptz AS last_autovacuum,
+    NULL::timestamptz AS last_analyze,
+    NULL::timestamptz AS last_autoanalyze,
+    NULL::bigint AS vacuum_count,
+    NULL::bigint AS autovacuum_count,
+    NULL::bigint AS analyze_count,
+    NULL::bigint AS autoanalyze_count,
+    snap.captured_at
+FROM pg_database d
+CROSS JOIN snapshot snap
+WHERE d.datname = current_database()
+
+UNION ALL
+
+SELECT
+    'TABLE'::text,
     d.oid AS database_oid,
     current_database() AS database_name,
 
@@ -55,5 +85,6 @@ JOIN pg_database d
 CROSS JOIN snapshot snap
 
 ORDER BY
-    n.nspname,
-    c.relname;
+    record_type,
+    schema_name NULLS FIRST,
+    object_name NULLS FIRST;

@@ -1208,9 +1208,9 @@ def save_table_capacity_snapshot(conn, task, rows):
         cur.executemany(sql, params)
         
 def save_vacuum_analyze_snapshot(conn, task, rows):
-    """Persist PG_VACUUM_ANALYZE rows."""
-    if not rows:
-        return
+    """Persist PG_VACUUM_ANALYZE: a DATABASE row per collected database, a TABLE row per table."""
+    if not any(r.get("record_type") == "DATABASE" for r in rows):
+        raise RuntimeError("PG_VACUUM_ANALYZE returned no DATABASE rows.")
 
     captured_at_values = {
         row["captured_at"]
@@ -1227,6 +1227,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
         (
             target_id,
             captured_at,
+            record_type,
 
             database_oid,
             database_name,
@@ -1255,6 +1256,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
         (
             %(target_id)s,
             %(captured_at)s,
+            %(record_type)s,
 
             %(database_oid)s,
             %(database_name)s,
@@ -1288,6 +1290,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
             {
                 "target_id": task["target_id"],
                 "captured_at": row["captured_at"],
+                "record_type": row["record_type"],
 
                 "database_oid": row["database_oid"],
                 "database_name": row["database_name"],

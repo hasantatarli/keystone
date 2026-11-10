@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG022).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG023).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -18,14 +18,14 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_ROLES | SYSTEM | `role_snapshot` | PG-SEC-001 |
 | PG_PREPARED_TRANSACTIONS | SYSTEM | `prepared_transaction_status_snapshot`, `prepared_transaction_snapshot` | PG-TRAN-005 |
 | PG_TRANSACTION_WRAPAROUND | DATABASE | `transaction_wraparound_snapshot` | PG-TRAN-002/004 |
-| PG_VACUUM_ANALYZE | DATABASE | `vacuum_analyze_snapshot` | PG-MAINT-001/002 |
+| PG_VACUUM_ANALYZE | DATABASE | `vacuum_analyze_snapshot` (DATABASE row per database, PG023) | PG-MAINT-001/002/003 |
 | PG_SEQUENCE_CAPACITY | DATABASE | `sequence_capacity_snapshot` | PG-CAP-002 |
 | PG_SCHEMA_PRIVILEGES | DATABASE | `schema_privilege_snapshot` | PG-SEC-004 |
 | PG_TABLE_STRUCTURE | DATABASE | `table_structure_snapshot` (PG022): foreign keys with index coverage, unlogged tables | PG-IDX-004, PG-BKP-003 |
 | PG_EXTENSIONS | DATABASE | `extension_snapshot` (PG022): installed and package versions | PG-LIFE-004 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |
 
-Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`).
+Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`, `PG_VACUUM_ANALYZE`).
 
 ## Privileges
 

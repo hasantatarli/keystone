@@ -153,7 +153,7 @@ The installer stores the header `Description` in `keystone.migration_history`, a
 
 ### 8. Empty evidence vs missing evidence — partly resolved (V041)
 
-New collectors always return a SYSTEM row (`PG_PREPARED_TRANSACTIONS`), so "none" is evidence. Older detail-only collectors (`PG_REPLICATION_SLOTS`) are unchanged. Original note:
+New collectors always return a SYSTEM row (`PG_PREPARED_TRANSACTIONS`), so "none" is evidence. Older detail-only collectors (`PG_REPLICATION_SLOTS`) are unchanged. PG_VACUUM_ANALYZE got a DATABASE row (PG023, 2026-11-10) after lab hc110: a database whose tables were all dropped returned nothing and the older snapshot with the dropped tables was judged. Remaining: a database that was dropped keeps its last snapshot until it is older than the rule's max age (24 h). Original note:
 
 
 Some collectors legitimately return zero rows (for example `PG_REPLICATION_SLOTS` on a server without replication slots). Evidence loaders read the latest captured rows, so "collected, nothing to report" is indistinguishable from "never collected" and is treated as missing evidence. Part of the open decision in issue 2.

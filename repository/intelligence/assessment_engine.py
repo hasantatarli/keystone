@@ -581,10 +581,14 @@ def load_instance_inventory(conn, target_id):
 
 
 def load_latest_vacuum_analyze_snapshot(conn, target_id):
-    """Latest PG_VACUUM_ANALYZE snapshot per database of the target (one row per table)."""
+    """Latest PG_VACUUM_ANALYZE snapshot per database of the target (one row per table).
+
+    The DATABASE row marks a database as read: one that has no tables any more ends with that
+    collection, not with an older snapshot (lab hc110: dropped test tables were still judged).
+    """
     return conn.execute(
         """
-        SELECT v.snapshot_id, v.target_id, v.captured_at, v.database_name, v.schema_name,
+        SELECT v.snapshot_id, v.target_id, v.captured_at, v.record_type, v.database_name, v.schema_name,
                v.object_name, v.is_partition, v.n_live_tup, v.n_dead_tup, v.n_mod_since_analyze,
                v.n_ins_since_vacuum, v.last_vacuum, v.last_autovacuum, v.last_analyze,
                v.last_autoanalyze, v.vacuum_count, v.autovacuum_count, v.analyze_count,
@@ -1515,12 +1519,17 @@ def ratio_or_size_severity(percent, count, thresholds, large_limit):
     return None, None
 
 
+def table_rows(rows):
+    """TABLE rows of PG_VACUUM_ANALYZE; DATABASE rows only mark a database as read."""
+    return [r for r in rows if r.get("record_type", "TABLE") == "TABLE"]
+
+
 def evaluate_dead_tuple_pressure(rows, rule, thresholds):
     """PG-MAINT-001: dead rows as a share of all rows, or many dead rows in a large table."""
     minimum = parameter(rule, "min_dead_tuples")
     large = parameter(rule, "large_table_dead_tuples")
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         dead, live = row["n_dead_tup"] or 0, row["n_live_tup"] or 0
         if dead < minimum:
             continue
@@ -1542,7 +1551,7 @@ def evaluate_stale_statistics(rows, rule, thresholds):
     minimum = parameter(rule, "min_modifications")
     large = parameter(rule, "large_table_modifications")
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         modified, live = row["n_mod_since_analyze"] or 0, row["n_live_tup"] or 0
         if modified < minimum:
             continue
@@ -2069,7 +2078,7 @@ def evaluate_never_processed_tables(evidence, rule, thresholds):
     factor = parameter(rule, "overdue_factor")
     base, scale = analyze_trigger_settings(config)
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         counts = (row.get("vacuum_count"), row["autovacuum_count"], row.get("analyze_count"),
                   row["autoanalyze_count"])
         times = (row["last_vacuum"], row["last_autovacuum"], row["last_analyze"], row["last_autoanalyze"])

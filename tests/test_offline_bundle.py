@@ -304,6 +304,40 @@ class OfflineImportTests(unittest.TestCase):
         self.assertIn("<code>btree (a, b)</code>", pages["tr"])
         self.assertIn("Foreign key without index", pages["en"])
 
+    def test_a_database_without_tables_ends_with_its_latest_collection(self):
+        # Lab hc110 (2026-11-10): after the test tables were dropped the database had no tables, the
+        # collector returned nothing and the older snapshot with the dropped table was judged.
+        from repository.intelligence import assessment_engine as engine
+        sql = Path("providers/postgresql/telemetry/collectors/vacuum_analyze_snapshot.sql").read_text()
+        with self.server.connect(autocommit=True) as admin:
+            admin.execute("DROP DATABASE IF EXISTS vac_empty")
+            admin.execute("CREATE DATABASE vac_empty")
+
+        def drop():
+            with self.server.connect(autocommit=True) as admin:
+                admin.execute("DROP DATABASE IF EXISTS vac_empty")
+        self.addCleanup(drop)
+
+        def collect():
+            with self.server.connect("vac_empty", row_factory=dict_row) as db:
+                rows = db.execute(sql).fetchall()
+            with self.connect() as conn:
+                worker.save_vacuum_analyze_snapshot(
+                    conn, {"target_id": self.target, "collector_key": "PG_VACUUM_ANALYZE"}, rows)
+                conn.commit()
+                return [r for r in engine.load_latest_vacuum_analyze_snapshot(conn, self.target)
+                        if r["database_name"] == "vac_empty"]
+
+        with self.server.connect("vac_empty", autocommit=True) as db:
+            db.execute("CREATE TABLE gone (id int) WITH (autovacuum_enabled = false)")
+            db.execute("INSERT INTO gone SELECT generate_series(1, 30000)")
+        self.assertEqual({r["object_name"] for r in engine.table_rows(collect())}, {"gone"})
+        with self.server.connect("vac_empty", autocommit=True) as db:
+            db.execute("DROP TABLE gone")
+        latest = collect()
+        self.assertEqual([r["record_type"] for r in latest], ["DATABASE"])
+        self.assertEqual(engine.table_rows(latest), [])
+
     def test_files_of_another_system_are_refused(self):
         files, _ = self.evidence_files()
         doc = json.loads(Path(files[0]).read_text())
