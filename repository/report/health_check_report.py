@@ -199,7 +199,8 @@ TEXTS = {
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
         "detail_valid_until": "Geçerlilik sonu",
         "detail_wait_event": "Beklediği", "detail_query_start": "Sorgu başlangıcı",
-        "detail_started_at": "Başlama zamanı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
+        "detail_started_at": "Başlama zamanı", "detail_definition": "Tanım",
+        "detail_other_definition": "Diğer index'in tanımı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
         "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat",
@@ -386,7 +387,8 @@ TEXTS = {
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
         "detail_valid_until": "Valid until",
         "detail_wait_event": "Waiting for", "detail_query_start": "Statement start",
-        "detail_started_at": "Started at", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
+        "detail_started_at": "Started at", "detail_definition": "Definition",
+        "detail_other_definition": "Other index's definition", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
         "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times",
@@ -1590,7 +1592,8 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("data_type", "detail_data_type"), ("column_type", "detail_column_type"),
                  ("last_value", "detail_last_value"), ("limit", "detail_limit"),
                  ("limit_source", "detail_limit_source"), ("wait_event", "detail_wait_event"),
-                 ("analyze_trigger", "detail_analyze_trigger"))
+                 ("analyze_trigger", "detail_analyze_trigger"), ("definition", "detail_definition"),
+                 ("other_definition", "detail_other_definition"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1636,7 +1639,7 @@ COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connection
                 "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds"}
-SIZE_VALUES = {"index_size"}
+SIZE_VALUES = {"index_size", "size_bytes"}
 
 
 def template_value_text(key, value, t=None):

@@ -157,7 +157,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 20 / 27 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 22 / 29 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):

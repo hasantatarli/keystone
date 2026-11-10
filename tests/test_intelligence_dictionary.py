@@ -348,6 +348,32 @@ EXPECTED_RULES = {
         "thresholds": {},
         "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
     },
+    # V057: object structure.
+    "PG-IDX-003": {
+        "assessment": "PG_INDEX_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_INDEX_USAGE": (True, 86400)},
+    },
+    "PG-IDX-004": {
+        "assessment": "PG_INDEX_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_TABLE_STRUCTURE": (True, 86400)},
+        "parameters": {"min_table_size": (Decimal("10485760"), "BYTE")},
+    },
+    "PG-BKP-003": {
+        "assessment": "PG_BACKUP_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_TABLE_STRUCTURE": (True, 86400)},
+    },
+    "PG-LIFE-004": {
+        "assessment": "PG_LIFECYCLE_HEALTH",
+        "default_severity": "INFO",
+        "thresholds": {},
+        "evidence": {"PG_EXTENSIONS": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

@@ -767,6 +767,56 @@ Unit tests for every condition and boundary; an end-to-end test on a disposable 
 
 ---
 
+# Batch of 2026-11-10 (2) — object structure (V057, PG022)
+
+Index definitions added to `PG_INDEX_USAGE` (method, key and INCLUDE columns, operator classes, collations, expressions, predicate, `pg_get_indexdef`). New collectors, DATABASE scope, `pg_monitor` enough: `PG_TABLE_STRUCTURE` (foreign keys with their columns, the referencing table's size and whether an index starts with the key's columns; unlogged tables; extension objects marked) and `PG_EXTENSIONS` (installed version and the server package's `default_version`). Both return a DATABASE row per database so "none" is evidence. They are also the first pieces of the inventory layer (Capability Roadmap, long-term direction). New assessment `PG_LIFECYCLE_HEALTH`, topic LIFECYCLE ("Sürüm ve yaşam döngüsü"); PG-LIFE-001/002/003 will join it.
+
+## PG-IDX-003 — Duplicate Index (PG_INDEX_HEALTH, topic INDEXES)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INDEX_USAGE`, required, 86 400 s; the primary's rows (definitions are the same on replicas) |
+| Condition | same table, method, key and INCLUDE columns, operator classes, collations, expressions and predicate → WARNING (FINDING); a btree index whose key columns are the leading key columns of a longer btree index, same operator classes and collations, no expressions or predicate → INFO (FINDING_ALT) |
+| Insufficient evidence | no primary (`no_primary`) |
+| Subject | INDEX (the one to drop) |
+
+Of two identical indexes the one that backs no constraint is reported; of two alike, the later name. Unique and constraint indexes are never reported as redundant: they enforce a rule. Invalid, still-building and extension-owned indexes are left out. The shorter of a prefix pair is smaller and may be preferred for some queries; the recommendation says to check.
+
+## PG-IDX-004 — Foreign Key Without Index (PG_INDEX_HEALTH, topic INDEXES)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TABLE_STRUCTURE`, required, 86 400 s |
+| Condition | no valid, non-partial index starts with exactly the key's columns (any order), and the referencing table ≥ parameter `min_table_size` (10 MB) → WARNING |
+| Subject | CONSTRAINT |
+
+Keys inherited by partitions are judged on the parent; a partitioned table's size is the sum of its partitions. Extension tables are left out.
+
+## PG-BKP-003 — Unlogged Tables (PG_BACKUP_HEALTH, topic BACKUP)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TABLE_STRUCTURE`, required, 86 400 s |
+| Condition | every unlogged table (not extension-owned) → WARNING |
+| Subject | TABLE |
+
+May be deliberate (caches, staging); the texts say so.
+
+## PG-LIFE-004 — Extension Update Available (PG_LIFECYCLE_HEALTH, topic LIFECYCLE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_EXTENSIONS`, required, 86 400 s |
+| Condition | installed version ≠ the server package's `default_version` → INFO |
+| Subject | EXTENSION (database.extension) |
+
+The reference is the package on the server, so no release list or internet access is needed (decision 6 does not apply). An extension whose package is gone (`default_version` NULL) is not judged.
+
+**Verification (V057)**  
+Unit tests for every condition; an end-to-end test on a disposable PostgreSQL 16 creates two identical indexes and a longer one, a 20 000-row child without an index on its foreign key (test `min_table_size`), an unlogged table and `pg_stat_statements` at version 1.9, then runs the real collectors, import and both report languages: all five findings as expected. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

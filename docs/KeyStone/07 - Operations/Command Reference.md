@@ -132,7 +132,7 @@ python -m repository.intelligence.assessment_engine --help
 
 The engine evaluates the evidence already in the repository; it does not collect.
 
-Assessments (2026-11-02): `PG_TRANSACTION_HEALTH`, `PG_REPLICATION_HEALTH`, `PG_CONNECTION_HEALTH`, `PG_CAPACITY_HEALTH`, `PG_CONFIGURATION_HEALTH`, `PG_BACKUP_HEALTH`, `PG_SECURITY_HEALTH`, `PG_MAINTENANCE_HEALTH`, `PG_INDEX_HEALTH`, `PG_CONFIGURATION_TUNING`. Configuration check alone: `python -m repository.healthcheck.health_check --target <id> --assessment PG_CONFIGURATION_TUNING --report tr`. Current list: `SELECT assessment_key FROM keystone.assessment_definition ORDER BY 1;`
+Assessments (2026-11-02): `PG_TRANSACTION_HEALTH`, `PG_REPLICATION_HEALTH`, `PG_CONNECTION_HEALTH`, `PG_CAPACITY_HEALTH`, `PG_CONFIGURATION_HEALTH`, `PG_BACKUP_HEALTH`, `PG_SECURITY_HEALTH`, `PG_MAINTENANCE_HEALTH`, `PG_INDEX_HEALTH`, `PG_CONFIGURATION_TUNING`, `PG_LIFECYCLE_HEALTH` (V057). Configuration check alone: `python -m repository.healthcheck.health_check --target <id> --assessment PG_CONFIGURATION_TUNING --report tr`. Current list: `SELECT assessment_key FROM keystone.assessment_definition ORDER BY 1;`
 
 ---
 

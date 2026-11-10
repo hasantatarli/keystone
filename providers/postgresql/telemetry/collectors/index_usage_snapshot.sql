@@ -11,7 +11,9 @@ Description
 Collects every user index with its scan count, size, validity and constraint,
 in every database of every node: scan counts are kept per server, so an index
 unused on the primary may be used by reports on a replica. Indexes of
-extensions (TimescaleDB, PostGIS...) are marked extension_owned.
+extensions (TimescaleDB, PostGIS...) are marked extension_owned. The index
+definition (method, key columns, operator classes, expressions, predicate)
+lets duplicate and redundant indexes be found.
 ===============================================================================
 */
 
@@ -37,6 +39,14 @@ SELECT
     NULL::text    AS constraint_type,
     NULL::boolean AS being_built,
     NULL::boolean AS extension_owned,
+    NULL::text    AS access_method,
+    NULL::integer AS key_count,
+    NULL::text    AS index_keys,
+    NULL::text    AS index_opclasses,
+    NULL::text    AS index_collations,
+    NULL::text    AS index_expressions,
+    NULL::text    AS index_predicate,
+    NULL::text    AS index_definition,
     c.captured_at
 FROM collection_context AS c
 LEFT JOIN pg_catalog.pg_stat_database AS d
@@ -63,10 +73,22 @@ SELECT
             WHERE d.classid = 'pg_catalog.pg_class'::regclass
               AND d.objid IN (s.indexrelid, s.relid)
               AND d.deptype = 'e'),
+    am.amname::text,
+    i.indnkeyatts::integer,
+    i.indkey::text,                     -- column numbers; 0 is an expression
+    i.indclass::text,
+    i.indcollation::text,
+    pg_get_expr(i.indexprs, i.indrelid),
+    pg_get_expr(i.indpred, i.indrelid),
+    pg_get_indexdef(i.indexrelid),
     c.captured_at
 FROM pg_catalog.pg_stat_user_indexes AS s
 JOIN pg_catalog.pg_index AS i
     ON i.indexrelid = s.indexrelid
+JOIN pg_catalog.pg_class AS ic
+    ON ic.oid = s.indexrelid
+JOIN pg_catalog.pg_am AS am
+    ON am.oid = ic.relam
 LEFT JOIN pg_catalog.pg_constraint AS con
     ON con.conindid = s.indexrelid
    AND con.contype IN ('p', 'u', 'x')

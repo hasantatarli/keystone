@@ -90,8 +90,8 @@ Sources combined:
 | --- | --- | --- | --- | --- | --- |
 | **PG-IDX-001** | Unused index | `idx_scan` summed over all nodes = 0, size ≥ 10 MB, not a constraint index; statistics ≥ 7 days, age always stated, under a year warns about periodic use — WARNING | Ready: PG_INDEX_USAGE (NODE_DATABASE) | Unused Indexes, Index Access Profile | Done |
 | **PG-IDX-002** | Invalid index | `indisvalid = false` on the primary, not being built — WARNING, unique — CRITICAL | Ready: PG_INDEX_USAGE | invalid indexes | Done |
-| PG-IDX-003 | Duplicate / redundant index | Same columns in the same order, or a prefix of another index | Gap: PG-011 | — | P2 |
-| PG-IDX-004 | Foreign key without index | FK columns not leading any index on a table of meaningful size | Gap: PG-022 | — | P2 |
+| **PG-IDX-003** | Duplicate / redundant index | Same columns in the same order, or a prefix of another index | Gap: PG-011 | — | Done |
+| **PG-IDX-004** | Foreign key without index | FK columns not leading any index on a table of meaningful size | Gap: PG-022 | — | Done |
 | PG-IDX-005 | Heavy sequential scans | Large table read mostly by sequential scans | Gap: `seq_scan`, `seq_tup_read` (extend PG-005) | Tabel Access Profile | P2 |
 
 ## 6. Capacity Engineering
@@ -128,7 +128,7 @@ WAL archiving settings and archiver statistics are collected (PG_CONFIGURATION_S
 | --- | --- | --- | --- | --- | --- |
 | **PG-BKP-001** | WAL archiving failing | `pg_stat_archiver`: last failure after last success — CRITICAL | Ready: PG_WAL_STATUS | — | Done |
 | **PG-BKP-002** | No point-in-time recovery possible | `archive_mode = off` on a primary — WARNING with explanation | Ready: PG-002 | — | Done |
-| PG-BKP-003 | Unlogged tables | Unlogged tables exist: lost after a crash, not replicated — WARNING with the table list | Gap: PG-030 | Unlogged Tables | P2 |
+| **PG-BKP-003** | Unlogged tables | Unlogged tables exist: lost after a crash, not replicated — WARNING with the table list | Gap: PG-030 | Unlogged Tables | Done |
 | PG-BKP-004 | Last successful backup age | No successful backup within N hours (pgBackRest, Barman, pg_dump logs) | Gap: backup tool integration over SSH | — | P3 |
 
 ## 9. Security Engineering
@@ -152,7 +152,7 @@ Needs a **release reference table** in the Dictionary (versions, release dates, 
 | PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P3 |
 | PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P3 |
 | PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Ready: host + reference table | — | P2 |
-| PG-LIFE-004 | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | P2 |
+| **PG-LIFE-004** | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | Done |
 
 ## 11. Performance Engineering (health-check depth)
 
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 39 | 0 | 14 | 10 |
-| of which evidence ready | 39 | 0 | 1 | 5 |
+| Checks | 43 | 0 | 10 | 10 |
+| of which evidence ready | 43 | 0 | 2 | 5 |
 
-Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
