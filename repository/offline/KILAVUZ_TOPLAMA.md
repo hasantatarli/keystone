@@ -38,6 +38,8 @@ Script şunları sorar:
 | SSH kullanıcısı | Diğer (Linux) sunucuların bellek, CPU ve disk bilgisi için. Verilirse script her sunucuya SSH ile bağlanıp host script'ini çalıştırır; sunucuya dosya kopyalanmaz. SSH, anahtar tanımlı değilse her sunucu için kendi şifresini sorar. Boş bırakılırsa toplanmaz. |
 | Çıktı klasörü | Varsayılanı script'in yanında yeni bir klasör |
 
+**Windows sunucular:** Diğer sunucuların donanım bilgisi SSH ile yalnızca Linux'ta alınabiliyor. Sunuculara uzak masaüstü (RDP) ile bağlanıyorsanız script'i her sunucuda ayrı çalıştırın (sunucu: `localhost`, SSH kullanıcısı: boş) ve çıkan bütün zip dosyalarını birlikte gönderin.
+
 Script'in çalıştığı makine veritabanı sunucusunun kendisiyse (`localhost`, `local`, makinenin adı ya da adresi), bellek, CPU ve disk bilgisi SSH'sız, doğrudan toplanır.
 
 Sonunda tek bir dosya oluşur: Windows'ta `.zip`, Linux'ta `.tar.gz`. **Gönderilecek dosya budur.**

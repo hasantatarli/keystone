@@ -440,6 +440,48 @@ class OfflineImportTests(unittest.TestCase):
             conn.commit()
         self.assertEqual(len(rows), 1)
 
+    def test_one_archive_per_windows_server_imports_as_one_system(self):
+        # Hasan 2026-11-10: a DBA on RDP runs the collector on each Windows server (localhost); the
+        # archives go to one import and become one system, each server with its own host facts.
+        import zipfile
+        files, _ = self.evidence_files()
+        with self.connect() as conn:
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
+            conn.commit()
+        archives = []
+        for label, replica in (("WINSRV-A", False), ("WINSRV-B", True)):
+            archive = self.dir / f"keystone_evidence_{label}.zip"
+            with zipfile.ZipFile(archive, "w") as z:
+                for f in files:
+                    doc = json.loads(imp.document_text(Path(f).read_text(encoding="utf-8")))
+                    doc["server"]["in_recovery"] = replica
+                    if doc["kind"] == "node":
+                        name = f"{label}_node.json"
+                    else:
+                        name = f"{label}_db_{doc['server']['database']}.json"
+                    z.writestr(name, json.dumps(doc))
+                z.writestr(f"{label}_server.json", json.dumps(
+                    {"typed": "localhost", "label": label, "port": self.server.port, "resolved": []}))
+                z.writestr(f"{label}_host.txt", WINDOWS_HOST.replace("DBSRV01", label))
+            archives.append(str(archive))
+        with tempfile.TemporaryDirectory() as work:
+            evidence, hosts = imp.expand(archives, work)
+            check_id, notes = imp.import_bundle(self.connect, None, evidence, hosts)
+        with self.connect() as conn:
+            got = {(r["name"], r["collector_key"]): r["status"] for r in conn.execute(
+                "SELECT t.name, c.collector_key, c.status FROM keystone.health_check_collection c "
+                "JOIN keystone.target t USING (target_id) WHERE c.health_check_id = %s", (check_id,))}
+            system = conn.execute("SELECT target_id FROM keystone.health_check WHERE health_check_id = %s",
+                                  (check_id,)).fetchone()["target_id"]
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s "
+                         "OR parent_target_id = %s", (system, system))
+            conn.commit()
+        self.assertIn("created in Keystone", notes[0])
+        for label in ("WINSRV-A", "WINSRV-B"):
+            self.assertEqual(got[(label, "PG_HOST_SNAPSHOT")], "SUCCESS")
+            self.assertEqual(got[(label, "PG_CONFIGURATION_SNAPSHOT")], "SUCCESS")
+            self.assertEqual(got[(label, "PG_INDEX_USAGE")], "SUCCESS")
+
     def test_primary_only_collectors_are_skipped_on_a_replica(self):
         # Lab 2026-11-10: on Patroni replicas the node script failed (WAL control functions in recovery).
         node = (self.dir / "scripts" / "keystone_node.sql").read_text(encoding="utf-8")
