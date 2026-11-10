@@ -1133,11 +1133,16 @@ def or_unknown(value, t):
     return e(value)
 
 
+def host_port(host, port):
+    """'10.0.0.5:5432', '[::1]:5432' (IPv6 in brackets, so the port is not read as part of it)."""
+    return f"[{host}]:{port}" if ":" in str(host) else f"{host}:{port}"
+
+
 def address_cell(node):
     """The address Keystone connects to; the server's own (NAT, Docker, proxy) as a tooltip if different."""
-    registered = (f"{node['connection_host']}:{node['connection_port'] or 5432}"
+    registered = (host_port(node["connection_host"], node["connection_port"] or 5432)
                   if node.get("connection_host") else "")
-    reported = f"{node['server_address']}:{node['server_port']}" if node.get("server_address") else ""
+    reported = host_port(node["server_address"], node["server_port"]) if node.get("server_address") else ""
     if registered and reported and registered != reported:
         return f'<span title="{e(reported)}">{e(registered)}</span>'
     return e(registered or reported)
