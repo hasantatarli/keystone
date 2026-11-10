@@ -572,7 +572,7 @@ def load_instance_inventory(conn, target_id):
         """
         SELECT ii.target_id, t.name AS node_name, ii.last_collected_at AS captured_at,
                ii.server_address, ii.server_port, ii.in_recovery, ii.server_version,
-               ii.postmaster_start_time
+               ii.server_version_num, ii.postmaster_start_time
         FROM postgresql.instance_inventory ii
         JOIN keystone.target t ON t.target_id = ii.target_id
         WHERE ii.target_id = ANY(%s)
@@ -586,8 +586,9 @@ def load_latest_vacuum_analyze_snapshot(conn, target_id):
         """
         SELECT v.snapshot_id, v.target_id, v.captured_at, v.database_name, v.schema_name,
                v.object_name, v.is_partition, v.n_live_tup, v.n_dead_tup, v.n_mod_since_analyze,
-               v.last_vacuum, v.last_autovacuum, v.last_analyze, v.last_autoanalyze,
-               v.autovacuum_count, v.autoanalyze_count
+               v.n_ins_since_vacuum, v.last_vacuum, v.last_autovacuum, v.last_analyze,
+               v.last_autoanalyze, v.vacuum_count, v.autovacuum_count, v.analyze_count,
+               v.autoanalyze_count
         FROM postgresql.vacuum_analyze_snapshot v
         JOIN (
             SELECT database_name, max(captured_at) AS captured_at
@@ -614,7 +615,8 @@ def load_latest_host_snapshot(conn, target_id):
     hosts = conn.execute(
         """
         SELECT 'HOST' AS record_type, h.target_id, t.name AS node_name, h.captured_at,
-               h.logical_cpu_count, h.memory_total_bytes
+               h.logical_cpu_count, h.memory_total_bytes, h.memory_available_bytes,
+               h.swap_total_bytes, h.swap_used_bytes
         FROM keystone.target t
         JOIN LATERAL (
             SELECT * FROM postgresql.host_snapshot h
@@ -1933,6 +1935,277 @@ def evaluate_sequence_exhaustion(rows, rule, thresholds):
 # Evidence loaders translate Dictionary evidence_source keys into repository
 # queries. Keeping this mapping here lets run_assessment() load only the evidence
 # declared by each rule without knowing PostgreSQL table/query details.
+# ----------------------------------------------------------------------------- P2 rules (V056)
+
+# Client statements only: replication senders, autovacuum and background workers are not judged.
+def evaluate_long_running_query(rows, rule, thresholds):
+    """PG-TRAN-007: an active statement of a client backend running long (from query_start)."""
+    findings = []
+    for row in rows:
+        if row["backend_type"] != "client backend" or row["state"] != "active":
+            continue
+        if row["query_start"] is None:
+            continue
+        running = (row["captured_at"] - row["query_start"]).total_seconds()
+        matched = match_threshold(running, thresholds, "SECOND")
+        if matched is None:
+            continue
+        details = session_details(row)
+        details["query_start"] = iso(row["query_start"])
+        if row.get("wait_event"):
+            details["wait_event"] = f"{row.get('wait_event_type')}: {row['wait_event']}"
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": {"pid": row["pid"], "running_seconds": round(running)},
+            "observed_value": round(running, 1), "observed_unit": "SECOND",
+            "subject_type": "SESSION", "subject_identifier": str(row["pid"]),
+            "details": details})
+    return findings
+
+
+def primary_settings(evidence):
+    """The primary's settings ({name: row}); a standalone server is its own primary."""
+    primary = current_primary(evidence["PG_INSTANCE_INVENTORY"])
+    if primary is None:
+        raise InsufficientEvidence("PG_INSTANCE_INVENTORY", "no_primary",
+                                   "There is no primary among the nodes.")
+    return primary, settings_by_node(evidence["PG_CONFIGURATION_SNAPSHOT"]).get(primary["target_id"], {})
+
+
+def setting_number(settings, name):
+    row = settings.get(name)
+    try:
+        return float(row["setting_value"]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+def evaluate_freeze_falling_behind(evidence, rule, thresholds):
+    """PG-TRAN-006: database XID age as a share of the primary's autovacuum_freeze_max_age."""
+    primary, settings = primary_settings(evidence)
+    freeze_max_age = setting_number(settings, "autovacuum_freeze_max_age")
+    if not freeze_max_age:
+        raise InsufficientEvidence("PG_CONFIGURATION_SNAPSHOT", "setting_missing",
+                                   "autovacuum_freeze_max_age was not collected on the primary.",
+                                   setting="autovacuum_freeze_max_age")
+    findings = []
+    for row in evidence["PG_TRANSACTION_WRAPAROUND"]:
+        if row["xid_age"] is None:
+            continue
+        share = 100 * row["xid_age"] / freeze_max_age
+        matched = match_threshold(share, thresholds, "PERCENT")
+        if matched is None:
+            continue
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": {"database_name": row["database_name"], "xid_age": row["xid_age"],
+                                "percent": f"{round(share):g}", "freeze_max_age": int(freeze_max_age)},
+            "observed_value": round(share, 1), "observed_unit": "PERCENT",
+            "subject_type": "DATABASE", "subject_identifier": row["database_name"],
+            "details": {"database": row["database_name"], "node": primary["node_name"],
+                        "captured_at": iso(row["captured_at"])}})
+    return findings
+
+
+# Server defaults of the analyze trigger, used when the settings were not collected.
+ANALYZE_TRIGGER_DEFAULTS = {"autovacuum_analyze_threshold": 50, "autovacuum_analyze_scale_factor": 0.1}
+
+
+def analyze_trigger_settings(config_rows):
+    """Server-wide analyze trigger (threshold, scale factor); any node's value, defaults otherwise."""
+    found = {}
+    for row in config_rows or ():
+        if row["setting_name"] in ANALYZE_TRIGGER_DEFAULTS and row["setting_name"] not in found:
+            try:
+                found[row["setting_name"]] = float(row["setting_value"])
+            except (TypeError, ValueError):
+                pass
+    return tuple(found.get(k, v) for k, v in ANALYZE_TRIGGER_DEFAULTS.items())
+
+
+def evaluate_never_processed_tables(evidence, rule, thresholds):
+    """PG-MAINT-003: no vacuum and no analyze since the statistics reset, although autovacuum is overdue.
+
+    Overdue: changes since analyze pass overdue_factor × the table's analyze trigger and min_changes.
+    """
+    if isinstance(evidence, dict):
+        rows, config = evidence["PG_VACUUM_ANALYZE"], evidence.get("PG_CONFIGURATION_SNAPSHOT")
+    else:
+        rows, config = evidence, None
+    minimum = parameter(rule, "min_changes")
+    factor = parameter(rule, "overdue_factor")
+    base, scale = analyze_trigger_settings(config)
+    findings = []
+    for row in rows:
+        counts = (row.get("vacuum_count"), row["autovacuum_count"], row.get("analyze_count"),
+                  row["autoanalyze_count"])
+        times = (row["last_vacuum"], row["last_autovacuum"], row["last_analyze"], row["last_autoanalyze"])
+        if any(c for c in counts) or any(times):
+            continue
+        changed = row["n_mod_since_analyze"] or 0
+        trigger = base + scale * (row["n_live_tup"] or 0)
+        if changed < minimum or changed < factor * trigger:
+            continue
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": {"table": table_name(row), "changed_rows": changed},
+            "observed_value": changed, "observed_unit": "ROW",
+            "subject_type": "TABLE", "subject_identifier": table_name(row),
+            "details": {"database": row["database_name"],
+                        "table": f"{row['schema_name']}.{row['object_name']}",
+                        "live_rows": row["n_live_tup"], "modified_rows": changed,
+                        "dead_rows": row["n_dead_tup"], "analyze_trigger": round(trigger),
+                        "captured_at": iso(row["captured_at"])}})
+    return findings
+
+
+def host_rows(rows):
+    """{target_id: HOST row} with known memory."""
+    return {r["target_id"]: r for r in rows
+            if r.get("record_type") == "HOST" and r.get("memory_total_bytes")}
+
+
+def size_text(value):
+    return config_rec.pg_value(config_rec.mb_floor(value), "BYTE")
+
+
+def evaluate_memory_pressure(rows, rule, thresholds):
+    """PG-CAP-004: swap in use while little memory is available, per node."""
+    hosts = host_rows(rows)
+    if not hosts:
+        raise InsufficientEvidence("PG_HOST_SNAPSHOT", "no_memory", "No server's memory is known.")
+    low = parameter(rule, "max_available_memory")
+    swap_min = parameter(rule, "min_swap_used")
+    findings = []
+    for host in hosts.values():
+        total, available = host["memory_total_bytes"], host.get("memory_available_bytes")
+        swap_total, swap_used = host.get("swap_total_bytes"), host.get("swap_used_bytes")
+        if available is None or not swap_total or swap_used is None:
+            continue
+        available_percent = 100 * available / total
+        swap_percent = 100 * swap_used / swap_total
+        if available_percent >= low or swap_percent < swap_min:
+            continue
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": None,
+            "template_values": {"node": host["node_name"], "available": size_text(available),
+                                "memory": size_text(total),
+                                "available_percent": f"{round(available_percent, 1):g}",
+                                "swap_used": size_text(swap_used), "swap_total": size_text(swap_total),
+                                "swap_percent": f"{round(swap_percent, 1):g}"},
+            "observed_value": round(available_percent, 1), "observed_unit": "PERCENT",
+            "subject_type": "NODE", "subject_identifier": host["node_name"],
+            "details": {"node": host["node_name"], "captured_at": iso(host["captured_at"])}})
+    return findings
+
+
+def evaluate_recent_restart(rows, rule, thresholds):
+    """PG-HA-002: servers started within the recent restart window (INFO, context)."""
+    window = parameter(rule, "recent_restart_window")
+    findings = []
+    for row in rows:
+        started = row["postmaster_start_time"]
+        if started is None:
+            continue
+        since = max((row["captured_at"] - started).total_seconds(), 0.0)
+        if since > window:
+            continue
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": None,
+            "template_values": {"node_name": row["node_name"], "started_at": clock(started),
+                                "since_seconds": round(since)},
+            "observed_value": round(since, 1), "observed_unit": "SECOND",
+            "subject_type": "NODE", "subject_identifier": row["node_name"],
+            "details": {"node": row["node_name"], "started_at": iso(started),
+                        "captured_at": iso(row["captured_at"])}})
+    return findings
+
+
+def primary_and_replicas(inventory):
+    """(primary, replicas) of a system; NotApplicable without replicas."""
+    replicas = [r for r in inventory if r["in_recovery"] is True]
+    if not replicas:
+        raise NotApplicable("PG_INSTANCE_INVENTORY", "no_replicas", "The system has no replicas.")
+    primary = current_primary(inventory)
+    if primary is None:
+        raise InsufficientEvidence("PG_INSTANCE_INVENTORY", "no_primary",
+                                   "There is no primary among the nodes.")
+    return primary, replicas
+
+
+def evaluate_replica_smaller(evidence, rule, thresholds):
+    """PG-HA-003: a replica with fewer CPUs or less than min_memory_share of the primary's memory."""
+    primary, replicas = primary_and_replicas(evidence["PG_INSTANCE_INVENTORY"])
+    hosts = host_rows(evidence["PG_HOST_SNAPSHOT"])
+    big = hosts.get(primary["target_id"])
+    if big is None:
+        raise InsufficientEvidence("PG_HOST_SNAPSHOT", "no_memory",
+                                   "The primary's memory is unknown.")
+    share = parameter(rule, "min_memory_share")
+    findings = []
+    for replica in replicas:
+        host = hosts.get(replica["target_id"])
+        if host is None:
+            add_unassessed(rule["unassessed"], replica["target_id"], replica["node_name"],
+                           "PG_HOST_SNAPSHOT", "no_memory")
+            continue
+        fewer_cpus = (host.get("logical_cpu_count") or 0) < (big.get("logical_cpu_count") or 0)
+        memory_share = 100 * host["memory_total_bytes"] / big["memory_total_bytes"]
+        if not fewer_cpus and memory_share >= share:
+            continue
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": None,
+            "template_values": {"node": replica["node_name"], "cpus": host.get("logical_cpu_count"),
+                                "memory": size_text(host["memory_total_bytes"]),
+                                "primary": primary["node_name"],
+                                "primary_cpus": big.get("logical_cpu_count"),
+                                "primary_memory": size_text(big["memory_total_bytes"])},
+            "observed_value": round(memory_share, 1), "observed_unit": "PERCENT",
+            "subject_type": "NODE", "subject_identifier": replica["node_name"],
+            "details": {"node": replica["node_name"], "captured_at": iso(host["captured_at"])}})
+    return findings
+
+
+def version_of(row):
+    """'17.10 (Ubuntu 17.10-1.pgdg24.04+1)' -> '17.10'."""
+    return (row.get("server_version") or "").split(" ")[0] or str(row.get("server_version_num") or "")
+
+
+def evaluate_mixed_versions(rows, rule, thresholds):
+    """PG-HA-004: a server running another PostgreSQL version than the primary."""
+    primary, replicas = primary_and_replicas(rows)
+    expected = version_of(primary)
+    findings = []
+    for replica in replicas:
+        version = version_of(replica)
+        if not version or version == expected:
+            continue
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": None,
+            "template_values": {"node_name": replica["node_name"], "version": version,
+                                "primary": primary["node_name"], "primary_version": expected},
+            "observed_value": None, "observed_unit": None,
+            "subject_type": "NODE", "subject_identifier": replica["node_name"],
+            "details": {"node": replica["node_name"], "captured_at": iso(replica["captured_at"])}})
+    return findings
+
+
+def evaluate_diagnostics_disabled(rows, rule, thresholds):
+    """PG-CONF-005: log_lock_waits off, or pg_stat_statements not in shared_preload_libraries, per node."""
+    findings = []
+    for row in rows:
+        if row["setting_name"] == "log_lock_waits" and row["setting_value"] == "off":
+            findings.append(setting_finding(rule["default_severity"], row))
+        elif row["setting_name"] == "shared_preload_libraries":
+            libraries = {x.strip().strip('"').lower() for x in (row["setting_value"] or "").split(",")}
+            if "pg_stat_statements" in libraries:
+                continue
+            finding = setting_finding(rule["default_severity"], row)
+            finding["template_values"]["_alt"] = True
+            findings.append(finding)
+    return findings
+
+
 EVIDENCE_LOADERS = {
     "PG_ACTIVITY_SNAPSHOT": load_latest_activity_snapshot,
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
@@ -2078,6 +2351,14 @@ RULE_EVALUATORS = {
     "PG-SEC-001": evaluate_login_superusers,
     "PG-SEC-004": evaluate_public_create,
     "PG-CAP-002": evaluate_sequence_exhaustion,
+    "PG-TRAN-007": evaluate_long_running_query,
+    "PG-TRAN-006": evaluate_freeze_falling_behind,
+    "PG-MAINT-003": evaluate_never_processed_tables,
+    "PG-CAP-004": evaluate_memory_pressure,
+    "PG-HA-002": evaluate_recent_restart,
+    "PG-HA-003": evaluate_replica_smaller,
+    "PG-HA-004": evaluate_mixed_versions,
+    "PG-CONF-005": evaluate_diagnostics_disabled,
 }
 
 

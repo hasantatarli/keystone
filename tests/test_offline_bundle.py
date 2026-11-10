@@ -200,6 +200,60 @@ class OfflineImportTests(unittest.TestCase):
         self.assertIn("offline toplandı", page)
         self.assertIn("Ubuntu 24.04.4 LTS", page)
 
+    def test_p2_rules_on_real_evidence(self):
+        # V056 end to end: real collectors, loaders, rules and both report languages.
+        import threading
+        with self.server.connect("app", autocommit=True) as app:
+            app.execute("DROP TABLE IF EXISTS untouched")
+            app.execute("CREATE TABLE untouched (id int) WITH (autovacuum_enabled = false)")
+            app.execute("INSERT INTO untouched SELECT generate_series(1, 30000)")
+        sleeper = self.server.connect("app", autocommit=True)
+        worker = threading.Thread(target=lambda: sleeper.execute("SELECT pg_sleep(8)"), daemon=True)
+        worker.start()
+        self.addCleanup(sleeper.close)
+        self.addCleanup(worker.join)
+        import time
+        time.sleep(3)
+        with self.connect() as conn:                 # thresholds of the test, not the defaults
+            conn.execute("UPDATE keystone.rule_threshold SET threshold_value = threshold_value / 300 "
+                         "WHERE rule_id = (SELECT rule_id FROM keystone.rule_definition "
+                         "WHERE rule_key = 'PG-TRAN-007')")
+            conn.commit()
+        try:
+            files, host = self.evidence_files()
+            check_id, _ = imp.import_bundle(self.connect, self.target, files, [host])
+        finally:
+            with self.connect() as conn:
+                conn.execute("UPDATE keystone.rule_threshold SET threshold_value = threshold_value * 300 "
+                             "WHERE rule_id = (SELECT rule_id FROM keystone.rule_definition "
+                             "WHERE rule_key = 'PG-TRAN-007')")
+                conn.commit()
+        with self.connect() as conn:
+            outcomes = {r["rule_key"]: (r["outcome"], r["max_severity"]) for r in conn.execute(
+                "SELECT rd.rule_key, res.outcome, res.max_severity FROM keystone.assessment_result res "
+                "JOIN keystone.assessment_run ar USING (assessment_run_id) "
+                "JOIN keystone.rule_definition rd USING (rule_id) WHERE ar.health_check_id = %s",
+                (check_id,))}
+            subjects = {r["subject_identifier"] for r in conn.execute(
+                "SELECT f.subject_identifier FROM keystone.finding f "
+                "JOIN keystone.assessment_run ar USING (assessment_run_id) WHERE ar.health_check_id = %s",
+                (check_id,))}
+            pages = {lang: report.render_html(report.load_report_data(conn, check_id), lang)
+                     for lang in ("tr", "en")}
+        self.assertEqual(outcomes["PG-TRAN-007"], ("ATTENTION_REQUIRED", "WARNING"))
+        self.assertEqual(outcomes["PG-MAINT-003"], ("ATTENTION_REQUIRED", "WARNING"))
+        self.assertIn("app.public.untouched", subjects)
+        self.assertEqual(outcomes["PG-TRAN-006"], ("HEALTHY", None))
+        self.assertEqual(outcomes["PG-CAP-004"], ("HEALTHY", None))
+        self.assertEqual(outcomes["PG-CONF-005"], ("ATTENTION_REQUIRED", "INFO"))
+        self.assertEqual(outcomes["PG-HA-003"][0], "NOT_APPLICABLE")
+        self.assertEqual(outcomes["PG-HA-004"][0], "NOT_APPLICABLE")
+        self.assertIn(outcomes["PG-HA-002"][0], ("HEALTHY", "ATTENTION_REQUIRED"))
+        self.assertIn("Uzun süren sorgu", pages["tr"])
+        self.assertIn("hiç vacuum ya da analyze çalışmamış", pages["tr"])
+        self.assertIn("pg_stat_statements yüklü değil", pages["tr"])
+        self.assertIn("Long running query", pages["en"])
+
     def test_files_of_another_system_are_refused(self):
         files, _ = self.evidence_files()
         doc = json.loads(Path(files[0]).read_text())

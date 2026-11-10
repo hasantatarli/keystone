@@ -673,6 +673,100 @@ Texts (V029, V030, V034, V040): every rule has NAME, HEALTHY, MEANING, CAUSES, I
 6. Run the full test suite, open a pull request, verify in the lab (clean, problem and recovery states where feasible).
 7. Record the verification result in this catalog.
 
+# Batch of 2026-11-10 — P2 rules on existing evidence (V056)
+
+No new collector: every rule reads evidence collected for earlier rules. Loaders now also read `memory_available_bytes`, `swap_total_bytes`, `swap_used_bytes` (host), `n_ins_since_vacuum`, `vacuum_count`, `analyze_count` (vacuum) and `server_version_num` (inventory). Thresholds are first values (Hasan 2026-11-10: to be calibrated on real systems; they are Dictionary rows).
+
+## PG-TRAN-007 — Long Running Query (PG_TRANSACTION_HEALTH, topic TRANSACTIONS)
+
+| | |
+| --- | --- |
+| Evidence | `PG_ACTIVITY_SNAPSHOT`, required, 600 s |
+| Metric | `captured_at − query_start` of a client backend in state `active` |
+| Condition | ≥ 300 s WARNING, ≥ 1 800 s CRITICAL |
+| Subject | SESSION (pid); details: wait event, query start, session context |
+
+Replication senders, autovacuum and background workers are not client backends and are not judged. A long statement in a long transaction also matches PG-TRAN-003: one judges the statement, the other the transaction.
+
+## PG-TRAN-006 — Freeze Falling Behind (PG_TRANSACTION_HEALTH, topic MAINTENANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TRANSACTION_WRAPAROUND` 86 400 s, `PG_CONFIGURATION_SNAPSHOT` 86 400 s, `PG_INSTANCE_INVENTORY` 3 600 s, all required |
+| Metric | database `age(datfrozenxid)` as a percentage of the primary's `autovacuum_freeze_max_age` |
+| Condition | ≥ 150 % WARNING, ≥ 200 % CRITICAL |
+| Insufficient evidence | no primary (`no_primary`); the setting not collected on the primary (`setting_missing`) |
+| Subject | DATABASE |
+
+At 100 % anti-wraparound autovacuum starts; staying well above it means freezing does not keep up. Much earlier than PG-TRAN-002 (absolute distance to wraparound). Per-table `autovacuum_freeze_max_age` is not considered.
+
+## PG-MAINT-003 — Table Never Processed By Autovacuum (PG_MAINTENANCE_HEALTH, topic MAINTENANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_VACUUM_ANALYZE` required 86 400 s; `PG_CONFIGURATION_SNAPSHOT` optional 86 400 s (analyze trigger settings) |
+| Condition | no vacuum and no analyze, manual or automatic (counts zero, timestamps empty), and `n_mod_since_analyze` ≥ parameter `min_changes` (10 000) and ≥ `overdue_factor` (2) × (`autovacuum_analyze_threshold` + `autovacuum_analyze_scale_factor` × live rows) → WARNING |
+| Subject | TABLE |
+
+Counters start at the statistics reset, so the finding says "since the statistics were reset". A missing timestamp alone is not a finding (catalogue constraint): the change condition makes autovacuum overdue, not just quiet. Server settings are used (defaults 50 / 0.1 when not collected); per-table settings are not considered. A table found here may also be found by PG-MAINT-002 (the symptom); this rule names the cause.
+
+## PG-CAP-004 — Memory Pressure (PG_CAPACITY_HEALTH, topic STORAGE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_HOST_SNAPSHOT`, required, 3 600 s |
+| Condition | available memory < parameter `max_available_memory` (10 %) of the total **and** swap in use ≥ `min_swap_used` (10 %) of the swap space → WARNING |
+| Insufficient evidence | no server's memory known (`no_memory`) |
+| Subject | NODE |
+
+Swap in use alone is misleading (pages swapped out long ago stay there); little available memory with no swap use is not judged either. A snapshot cannot show swap activity (si/so).
+
+## PG-HA-002 — Recently Restarted Server (PG_REPLICATION_HEALTH, topic REPLICATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INSTANCE_INVENTORY`, required, 3 600 s |
+| Condition | `postmaster_start_time` within parameter `recent_restart_window` (86 400 s) → INFO |
+| Subject | NODE |
+
+Context for other findings: caches are cold and some statistics may have been reset. Applies to standalone servers too.
+
+## PG-HA-003 — Replica Smaller Than Primary (PG_REPLICATION_HEALTH, topic REPLICATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_HOST_SNAPSHOT` and `PG_INSTANCE_INVENTORY`, required, 3 600 s |
+| Condition | a replica with fewer logical CPUs than the primary, or memory < parameter `min_memory_share` (90 %) of the primary's → WARNING |
+| Not applicable | no replicas (`no_replicas`) |
+| Insufficient evidence | no primary; the primary's memory unknown (`no_memory`); a replica without host data is listed as not assessed |
+| Subject | NODE (replica) |
+
+## PG-HA-004 — Mixed PostgreSQL Versions (PG_REPLICATION_HEALTH, topic REPLICATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INSTANCE_INVENTORY`, required, 3 600 s |
+| Condition | a replica whose version (first token of `server_version`) differs from the primary's → WARNING |
+| Not applicable | no replicas |
+| Subject | NODE (replica) |
+
+Expected during a rolling update; reported because it should not stay.
+
+## PG-CONF-005 — Diagnostics Disabled (PG_CONFIGURATION_HEALTH, topic CONFIGURATION)
+
+| | |
+| --- | --- |
+| Evidence | `PG_CONFIGURATION_SNAPSHOT`, required, 86 400 s |
+| Condition | per node: `log_lock_waits = off` (FINDING); `pg_stat_statements` not in `shared_preload_libraries` (FINDING_ALT) → INFO |
+| Subject | SETTING |
+
+`log_min_duration_statement` is judged by PG-CONF-003 and not here. Whether `CREATE EXTENSION pg_stat_statements` was run is not checked (needs the extension inventory, P2 group 2).
+
+**Verification (V056)**  
+Unit tests for every condition and boundary; an end-to-end test on a disposable PostgreSQL runs the real collectors (offline scripts), import and both report languages: a running `pg_sleep` gives PG-TRAN-007 WARNING (test threshold), a table with `autovacuum_enabled = false` and 30 000 inserted rows gives PG-MAINT-003, default settings give PG-CONF-005 INFO, a standalone server makes PG-HA-003/004 not applicable. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.
@@ -680,7 +774,4 @@ Not implemented; recorded so they are not lost.
 | Candidate | Source | Evidence available |
 | --- | --- | --- |
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
-| XID age relative to `autovacuum_freeze_max_age` | PG-TRAN-002 limitation | Yes (wraparound + configuration snapshots) |
 | Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |
-| Mixed PostgreSQL versions across nodes | Inventory review 2026-10-20 | Yes (`PG_INSTANCE_INVENTORY`) |
-| Replica smaller than primary (CPU, memory) | Inventory review 2026-10-20 | Yes (`PG_HOST_SNAPSHOT`) |

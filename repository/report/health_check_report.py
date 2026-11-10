@@ -183,6 +183,7 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
+                         "setting_missing": "{setting} ayarı primary'de toplanamadı.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
@@ -197,9 +198,11 @@ TEXTS = {
         "detail_statistics_node": "En kısa istatistik", "detail_statistics_since": "İstatistik başlangıcı",
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
         "detail_valid_until": "Geçerlilik sonu",
+        "detail_wait_event": "Beklediği", "detail_query_start": "Sorgu başlangıcı",
+        "detail_started_at": "Başlama zamanı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
         "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -367,6 +370,7 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
+                         "setting_missing": "{setting} was not collected on the primary.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
@@ -381,9 +385,11 @@ TEXTS = {
         "detail_statistics_node": "Shortest statistics", "detail_statistics_since": "Statistics since",
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
         "detail_valid_until": "Valid until",
+        "detail_wait_event": "Waiting for", "detail_query_start": "Statement start",
+        "detail_started_at": "Started at", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
         "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -1583,7 +1589,8 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("role", "detail_role"), ("sequence", "detail_sequence"), ("column", "detail_column"),
                  ("data_type", "detail_data_type"), ("column_type", "detail_column_type"),
                  ("last_value", "detail_last_value"), ("limit", "detail_limit"),
-                 ("limit_source", "detail_limit_source"))
+                 ("limit_source", "detail_limit_source"), ("wait_event", "detail_wait_event"),
+                 ("analyze_trigger", "detail_analyze_trigger"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1594,6 +1601,7 @@ TIME_LABELS = (("transaction_start", "detail_transaction_start"),
                ("last_archived_time", "detail_last_archived_time"), ("stats_reset", "detail_stats_reset"),
                ("timeline_started_at", "detail_timeline_started_at"),
                ("statistics_since", "detail_statistics_since"), ("valid_until", "detail_valid_until"),
+               ("query_start", "detail_query_start"), ("started_at", "detail_started_at"),
                ("captured_at", "detail_captured_at"))
 
 
@@ -1625,9 +1633,9 @@ def setting_value_text(value, unit, t):
 
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
-                "connection_count", "last_value", "limit"}
+                "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
-DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds"}
+DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds"}
 SIZE_VALUES = {"index_size"}
 
 
@@ -1676,7 +1684,7 @@ def render_instance(f, data, lang, t):
         details["trigger"] = t["trigger_large_table"]
     else:
         details.pop("trigger", None)
-    for key in ("live_rows", "dead_rows", "modified_rows"):
+    for key in ("live_rows", "dead_rows", "modified_rows", "analyze_trigger"):
         if isinstance(details.get(key), (int, float)):
             details[key] = f"{details[key]:,}"
     for key in ("last_value", "limit"):
