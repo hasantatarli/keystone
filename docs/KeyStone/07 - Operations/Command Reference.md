@@ -201,12 +201,15 @@ python -m repository.offline.bundle --out C:\keystone-offline
 
 2. Nothing to register: the import recognises a system by its `system_identifier` or creates it (a SYSTEM and a NODE per server, named as the customer typed the servers).
 
-   The customer runs one collector (asks servers, port, user, password; walks every database; one archive):
+   The customer runs one collector (asks servers, port, user, password and an optional SSH user; walks every database; host facts directly on this machine, over SSH on the other Linux servers; one archive):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File keystone_collect.ps1     # Windows (psql from pgAdmin or PostgreSQL)
 sh keystone_collect.sh                                            # Linux
+powershell -ExecutionPolicy Bypass -File keystone_collect.ps1 -Servers 10.0.0.1,10.0.0.2 -User postgres -SshUser admin
 ```
+
+- Host facts over SSH: the host script goes on stdin (`ssh user@server "sh -s"`), nothing is copied to the server; SSH asks its own password unless a key is set up. A server SSH cannot reach is skipped with a warning; its SQL evidence still goes. Without SSH access, the host script runs on the server separately and its `<server>_host.txt` is passed with `--host`.
 
 3. Import the archive (or single files from the pgAdmin fallback) and write the report:
 

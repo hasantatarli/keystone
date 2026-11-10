@@ -3,16 +3,17 @@
 #
 # Runs the read-only Keystone scripts on one or more PostgreSQL servers with
 # psql (from pgAdmin or a PostgreSQL installation): the node script once per
-# server, the database script in every database it finds, and the host script
-# when run on the server itself. Everything goes into one zip to send. The
-# password is asked, never written to disk, and removed at the end.
+# server, the database script in every database it finds, and the host
+# script: directly for this computer, over SSH for Linux servers when an SSH
+# user is given. Everything goes into one zip to send. The password is asked,
+# never written to disk, and removed at the end.
 #
 #   powershell -ExecutionPolicy Bypass -File keystone_collect.ps1
-# Unattended: -Servers db-1,db-2 -Port 5432 -User postgres -OutDir C:\out
-# (and the password in PGPASSWORD); anything not given is asked.
+# Unattended: -Servers db-1,db-2 -Port 5432 -User postgres -SshUser admin
+# -OutDir C:\out (and the password in PGPASSWORD); anything not given is asked.
 # =============================================================================
 
-param([string]$Servers, [string]$Port, [string]$User, [string]$OutDir, [switch]$NoHost)
+param([string]$Servers, [string]$Port, [string]$User, [string]$SshUser, [string]$OutDir, [switch]$NoHost)
 
 $ErrorActionPreference = "Continue"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -52,6 +53,15 @@ if (-not $PresetPassword) {
     $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 }
+if (-not $NoHost -and -not $PSBoundParameters.ContainsKey("SshUser")) {
+    $SshUser = Ask "Diger (Linux) sunucularin donanim bilgisi SSH ile toplansin mi? SSH kullanicisi (bos: toplanmaz)" ""
+}
+$HostScript = Join-Path $Here "host_snapshot.sh"
+$Ssh = Get-Command ssh -ErrorAction SilentlyContinue
+if ($SshUser -and -not $Ssh) { Write-Warning "ssh bulunamadi; diger sunucularin donanim bilgisi toplanmayacak."; $SshUser = "" }
+# This computer however it is typed: its names and addresses.
+$Me = @("localhost", "127.0.0.1", "::1", [Environment]::MachineName)
+try { $Me += @([System.Net.Dns]::GetHostAddresses([Environment]::MachineName) | ForEach-Object { $_.IPAddressToString }) } catch { }
 $Out = if ($OutDir) { $OutDir } else { Ask "Cikti klasoru" (Join-Path $Here "keystone_evidence_$Stamp") }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $env:PGCLIENTENCODING = "UTF8"
@@ -89,12 +99,26 @@ try {
             }
         }
 
-        $Local = $HostName -in @("localhost", "127.0.0.1", "::1", [Environment]::MachineName)
-        if ($NoHost) { $Local = $false }
-        elseif (-not $Local) { $Local = (Ask "$Label bu bilgisayar mi? Sunucu bilgisi de toplansin mi (e/h)" "h") -eq "e" }
-        if ($Local) {
-            & (Join-Path $Here "host_snapshot_windows.ps1") | Out-File -Encoding utf8 (Join-Path $Out "${Name}_host.txt")
+        # Host facts: this computer directly; a Linux server over SSH (the script goes on stdin,
+        # nothing is copied to the server; SSH asks its own password unless a key is set up).
+        $HostFile = Join-Path $Out "${Name}_host.txt"
+        if ($NoHost) { }
+        elseif ($HostName -in $Me) {
+            & (Join-Path $Here "host_snapshot_windows.ps1") | Out-File -Encoding utf8 $HostFile
             Write-Host "[$Label] sunucu bilgisi toplandi."
+        }
+        elseif ($SshUser) {
+            Write-Host "[$Label] sunucu bilgisi SSH ile toplaniyor ($SshUser@$HostName)..."
+            # Start-Process passes the file and the output byte for byte (a PowerShell pipe would not).
+            Start-Process -FilePath $Ssh.Source -NoNewWindow -Wait `
+                -ArgumentList @("-o", "ConnectTimeout=10", "$SshUser@$HostName", "sh -s") `
+                -RedirectStandardInput $HostScript -RedirectStandardOutput $HostFile
+            if ((Test-Path $HostFile) -and (Select-String -Path $HostFile -Pattern "^===CAPTURED_AT===" -Quiet)) {
+                Write-Host "[$Label] sunucu bilgisi toplandi."
+            } else {
+                Write-Warning "[$Label] sunucu bilgisi SSH ile alinamadi; atlandi."
+                Remove-Item $HostFile -ErrorAction SilentlyContinue
+            }
         }
     }
 }

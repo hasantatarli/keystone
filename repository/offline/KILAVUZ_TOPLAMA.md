@@ -35,8 +35,10 @@ Script şunları sorar:
 | Port | Varsayılan 5432 |
 | Kullanıcı | Superuser ya da `pg_monitor` rolü olan bir kullanıcı |
 | Şifre | Ekranda görünmez, hiçbir yere kaydedilmez, iş bitince bellekten silinir |
+| SSH kullanıcısı | Diğer (Linux) sunucuların bellek, CPU ve disk bilgisi için. Verilirse script her sunucuya SSH ile bağlanıp host script'ini çalıştırır; sunucuya dosya kopyalanmaz. SSH, anahtar tanımlı değilse her sunucu için kendi şifresini sorar. Boş bırakılırsa toplanmaz. |
 | Çıktı klasörü | Varsayılanı script'in yanında yeni bir klasör |
-| Bu makine mi? | Script veritabanı sunucusunun kendisinde çalışıyorsa "e": bellek, CPU ve disk bilgisi de toplanır |
+
+Script'in çalıştığı makine veritabanı sunucusunun kendisiyse (`localhost`, `local`, makinenin adı ya da adresi), bellek, CPU ve disk bilgisi SSH'sız, doğrudan toplanır.
 
 Sonunda tek bir dosya oluşur: Windows'ta `.zip`, Linux'ta `.tar.gz`. **Gönderilecek dosya budur.**
 
@@ -69,7 +71,7 @@ sh host_snapshot.sh > postgre-1_host.txt
 powershell -ExecutionPolicy Bypass -File host_snapshot_windows.ps1 > DBSRV01_host.txt
 ```
 
-Toplayıcı script "bu makine" denildiğinde bunu kendisi yapar. Ayrıca çalıştırmak isterseniz bu script'ler de yalnızca okur (Linux'ta `/proc`, `df`, `lsblk`; Windows'ta `Get-CimInstance`, `Get-Partition`, `Get-PhysicalDisk`).
+Toplayıcı script bunu kendi makinesi için doğrudan, diğer Linux sunucular için SSH kullanıcısı verildiğinde SSH ile kendisi yapar. SSH erişimi yoksa (örneğin sunuculara yalnızca sistem yöneticisi bağlanabiliyorsa) script'ler sunucuda ayrıca çalıştırılır ve çıktı dosyaları arşive eklenir. Ayrıca çalıştırmak isterseniz bu script'ler de yalnızca okur (Linux'ta `/proc`, `df`, `lsblk`; Windows'ta `Get-CimInstance`, `Get-Partition`, `Get-PhysicalDisk`).
 
 Script çalıştırılamıyorsa her sunucu için şu bilgiler yeterlidir: bellek (GB), CPU çekirdek sayısı, veri diskinin boyutu ve doluluğu, disk tipi (SSD/HDD).
 

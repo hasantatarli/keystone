@@ -4,9 +4,10 @@
 #
 # Runs the read-only Keystone scripts on one or more PostgreSQL servers with
 # psql: the node script once per server, the database script in every
-# database it finds, and the host script when run on the server itself.
-# Everything goes into one archive to send. The password is asked, never
-# written to disk, and removed from the environment at the end.
+# database it finds, and the host script: directly on this machine, over SSH
+# on the other servers when an SSH user is given. Everything goes into one
+# archive to send. The password is asked, never written to disk, and removed
+# from the environment at the end.
 #
 #   sh keystone_collect.sh
 # =============================================================================
@@ -32,6 +33,7 @@ PORT=$(ask "Port [5432]: " "5432")
 PGUSER_IN=$(ask "Kullanici [postgres]: " "postgres")
 printf "Sifre (yerel peer baglantisinda bos birakin): " >&2
 stty -echo 2>/dev/null; read -r PGPASSWORD; stty echo 2>/dev/null; echo >&2
+SSH_USER=$(ask "Diger sunucularin donanim bilgisi SSH ile toplansin mi? SSH kullanicisi (bos: toplanmaz) []: " "")
 OUT=$(ask "Cikti klasoru [$HERE/keystone_evidence_$STAMP]: " "$HERE/keystone_evidence_$STAMP")
 mkdir -p "$OUT"
 
@@ -72,8 +74,19 @@ for HOST in $(echo "$HOSTS" | tr ',' ' '); do
             { echo "[$LABEL] $DB atlandi (hata)." >&2; rm -f "$OUT/${NAME}_db_$(safe "$DB").json"; }
     done
 
-    if [ "$HOST" = "local" ] || [ "$(ask "$LABEL bu makine mi? Sunucu bilgisi de toplansin mi (e/h) [h]: " "h")" = "e" ]; then
+    # Host facts: run here for this machine; over SSH for the others (the script is sent on stdin,
+    # nothing is copied to the server; SSH asks its own password unless a key is set up).
+    if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "127.0.0.1" ] || [ "$LABEL" = "$(hostname)" ]; then
         sh "$HERE/host_snapshot.sh" > "$OUT/${NAME}_host.txt" 2>/dev/null && echo "[$LABEL] sunucu bilgisi toplandi."
+    elif [ -n "$SSH_USER" ]; then
+        echo "[$LABEL] sunucu bilgisi SSH ile toplaniyor ($SSH_USER@$HOST)..."
+        ssh -o ConnectTimeout=10 "$SSH_USER@$HOST" "sh -s" < "$HERE/host_snapshot.sh" > "$OUT/${NAME}_host.txt"
+        if grep -q "^===CAPTURED_AT===" "$OUT/${NAME}_host.txt" 2>/dev/null; then
+            echo "[$LABEL] sunucu bilgisi toplandi."
+        else
+            echo "[$LABEL] sunucu bilgisi SSH ile alinamadi; atlandi." >&2
+            rm -f "$OUT/${NAME}_host.txt"
+        fi
     fi
 done
 

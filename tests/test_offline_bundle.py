@@ -290,10 +290,10 @@ class OfflineImportTests(unittest.TestCase):
         self.assertEqual(stored[live_target], stored[self.target])
 
     def test_linux_collector_walks_every_database_into_one_archive(self):
-        # Answers to the prompts: server, port, user, password, output folder, Keystone name, host? (h)
+        # Answers to the prompts: server, port, user, password, SSH user (none), output folder.
         import subprocess
         out = self.dir / "collected"
-        answers = f"127.0.0.1\n{self.server.port}\nkeystone_test\n\n{out}\nh\n"
+        answers = f"127.0.0.1\n{self.server.port}\nkeystone_test\n\n\n{out}\n"
         result = subprocess.run(["sh", str(self.dir / "scripts" / "keystone_collect.sh")], input=answers,
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -310,6 +310,65 @@ class OfflineImportTests(unittest.TestCase):
                     "SELECT status FROM keystone.health_check_collection WHERE health_check_id = %s "
                     "AND collector_key <> 'PG_HOST_SNAPSHOT'", (check_id,))}
         self.assertEqual(statuses, {"SUCCESS"})
+
+    def test_linux_collector_reads_other_servers_hosts_over_ssh(self):
+        # Hasan 2026-11-10: one run collects everything; no copy, run, copy back per server.
+        # The server is reached as 127.0.0.2 (not this machine) through a forwarder; ssh is a stand-in
+        # that runs what it is sent, so the test shows the script goes on stdin and comes back whole.
+        import os
+        import socket
+        import subprocess
+        import threading
+
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.2", self.server.port))
+        listener.listen()
+
+        def pipe(a, b):
+            with contextlib.suppress(OSError):
+                while data := a.recv(65536):
+                    b.sendall(data)
+            with contextlib.suppress(OSError):
+                b.shutdown(socket.SHUT_WR)
+
+        def forward():
+            with contextlib.suppress(OSError):
+                while True:
+                    client, _ = listener.accept()
+                    upstream = socket.create_connection(("127.0.0.1", self.server.port))
+                    threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
+                    threading.Thread(target=pipe, args=(upstream, client), daemon=True).start()
+
+        threading.Thread(target=forward, daemon=True).start()
+        bin_dir = self.dir / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        stub = bin_dir / "ssh"
+        stub.write_text(f'#!/bin/sh\necho "$@" > "{self.dir}/ssh_args"\nexec sh -s\n', encoding="utf-8")
+        stub.chmod(0o755)
+        self.addCleanup(listener.close)
+
+        def collect(out):
+            return subprocess.run(["sh", str(self.dir / "scripts" / "keystone_collect.sh")],
+                                  input=f"127.0.0.2\n{self.server.port}\nkeystone_test\n\nadmin\n{out}\n",
+                                  capture_output=True, text=True, timeout=120,
+                                  env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+
+        out = self.dir / "collected_ssh"
+        result = collect(out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("admin@127.0.0.2 sh -s", (self.dir / "ssh_args").read_text())
+        host = (out / "127.0.0.2_host.txt").read_text(encoding="utf-8")
+        self.assertTrue(host.startswith("===CAPTURED_AT==="), host[:200])
+        self.assertIn("===FILESYSTEMS===", host)
+
+        stub.write_text("#!/bin/sh\necho 'Permission denied' >&2\nexit 255\n", encoding="utf-8")
+        out = self.dir / "collected_ssh_denied"
+        result = collect(out)
+        self.assertEqual(result.returncode, 0, result.stderr)                   # the SQL evidence still goes
+        self.assertIn("SSH ile alinamadi", result.stderr)
+        self.assertFalse((out / "127.0.0.2_host.txt").exists())
+        self.assertTrue((out / "127.0.0.2_node.json").exists())
 
     def test_without_a_target_the_system_is_created_then_recognised(self):
         # The customer never knows Keystone's names: the import creates the system, then finds it again.
