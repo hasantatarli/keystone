@@ -154,6 +154,70 @@ Implementation planning should flow from engineering purpose rather than arbitra
 
 Existing collector roadmap IDs remain valid, but future collector work should be justified by evidence requirements derived from this model.
 
+## Long-Term Direction (2026-11-10)
+
+Recorded from a discussion with Hasan; a direction, not a change of the current plan. P2 and P3 come first.
+
+### What customers ask for
+
+Requests reaching DataWiser go beyond a health check. Customers buy a decision: what do we have, is it safe, can we recover, should we stay on this platform or move. A recent request (managed PostgreSQL, hosting review) asked for:
+
+- a technical inventory: schemas, tables, relationships, indexes, extensions, migration history;
+- an access review: roles, grants, row-level security;
+- backup and recovery arrangements, including what SQL cannot see (platform backups, restore tests);
+- hosting options and migration readiness;
+- a report an independent assessor can verify.
+
+Assessment layers that follow from this, the health check being one of them:
+
+| Layer | Question | Status |
+|---|---|---|
+| Health | Is something wrong? | Strong (31 rules) |
+| Inventory | What exactly do we have? | Missing |
+| Security and access | Who can reach what? | Partial |
+| Backup and recovery | Can we really recover? | Partial (what SQL shows) |
+| Platform and portability | Can this move to RDS / Azure; what blocks it? | Missing |
+| Evidence quality | Can an independent reviewer verify it? | Foundation present (capture times, file checksums), not in the report |
+
+Two concepts this needs:
+
+- **Stated facts:** information SQL cannot see (platform backups, last restore test, host facts without access) enters the report labelled as stated by the customer, never mixed with measured evidence.
+- **Portability checks:** unsupported extensions on a target platform, tables without a primary key (block logical replication), version gaps. Deterministic rules that answer "stay or move" objectively.
+
+Hosting cost comparison and migration plans stay consulting deliverables; Keystone supplies their facts.
+
+### Continuous engineering and screens
+
+A SQL Server tool used by DBA consultancies (company and server tree, wait statistics, disk IO, procedures whose reads grew against last week, AG node comparison with fix scripts) shows the target: the value is in time, answering what changed, why, and what to do.
+
+Already in place: collectors run on a clock-aligned schedule (ADR-0015, V025); collectors store raw counters with no filtering in SQL; assessments run on schedule and keep their history (V026).
+
+Missing, the engineering layer:
+
+1. **Derived evidence:** differences and rates between snapshots (TPS, growth per day). Rules mostly read one snapshot today.
+2. **Baselines and trends:** is this normal for this system; what changed since last week.
+3. **Performance time-series collectors:** `pg_stat_statements` deltas (regressed queries), wait-event sampling, blocking samples.
+4. **Retention and rollup:** deferred in V024 until continuous operation produces volume.
+5. **Screens:** today only the HTML report. Screens are needed to explore, not only to read a report.
+
+Host CPU and memory monitoring is left to existing tools (Zabbix, Prometheus); Keystone shows the inside of the database.
+
+PostgreSQL counterparts of the most valuable screens, in order: regressed queries (`pg_stat_statements`), growth trend and forecast, Patroni node comparison (configuration is already collected per node), wait sampling, blocking.
+
+Positioning: one tool for DBAs and consultancies managing many customers: company, server, rule, recommendation, fix command, offline mode.
+
+### AI assistant
+
+ADR-0012 already defines it. The intended interaction: a metric is high on a screen; the user asks "how was this at the same time last month?" and gets an answer built from Keystone's own history and findings, with the evidence it used. This depends on layers 1-3 above: the assistant explains derived evidence and history; it does not invent numbers.
+
+### Sequence
+
+1. P2 and P3 rules. Derived evidence and baselines are built when a rule first needs them (for example a capacity rule that needs a growth trend), not as a separate project.
+2. Inventory, access review, platform profile, evidence appendix (assessment report level).
+3. Stated facts with the backup section; portability checks.
+4. Performance time-series collectors, retention, screens.
+5. AI assistant over the history (ADR-0012); comparison between two checks; estate overview (ADR-0016); a second provider.
+
 ## Next Design Decisions
 
 - Confirm top-level capability domains and boundaries.
