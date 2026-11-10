@@ -257,8 +257,12 @@ def resolve_target(conn, docs, host_files, name=None, environment="UNKNOWN"):
             existing.add(r["name"].lower())
             if r["host"]:
                 existing.add(r["host"].lower())
+        nodes_now = conn.execute("SELECT count(*) AS n FROM keystone.target WHERE parent_target_id = %s "
+                                 "AND is_active", (system_id,)).fetchone()["n"]
+        # One server, one known node: the same server, whatever name the customer typed.
+        single = nodes_now == 1 and len(labels) == 1
         for label in labels:
-            if label.lower() not in existing:
+            if label.lower() not in existing and not single:
                 conn.execute("INSERT INTO keystone.target (name, provider, target_type, environment, "
                              "parent_target_id) SELECT %s, provider, 'NODE', environment, target_id "
                              "FROM keystone.target WHERE target_id = %s", (label, system_id))
