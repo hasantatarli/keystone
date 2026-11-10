@@ -13,13 +13,16 @@ Bu klasördeki script'ler, Keystone'un PostgreSQL sağlık kontrolü için gerek
 
 Tek bir script sunucuya bağlanır, **bütün veritabanlarını kendisi bulup dolaşır** ve her şeyi tek bir arşiv dosyasında toplar. Veritabanı sayısı ne olursa olsun bir kez çalıştırmak yeter.
 
-Gereken tek şey `psql`. Windows'ta pgAdmin kurulumunun içinde gelir (`pgAdmin 4\runtime\psql.exe`); script onu ve PostgreSQL kurulum klasörünü kendisi arar. Linux'ta PostgreSQL sunucusunda zaten vardır.
+Gereken tek şey `psql`. Windows'ta pgAdmin kurulumunun içinde gelir (`pgAdmin 4\runtime\psql.exe`); script onu, çalışan PostgreSQL servisinin klasörünü (`E:\post_data\bin` gibi standart dışı yerler dahil) ve PostgreSQL kurulum klasörünü kendisi arar. Bulamazsa `psql.exe`'nin ya da bulunduğu klasörün yolunu sorar. Linux'ta PostgreSQL sunucusunda zaten vardır.
 
-**Windows** (PowerShell):
+**Windows:** Dosyaya çift tıklamayın ya da "Run with PowerShell" demeyin; pencere iş bitince ya da hata olunca hemen kapanır ve ne olduğu görünmez. Bir PowerShell penceresi açın, zip'i açtığınız klasöre geçin ve:
 
 ```
+Get-ChildItem | Unblock-File
 powershell -ExecutionPolicy Bypass -File keystone_collect.ps1
 ```
+
+`Unblock-File`, internetten indirilen dosyalara Windows'un koyduğu engeli kaldırır.
 
 **Linux:**
 
