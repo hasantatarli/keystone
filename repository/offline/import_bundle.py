@@ -154,6 +154,14 @@ def match_node(conn, doc_or_file, nodes, explicit, address=None, port=None):
         return by_name[name.lower()]
     if len(nodes) == 1:
         return nodes[0]
+    label = server_label(file)
+    if label:
+        row = conn.execute(
+            "SELECT target_id FROM keystone.target_connection WHERE target_id = ANY(%s) "
+            "AND lower(host) = lower(%s) AND is_active LIMIT 1",
+            ([n["target_id"] for n in nodes], label)).fetchone()
+        if row:
+            return next(n for n in nodes if n["target_id"] == row["target_id"])
     if address:
         row = conn.execute(
             "SELECT target_id FROM keystone.target_connection WHERE target_id = ANY(%s) "
@@ -186,6 +194,79 @@ def check_identity(conn, docs, node_of):
     return identifier
 
 
+# ----------------------------------------------------------------------------- targets
+
+def server_label(path):
+    """The server a collector file belongs to, from its name: <server>_node.json, <server>_db_<db>.json,
+    <server>_host.txt (the server as the customer typed it)."""
+    name = Path(path).name
+    for marker in ("_node.", "_db_", "_host."):
+        if marker in name:
+            return name[:name.index(marker)]
+    return None
+
+
+def resolve_target(conn, docs, host_files, name=None, environment="UNKNOWN"):
+    """(target_id, created) for the system the files come from, found by system_identifier or created.
+
+    The customer never needs Keystone's names: a system seen before is recognised by its
+    identifier; a new one gets a SYSTEM target and a NODE per server named as in the files.
+    """
+    identifiers = {d["server"]["system_identifier"] for d in docs}
+    if len(identifiers) != 1:
+        raise BundleError("the files come from different PostgreSQL systems (system_identifier "
+                          + ", ".join(sorted(identifiers)) + ")")
+    identifier = next(iter(identifiers))
+    labels = []
+    for f in [d["file"] for d in docs] + list(host_files):
+        label = server_label(f)
+        if label is None:
+            raise BundleError(f"{f}: cannot tell the server from the file name "
+                              "(<server>_node.json, <server>_db_<database>.json, <server>_host.txt)")
+        if label not in labels:
+            labels.append(label)
+    known = conn.execute(
+        """
+        SELECT DISTINCT COALESCE(t.parent_target_id, t.target_id) AS target_id
+        FROM postgresql.instance_inventory i JOIN keystone.target t USING (target_id)
+        WHERE i.system_identifier = %s AND t.is_active
+        """, (identifier,)).fetchall()
+    created = []
+    if len(known) > 1:
+        raise BundleError(f"system {identifier} is known as several targets "
+                          f"({', '.join(str(k['target_id']) for k in known)}); give --target")
+    if known:
+        system_id = known[0]["target_id"]
+    else:
+        display = name or next((d["server"]["cluster_name"] for d in docs if d["server"].get("cluster_name")),
+                               labels[0])
+        system_id = conn.execute(
+            "INSERT INTO keystone.target (name, provider, target_type, environment, description) "
+            "VALUES (%s, 'PostgreSQL', 'SYSTEM', %s, %s) RETURNING target_id",
+            (display, environment, f"Offline evidence, system {identifier}")).fetchone()["target_id"]
+        created.append(display)
+    system = conn.execute("SELECT target_type FROM keystone.target WHERE target_id = %s",
+                          (system_id,)).fetchone()
+    if system["target_type"] == "SYSTEM":
+        # A node is known by its name or, for systems also collected live, by its connection address.
+        existing = set()
+        for r in conn.execute(
+                "SELECT t.name, c.host FROM keystone.target t LEFT JOIN keystone.target_connection c "
+                "ON c.target_id = t.target_id AND c.is_active WHERE t.parent_target_id = %s AND t.is_active",
+                (system_id,)):
+            existing.add(r["name"].lower())
+            if r["host"]:
+                existing.add(r["host"].lower())
+        for label in labels:
+            if label.lower() not in existing:
+                conn.execute("INSERT INTO keystone.target (name, provider, target_type, environment, "
+                             "parent_target_id) SELECT %s, provider, 'NODE', environment, target_id "
+                             "FROM keystone.target WHERE target_id = %s", (label, system_id))
+                created.append(label)
+    conn.commit()
+    return system_id, created
+
+
 # ----------------------------------------------------------------------------- import
 
 def gather(scope, plan_target, docs, node_of, primary_id, hosts):
@@ -207,14 +288,21 @@ def gather(scope, plan_target, docs, node_of, primary_id, hosts):
 
 
 def import_bundle(connect, target_id, files, hosts=None, node_map=None, host_map=None,
-                  assessment_key=None, requested_by=None):
-    """Returns (health_check_id, warnings). Raises BundleError before writing anything if files are wrong."""
+                  assessment_key=None, requested_by=None, name=None, environment="UNKNOWN"):
+    """Returns (health_check_id, warnings). Raises BundleError before writing anything if files are wrong.
+
+    target_id None: the system is recognised by its system_identifier or created (resolve_target).
+    """
     docs = [read_evidence(f) for f in files]
     host_files = list(hosts or ())
     current = {c["collector_key"]: c for c in installer.discover_collectors()}
     warnings = []
 
     with connect() as conn:
+        if target_id is None:
+            target_id, created = resolve_target(conn, docs, host_files, name, environment)
+            if created:
+                warnings.append("created in Keystone: " + ", ".join(created))
         target, nodes = hc.load_target_tree(conn, target_id)
         node_targets = nodes or ([target] if target["target_type"] == "NODE" else [])
         if not node_targets:
@@ -340,7 +428,10 @@ def collector_rows(chosen, key, current):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Import Keystone offline evidence into a health check.")
-    parser.add_argument("--target", type=int, required=True, help="target_id (SYSTEM includes its nodes)")
+    parser.add_argument("--target", type=int,
+                        help="target_id; default: the system is recognised by its identifier or created")
+    parser.add_argument("--name", help="name of a system created by this import (default: cluster_name or server)")
+    parser.add_argument("--environment", default="UNKNOWN", help="environment of a created system (e.g. PROD)")
     parser.add_argument("files", nargs="+",
                         help="the collector's archive (.zip / .tar.gz) or evidence files")
     parser.add_argument("--host", action="append", default=[], metavar="[NODE=]FILE",
@@ -364,13 +455,13 @@ def main(argv=None):
         hosts = [h.partition("=")[2] if "=" in h else h for h in args.host] + found_hosts
         health_check_id, warnings = import_bundle(
             worker.connect_repository, args.target, files, hosts, args.node,
-            [h for h in args.host if "=" in h], args.assessment, user)
+            [h for h in args.host if "=" in h], args.assessment, user, args.name, args.environment)
     except BundleError as exc:
         raise SystemExit(f"Import refused: {exc}")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     for w in warnings:
-        print(f"Warning: {w}")
+        print(f"Note: {w}")
     with worker.connect_repository() as conn:
         hc.print_summary(conn, health_check_id)
         if args.report:

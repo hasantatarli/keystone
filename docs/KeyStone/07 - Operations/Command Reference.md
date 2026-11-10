@@ -199,13 +199,7 @@ For customers where Keystone cannot connect (jump server, GUI client only). The 
 python -m repository.offline.bundle --out C:\keystone-offline
 ```
 
-2. Register the system without connections (once). Name the nodes as the files will be named:
-
-```sql
-INSERT INTO keystone.target (name, provider, target_type, environment) VALUES ('musteri-db', 'PostgreSQL', 'SYSTEM', 'PROD') RETURNING target_id;   -- e.g. 20
-INSERT INTO keystone.target (name, provider, target_type, environment, parent_target_id) VALUES ('db-1', 'PostgreSQL', 'NODE', 'PROD', 20), ('db-2', 'PostgreSQL', 'NODE', 'PROD', 20);
--- A standalone server can be one NODE target without a SYSTEM.
-```
+2. Nothing to register: the import recognises a system by its `system_identifier` or creates it (a SYSTEM and a NODE per server, named as the customer typed the servers).
 
    The customer runs one collector (asks servers, port, user, password; walks every database; one archive):
 
@@ -217,11 +211,13 @@ sh keystone_collect.sh                                            # Linux
 3. Import the archive (or single files from the pgAdmin fallback) and write the report:
 
 ```powershell
-python -m repository.offline.import_bundle --target 20 keystone_evidence_20261110-1300.zip --report tr
+python -m repository.offline.import_bundle keystone_evidence_20261110-1300.zip --name "Musteri DB" --environment PROD --report tr
 python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
 ```
 
-- Files are matched to nodes by a connection address if one is defined, else by the file name starting with the node name; `--node db-2=file.json` says it explicitly. One node: any name works.
+- Without `--target`: a system seen before (live or offline) is found by its identifier; its nodes by name or connection address; new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
+
+- With `--target`: files are matched to nodes by the server in the file name (node name or connection address), the address PostgreSQL reports, or `--node db-2=file.json`. One node: any name works.
 - Refused before anything is written: files of different systems (`system_identifier`), a system different from what Keystone knew, the same script twice for one server and database.
 - A collector changed since the scripts were generated is not imported (FAILED: generate the scripts again). Missing files make their collections NOT_COLLECTED; the rules then say "not assessed".
 - The report header says "collected offline" with the import time; the date is the capture time.

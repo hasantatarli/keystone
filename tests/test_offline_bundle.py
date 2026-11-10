@@ -293,15 +293,15 @@ class OfflineImportTests(unittest.TestCase):
         # Answers to the prompts: server, port, user, password, output folder, Keystone name, host? (h)
         import subprocess
         out = self.dir / "collected"
-        answers = f"127.0.0.1\n{self.server.port}\nkeystone_test\n\n{out}\npg-off\nh\n"
+        answers = f"127.0.0.1\n{self.server.port}\nkeystone_test\n\n{out}\nh\n"
         result = subprocess.run(["sh", str(self.dir / "scripts" / "keystone_collect.sh")], input=answers,
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr)
         archive = Path(f"{out}.tar.gz")
         self.assertTrue(archive.exists(), result.stdout)
         names = sorted(p.name for p in out.iterdir())
-        self.assertIn("pg-off_node.json", names)
-        self.assertTrue({"pg-off_db_app.json", "pg-off_db_postgres.json"} <= set(names), names)
+        self.assertIn("127.0.0.1_node.json", names)                       # named as the customer typed
+        self.assertTrue({"127.0.0.1_db_app.json", "127.0.0.1_db_postgres.json"} <= set(names), names)
         with tempfile.TemporaryDirectory() as work:
             files, hosts = imp.expand([str(archive)], work)
             check_id, _ = imp.import_bundle(self.connect, self.target, files, hosts)
@@ -310,6 +310,37 @@ class OfflineImportTests(unittest.TestCase):
                     "SELECT status FROM keystone.health_check_collection WHERE health_check_id = %s "
                     "AND collector_key <> 'PG_HOST_SNAPSHOT'", (check_id,))}
         self.assertEqual(statuses, {"SUCCESS"})
+
+    def test_without_a_target_the_system_is_created_then_recognised(self):
+        # The customer never knows Keystone's names: the import creates the system, then finds it again.
+        files, host = self.evidence_files()
+        renamed = []
+        for f in files:
+            to = Path(f).with_name(Path(f).name.replace("pg-off_", "dbsrv7_").replace("dbsrv7_app", "dbsrv7_db_app")
+                                   .replace("dbsrv7_postgres", "dbsrv7_db_postgres"))
+            Path(f).rename(to)
+            renamed.append(str(to))
+        host_file = Path(host).with_name("dbsrv7_host.txt")
+        Path(host).rename(host_file)
+        with self.connect() as conn:                 # this server's earlier imports are not the customer's
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
+            conn.commit()
+        first, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)], name="Musteri DB",
+                                         environment="PROD")
+        self.assertEqual(notes[0], "created in Keystone: Musteri DB, dbsrv7")
+        second, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)])
+        self.assertFalse(any(n.startswith("created") for n in notes))
+        with self.connect() as conn:
+            targets = {r["health_check_id"]: r["target_id"] for r in conn.execute(
+                "SELECT health_check_id, target_id FROM keystone.health_check WHERE health_check_id = ANY(%s)",
+                ([first, second],))}
+            nodes = conn.execute("SELECT name, environment FROM keystone.target WHERE parent_target_id = %s",
+                                 (targets[first],)).fetchall()
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s "
+                         "OR parent_target_id = %s", (targets[first], targets[first]))
+            conn.commit()
+        self.assertEqual(targets[first], targets[second])
+        self.assertEqual([(n["name"], n["environment"]) for n in nodes], [("dbsrv7", "PROD")])
 
     def test_windows_files_and_doubled_quotes_are_read(self):
         doc = '{"keystone_bundle": 1}'

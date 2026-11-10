@@ -36,7 +36,6 @@ Script şunları sorar:
 | Kullanıcı | Superuser ya da `pg_monitor` rolü olan bir kullanıcı |
 | Şifre | Ekranda görünmez, hiçbir yere kaydedilmez, iş bitince bellekten silinir |
 | Çıktı klasörü | Varsayılanı script'in yanında yeni bir klasör |
-| Keystone'daki sunucu adı | Her sunucu için; dosyalar bu adla adlandırılır. Size verilen adı yazın. |
 | Bu makine mi? | Script veritabanı sunucusunun kendisinde çalışıyorsa "e": bellek, CPU ve disk bilgisi de toplanır |
 
 Sonunda tek bir dosya oluşur: Windows'ta `.zip`, Linux'ta `.tar.gz`. **Gönderilecek dosya budur.**
@@ -52,7 +51,7 @@ Script'leri aynı anda, birbirine yakın zamanda çalıştırın (ideal olarak 1
 
 1. Veritabanında **Query Tool**'u açın, script'i açıp çalıştırın (F5).
 2. Sonuç tek hücredir (`keystone_evidence`). Sonuç alanındaki "Save results to file" ile kaydedin ya da hücreyi kopyalayıp bir metin dosyasına yapıştırın.
-3. Dosyaları sunucu ve veritabanı adıyla adlandırın: `<sunucu>_node.json`, `<sunucu>_db_<veritabanı>.json`.
+3. Dosyaları sunucu ve veritabanı adıyla adlandırın: `<sunucu>_node.json`, `<sunucu>_db_<veritabanı>.json` (sunucu: bağlandığınız adres ya da ad).
 
 ## Sunucu bilgisi (isteğe bağlı)
 

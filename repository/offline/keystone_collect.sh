@@ -41,7 +41,8 @@ trap 'unset PGPASSWORD' EXIT
 safe() { echo "$1" | sed 's/[^A-Za-z0-9._-]/_/g'; }
 
 for HOST in $(echo "$HOSTS" | tr ',' ' '); do
-    LABEL=$(ask "$HOST icin Keystone'daki sunucu adi [$HOST]: " "$HOST")
+    # Files are named after the server as typed (this machine's name for local); Keystone matches them.
+    if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ]; then LABEL=$(hostname); else LABEL=$HOST; fi
     NAME=$(safe "$LABEL")
     if [ "$HOST" = "local" ]; then CONN="-p $PORT -U $PGUSER_IN"; else CONN="-h $HOST -p $PORT -U $PGUSER_IN"; fi
 

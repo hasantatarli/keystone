@@ -12,7 +12,7 @@
 # (and the password in PGPASSWORD); anything not given is asked.
 # =============================================================================
 
-param([string]$Servers, [string]$Port, [string]$User, [string]$OutDir, [string[]]$Names, [switch]$NoHost)
+param([string]$Servers, [string]$Port, [string]$User, [string]$OutDir, [switch]$NoHost)
 
 $ErrorActionPreference = "Continue"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -58,10 +58,9 @@ $env:PGCLIENTENCODING = "UTF8"
 $env:PGCONNECT_TIMEOUT = "10"
 
 try {
-    $Index = 0
     foreach ($HostName in ($Hosts -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }) {
-        $Label = if ($Names -and $Index -lt $Names.Count) { $Names[$Index] } else { Ask "$HostName icin Keystone'daki sunucu adi" $HostName }
-        $Index++
+        # Files are named after the server as typed (this computer's name for localhost); Keystone matches them.
+        $Label = if ($HostName -in @("localhost", "127.0.0.1", "::1")) { [Environment]::MachineName } else { $HostName }
         $Name = Safe $Label
         $Conn = @("-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-h", $HostName, "-p", $Port, "-U", $User)
 
@@ -84,7 +83,7 @@ try {
             }
         }
 
-        $Local = $HostName -in @("localhost", "127.0.0.1", "::1", $env:COMPUTERNAME)
+        $Local = $HostName -in @("localhost", "127.0.0.1", "::1", [Environment]::MachineName)
         if ($NoHost) { $Local = $false }
         elseif (-not $Local) { $Local = (Ask "$Label bu bilgisayar mi? Sunucu bilgisi de toplansin mi (e/h)" "h") -eq "e" }
         if ($Local) {
