@@ -1437,17 +1437,18 @@ class DuplicateIndexTests(unittest.TestCase):
     def found(self, findings):
         return [(f["subject_identifier"], f["severity"], f["template_values"]["other"]) for f in findings]
 
+
     def test_exact_duplicate_keeps_the_constraint_index(self):
         findings = self.evaluate(index_def("orders_pkey", [1], unique=True, constraint="p"),
                                  index_def("orders_id_idx", [1]),
                                  index_def("orders_id_idx", [1], node=2))     # replica row: ignored
-        self.assertEqual(self.found(findings), [("app.public.orders_id_idx", "WARNING", "app.public.orders_pkey")])
+        self.assertEqual(self.found(findings), [("app.public.orders_id_idx", "WARNING", "orders_pkey")])
 
     def test_prefix_is_redundant_but_unique_prefix_is_needed(self):
         findings = self.evaluate(index_def("i_a", [3]), index_def("i_ab", [3, 4]),
                                  index_def("u_c", [5], unique=True), index_def("i_cd", [5, 6]),
                                  index_def("i_b", [4]))                       # b is not a prefix of (a, b)
-        self.assertEqual(self.found(findings), [("app.public.i_a", "INFO", "app.public.i_ab")])
+        self.assertEqual(self.found(findings), [("app.public.i_a", "INFO", "i_ab")])
 
     def test_different_shapes_are_not_duplicates(self):
         findings = self.evaluate(index_def("i_a", [3]), index_def("i_a_hash", [3], method="hash"),

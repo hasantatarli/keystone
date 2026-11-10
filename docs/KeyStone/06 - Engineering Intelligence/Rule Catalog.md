@@ -813,7 +813,7 @@ May be deliberate (caches, staging); the texts say so.
 The reference is the package on the server, so no release list or internet access is needed (decision 6 does not apply). An extension whose package is gone (`default_version` NULL) is not judged.
 
 **Verification (V057)**  
-Unit tests for every condition; an end-to-end test on a disposable PostgreSQL 16 creates two identical indexes and a longer one, a 20 000-row child without an index on its foreign key (test `min_table_size`), an unlogged table and `pg_stat_statements` at version 1.9, then runs the real collectors, import and both report languages: all five findings as expected. Lab: pending.
+Unit tests for every condition; an end-to-end test on a disposable PostgreSQL 16 creates two identical indexes and a longer one, a 20 000-row child without an index on its foreign key (test `min_table_size`), an unlogged table and `pg_stat_statements` at version 1.9, then runs the real collectors, import and both report languages: all five findings as expected. Lab 2026-11-10 on the Patroni cluster: hc108 clean, 42 of 43 assessed, 29 of 29 collections, TimescaleDB at its package version; hc109 with two identical indexes and a longer one, an unindexed foreign key on a 19.5 MB table and an unlogged table: PG-IDX-003 WARNING and INFO, PG-IDX-004 WARNING, PG-BKP-003 WARNING. Review: index names in the sentence shortened (the table carries database and schema).
 
 ---
 

@@ -250,8 +250,8 @@ class OfflineImportTests(unittest.TestCase):
         self.assertEqual(outcomes["PG-HA-004"][0], "NOT_APPLICABLE")
         self.assertIn(outcomes["PG-HA-002"][0], ("HEALTHY", "ATTENTION_REQUIRED"))
         self.assertIn("Uzun süren sorgu", pages["tr"])
-        self.assertIn("hiç vacuum ya da analyze çalışmamış", pages["tr"])
-        self.assertIn("pg_stat_statements yüklü değil", pages["tr"])
+        self.assertIn("Autovacuum analyze eşiği (satır)", pages["tr"])        # findings table columns
+        self.assertIn("shared_preload_libraries", pages["tr"])
         self.assertIn("Long running query", pages["en"])
 
     def test_object_structure_rules_on_real_evidence(self):
@@ -300,7 +300,8 @@ class OfflineImportTests(unittest.TestCase):
             ("PG-BKP-003", "app.public.s_cache", "WARNING"),
             ("PG-LIFE-004", "app.pg_stat_statements", "INFO")})
         self.assertIn("Sürüm ve yaşam döngüsü", pages["tr"])
-        self.assertIn("aynı kolonlarla başlayan", pages["tr"])
+        self.assertIn("Kapsanıyor", pages["tr"])
+        self.assertIn("<code>btree (a, b)</code>", pages["tr"])
         self.assertIn("Foreign key without index", pages["en"])
 
     def test_files_of_another_system_are_refused(self):

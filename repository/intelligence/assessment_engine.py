@@ -2266,14 +2266,17 @@ def keeps_rule(r):
 
 
 def duplicate_finding(rule, r, other, severity, alt):
-    name, table = index_name(r), f"{r['schema_name']}.{r['table_name']}"
-    values = {"index": name, "table": table, "other": index_name(other)}
+    """Short index names in the sentence; the table carries database and schema."""
+    table = f"{r['database_name']}.{r['schema_name']}.{r['table_name']}"
+    values = {"index": r["index_name"], "table": table, "other": other["index_name"]}
     if alt:
         values["_alt"] = True
     return {"severity": severity, "snapshot_id": r["snapshot_id"], "template_values": values,
-            "observed_value": None, "observed_unit": None,
-            "subject_type": "INDEX", "subject_identifier": name,
-            "details": {"database": r["database_name"], "table": table, "index": name,
+            "observed_value": r["index_size_bytes"], "observed_unit": "BYTE",
+            "subject_type": "INDEX", "subject_identifier": index_name(r),
+            "details": {"database": r["database_name"], "table": f"{r['schema_name']}.{r['table_name']}",
+                        "index": r["index_name"], "other_index": other["index_name"],
+                        "match": "covered" if alt else "same",
                         "index_size_bytes": r["index_size_bytes"], "definition": r["index_definition"],
                         "other_definition": other["index_definition"],
                         "captured_at": iso(r["captured_at"])}}

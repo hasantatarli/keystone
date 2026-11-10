@@ -78,7 +78,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn('<html lang="tr">', page)
         self.assertIn("Veritabanı Sağlık Kontrolü Raporu", page)
         self.assertIn("Dikkat gerektiren sorunlar var.", page)
-        self.assertIn("Ölçülen: <b>20 dakika</b>", page)
+        self.assertIn('<td class="num">20 dakika</td>', page)            # findings table (option B)
         self.assertIn("Eşik: Uyarı ≥ 5 dakika · Kritik ≥ 15 dakika", page)
         self.assertIn("Son gözlenen sorgu", page)
         self.assertIn("Primary", page)
@@ -832,7 +832,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         technical = page[page.index(TECH_PANEL):]
         self.assertIn('<details class="more"><summary>Tümünü göster (15)</summary>', technical)
         shown = technical[:technical.index('<details class="more">')]
-        self.assertEqual(shown.count('class="instance"'), 10)
+        self.assertEqual(shown.count('<tr><td><span class="badge'), 10)
         self.assertIn("extra finding 13", shown)          # largest values first
         self.assertNotIn("extra finding 00", shown)
 
@@ -1161,10 +1161,13 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.execute("UPDATE keystone.finding SET template_values = %s",
                           ('{"pid": 4711, "duration_seconds": "1200.0", "dead_rows": 50000}',))
         self.conn.commit()
-        self.assertIn("4711 numaralı session 1200.0 saniyedir transaction içinde boşta bekliyor.",
-                      self.render(check_id, "tr"))
-        self.assertIn("Session 4711 has been idle in transaction for 1200.0 seconds.",
-                      self.render(check_id, "en"))
+        # The technical part shows such rules as a table; the sentence serves rules without columns.
+        data = report.load_report_data(self.conn, check_id)
+        finding = data["findings"][0]
+        self.assertEqual(report.finding_sentence(finding, data, "tr"),
+                         "4711 numaralı session 1200.0 saniyedir transaction içinde boşta bekliyor.")
+        self.assertEqual(report.finding_sentence(finding, data, "en"),
+                         "Session 4711 has been idle in transaction for 1200.0 seconds.")
         self.assertEqual(report.template_value_text("dead_rows", 50000), "50,000")
 
     def test_finding_without_values_keeps_the_stored_text(self):
