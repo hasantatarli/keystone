@@ -182,6 +182,8 @@ Found 2026-10-14 (PR #14 lab lock test): the lab target connection goes through 
 
 Current checkpoint (2026-11-09): MVP Plan Phase 0 done; Phase 1 done except the offline evidence bundle. Every P1 check is done (31 checks in 10 assessments), including configuration recommendations (ADR-0017, PR #27–#32). Verified on the multi-system lab (Patroni cluster on PostgreSQL 17 with SSH, PostgreSQL 15, 16, 18 standalone and 17 primary + replica in Docker). 353 automated tests (unit and disposable PostgreSQL).
 
+Update (2026-11-10): offline evidence bundle merged (PR #36, #37; lab hc100–hc105). P2 group 1 in progress on `feat/p2-ready-rules` (V056): eight rules on existing evidence (PG-TRAN-006/007, PG-MAINT-003, PG-CAP-004, PG-HA-002/003/004, PG-CONF-005), 39 checks; lab-verified (hc106, hc107). Next: P2 group 2 (rules needing new collectors). Long-term direction recorded in the Capability Roadmap (assessment layers, continuous engineering, screens, AI assistant).
+
 Open before a first real engagement (MVP Plan → Readiness Criteria): offline evidence bundle; a side-by-side run with a manual health check on a real system; a short customer document on what Keystone collects and does not do; report delivery (customer name / logo, PDF).
 
 Retrospective (Hasan, 2026-11-09): configuration recommendations took six pull requests and many polish rounds (2026-10-29 → 11-09) with little visible progress in the last ones. From now on: larger pieces, one design table approved at once for a batch of rules, lab rounds only for what must be verified, cosmetic fixes folded into the same pull request.

@@ -546,9 +546,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         ).fetchall()}
         self.assertEqual(outcomes, {"PG-CONF-001": ("HEALTHY", None),
                                     "PG-CONF-002": ("ATTENTION_REQUIRED", "WARNING"),
-                                    "PG-CONF-004": ("HEALTHY", None)})
-        text = self.conn.execute("SELECT finding_text FROM keystone.finding ORDER BY finding_id DESC "
-                                 "LIMIT 1").fetchone()["finding_text"]
+                                    "PG-CONF-004": ("HEALTHY", None),
+                                    "PG-CONF-005": ("ATTENTION_REQUIRED", "INFO")})
+        text = self.conn.execute(
+            "SELECT f.finding_text FROM keystone.finding f JOIN keystone.rule_definition rd USING (rule_id) "
+            "WHERE rd.rule_key = 'PG-CONF-002' ORDER BY f.finding_id DESC LIMIT 1").fetchone()["finding_text"]
         self.assertEqual(text, "Setting synchronous_commit is off on node-2.")
 
     def prepare_configuration_evidence(self):
@@ -747,7 +749,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         problems = executive[executive.index("Öne çıkan sorunlar"):]
         self.assertNotIn("Öneriden farklı ayar", problems[:problems.index("<h2>", 5)])
-        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 öneri)', executive)
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', executive)
         self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
         self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
 

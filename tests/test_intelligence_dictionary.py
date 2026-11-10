@@ -284,6 +284,70 @@ EXPECTED_RULES = {
         },
         "evidence": {"PG_SEQUENCE_CAPACITY": (True, 86400)},
     },
+    # V056: P2 rules on existing evidence.
+    "PG-TRAN-007": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("300"), "SECOND"),
+            "CRITICAL": (Decimal("1800"), "SECOND"),
+        },
+        "evidence": {"PG_ACTIVITY_SNAPSHOT": (True, 600)},
+    },
+    "PG-TRAN-006": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {
+            "WARNING": (Decimal("150"), "PERCENT"),
+            "CRITICAL": (Decimal("200"), "PERCENT"),
+        },
+        "evidence": {"PG_TRANSACTION_WRAPAROUND": (True, 86400),
+                     "PG_CONFIGURATION_SNAPSHOT": (True, 86400),
+                     "PG_INSTANCE_INVENTORY": (True, 3600)},
+    },
+    "PG-MAINT-003": {
+        "assessment": "PG_MAINTENANCE_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_VACUUM_ANALYZE": (True, 86400),
+                     "PG_CONFIGURATION_SNAPSHOT": (False, 86400)},
+        "parameters": {"min_changes": (Decimal("10000"), "ROW"),
+                       "overdue_factor": (Decimal("2"), "RATIO")},
+    },
+    "PG-CAP-004": {
+        "assessment": "PG_CAPACITY_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_HOST_SNAPSHOT": (True, 3600)},
+        "parameters": {"max_available_memory": (Decimal("10"), "PERCENT"),
+                       "min_swap_used": (Decimal("10"), "PERCENT")},
+    },
+    "PG-HA-002": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "INFO",
+        "thresholds": {},
+        "evidence": {"PG_INSTANCE_INVENTORY": (True, 3600)},
+        "parameters": {"recent_restart_window": (Decimal("86400"), "SECOND")},
+    },
+    "PG-HA-003": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_HOST_SNAPSHOT": (True, 3600), "PG_INSTANCE_INVENTORY": (True, 3600)},
+        "parameters": {"min_memory_share": (Decimal("90"), "PERCENT")},
+    },
+    "PG-HA-004": {
+        "assessment": "PG_REPLICATION_HEALTH",
+        "default_severity": "WARNING",
+        "thresholds": {},
+        "evidence": {"PG_INSTANCE_INVENTORY": (True, 3600)},
+    },
+    "PG-CONF-005": {
+        "assessment": "PG_CONFIGURATION_HEALTH",
+        "default_severity": "INFO",
+        "thresholds": {},
+        "evidence": {"PG_CONFIGURATION_SNAPSHOT": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

@@ -1222,3 +1222,186 @@ class MemoryOvercommitmentCoverageTests(unittest.TestCase):
     def test_no_memory_anywhere_is_not_assessed(self):
         with self.assertRaises(engine.InsufficientEvidence):
             engine.evaluate_memory_overcommitment(self.evidence({1: (None, 4096)}), rule(), [])
+
+
+# ----------------------------------------------------------------------------- V056 P2 rules
+
+def with_params(default_severity=None, **params):
+    return {"rule_key": "PG-P2", "default_severity": default_severity, "unassessed": [],
+            "parameters": {k: {"value": float(v), "unit": None} for k, v in params.items()}}
+
+
+def activity(pid, minutes, state="active", backend="client backend"):
+    return {"snapshot_id": 1, "target_id": 1, "captured_at": NOW, "pid": pid, "state": state,
+            "backend_type": backend, "query_start": NOW - timedelta(minutes=minutes),
+            "transaction_start": NOW - timedelta(minutes=minutes), "state_change": NOW,
+            "wait_event_type": "Lock", "wait_event": "relation", "database_name": "app",
+            "user_name": "app", "query_text": "SELECT pg_sleep(9999)"}
+
+
+class LongRunningQueryTests(unittest.TestCase):
+    """PG-TRAN-007."""
+
+    THRESHOLDS = [threshold("WARNING", 300, "SECOND"), threshold("CRITICAL", 1800, "SECOND")]
+
+    def test_client_statements_by_age(self):
+        rows = [activity(1, 2), activity(2, 6), activity(3, 45),
+                activity(4, 60, state="idle in transaction"),       # PG-TRAN-001/003, not a statement
+                activity(5, 60, backend="walsender"), activity(6, 60, backend="autovacuum worker")]
+        findings = engine.evaluate_long_running_query(rows, rule(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("2", "WARNING"), ("3", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"]["running_seconds"], 360)
+        self.assertEqual(findings[0]["details"]["wait_event"], "Lock: relation")
+
+
+def inventory_row(target_id, name, recovery, version="17.10 (Ubuntu 17.10-1.pgdg24.04+1)", started_hours=48):
+    return {"target_id": target_id, "node_name": name, "captured_at": NOW, "in_recovery": recovery,
+            "server_version": version, "server_version_num": None,
+            "postmaster_start_time": NOW - timedelta(hours=started_hours)}
+
+
+class FreezeFallingBehindTests(unittest.TestCase):
+    """PG-TRAN-006."""
+
+    THRESHOLDS = [threshold("WARNING", 150, "PERCENT"), threshold("CRITICAL", 200, "PERCENT")]
+
+    def evidence(self, ages, freeze="200000000"):
+        return {"PG_INSTANCE_INVENTORY": [inventory_row(1, "db-1", False), inventory_row(2, "db-2", True)],
+                "PG_CONFIGURATION_SNAPSHOT": settings(1, "db-1", autovacuum_freeze_max_age=freeze)
+                + settings(2, "db-2", autovacuum_freeze_max_age="999999999"),
+                "PG_TRANSACTION_WRAPAROUND": [
+                    {"snapshot_id": 1, "target_id": 0, "captured_at": NOW, "database_name": name,
+                     "xid_age": age} for name, age in ages.items()]}
+
+    def test_share_of_the_primary_setting(self):
+        findings = engine.evaluate_freeze_falling_behind(
+            self.evidence({"a": 250_000_000, "b": 310_000_000, "c": 450_000_000}), rule(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("b", "WARNING"), ("c", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"]["percent"], "155")
+        self.assertEqual(findings[0]["template_values"]["freeze_max_age"], 200_000_000)
+
+    def test_missing_setting_is_not_assessed(self):
+        evidence = self.evidence({"a": 1})
+        evidence["PG_CONFIGURATION_SNAPSHOT"] = []
+        with self.assertRaisesRegex(engine.InsufficientEvidence, r"\[setting_missing\]"):
+            engine.evaluate_freeze_falling_behind(evidence, rule(), self.THRESHOLDS)
+
+
+def vacuum_row(name, live, modified, processed=False):
+    row = table_row(name, live, modified=modified)
+    row.update({"last_autovacuum": NOW if processed else None, "autovacuum_count": 1 if processed else 0,
+                "autoanalyze_count": 0, "vacuum_count": 0, "analyze_count": 0, "n_ins_since_vacuum": 0})
+    return row
+
+
+class NeverProcessedTableTests(unittest.TestCase):
+    """PG-MAINT-003."""
+
+    def evaluate(self, rows, config=()):
+        return engine.evaluate_never_processed_tables(
+            {"PG_VACUUM_ANALYZE": rows, "PG_CONFIGURATION_SNAPSHOT": list(config)},
+            with_params("WARNING", min_changes=10000, overdue_factor=2), [])
+
+    def test_overdue_and_untouched(self):
+        findings = self.evaluate([
+            vacuum_row("hot", 1000, 50_000),                       # trigger 150: overdue
+            vacuum_row("small_change", 1000, 5_000),               # below min_changes
+            vacuum_row("big", 10_000_000, 1_500_000),              # trigger 1,000,050: not yet 2x
+            vacuum_row("done", 1000, 50_000, processed=True)])     # autovacuum reached it
+        self.assertEqual([f["subject_identifier"] for f in findings], ["app.public.hot"])
+        self.assertEqual(findings[0]["template_values"]["changed_rows"], 50_000)
+
+    def test_server_trigger_settings_are_used(self):
+        config = settings(1, "db-1", autovacuum_analyze_scale_factor="0.01", autovacuum_analyze_threshold="50")
+        findings = self.evaluate([vacuum_row("big", 10_000_000, 1_500_000)], config)
+        self.assertEqual(len(findings), 1)                            # trigger 100,050 with 0.01
+
+
+def host(target_id, name, memory_gb=8, available_gb=4.0, swap_gb=2, swap_used_gb=0.0, cpus=4):
+    return {"record_type": "HOST", "target_id": target_id, "node_name": name, "captured_at": NOW,
+            "logical_cpu_count": cpus, "memory_total_bytes": memory_gb * GB,
+            "memory_available_bytes": int(available_gb * GB), "swap_total_bytes": swap_gb * GB,
+            "swap_used_bytes": int(swap_used_gb * GB)}
+
+
+class MemoryPressureTests(unittest.TestCase):
+    """PG-CAP-004."""
+
+    RULE = dict(max_available_memory=10, min_swap_used=10)
+
+    def evaluate(self, *hosts):
+        return engine.evaluate_memory_pressure(list(hosts), with_params("WARNING", **self.RULE), [])
+
+    def test_both_conditions_are_needed(self):
+        findings = self.evaluate(
+            host(1, "pressed", available_gb=0.5, swap_used_gb=1),
+            host(2, "old_swap", available_gb=4, swap_used_gb=1),     # swap used, memory available
+            host(3, "full_cache", available_gb=0.5, swap_used_gb=0),  # little available, no swap use
+            host(4, "no_swap", available_gb=0.5, swap_gb=0))
+        self.assertEqual([f["subject_identifier"] for f in findings], ["pressed"])
+        self.assertEqual(findings[0]["template_values"]["available_percent"], "6.2")
+
+    def test_no_memory_known(self):
+        with self.assertRaises(engine.InsufficientEvidence):
+            self.evaluate()
+
+
+class RecentRestartTests(unittest.TestCase):
+    """PG-HA-002."""
+
+    def test_started_within_the_window(self):
+        rows = [inventory_row(1, "db-1", False, started_hours=3), inventory_row(2, "db-2", True)]
+        findings = engine.evaluate_recent_restart(rows, with_params("INFO", recent_restart_window=86400), [])
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings], [("db-1", "INFO")])
+        self.assertEqual(findings[0]["template_values"]["since_seconds"], 3 * 3600)
+
+
+class ReplicaSmallerTests(unittest.TestCase):
+    """PG-HA-003."""
+
+    def evaluate(self, hosts, nodes=None):
+        nodes = nodes or [inventory_row(1, "db-1", False), inventory_row(2, "db-2", True),
+                          inventory_row(3, "db-3", True), inventory_row(4, "db-4", True)]
+        r = with_params("WARNING", min_memory_share=90)
+        return engine.evaluate_replica_smaller(
+            {"PG_INSTANCE_INVENTORY": nodes, "PG_HOST_SNAPSHOT": hosts}, r, []), r
+
+    def test_fewer_cpus_or_less_memory(self):
+        findings, r = self.evaluate([host(1, "db-1", memory_gb=16, cpus=8), host(2, "db-2", memory_gb=16, cpus=8),
+                                     host(3, "db-3", memory_gb=8, cpus=8)])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["db-3"])
+        self.assertEqual([u["node"] for u in r["unassessed"]], ["db-4"])
+
+    def test_standalone_is_not_applicable(self):
+        with self.assertRaises(engine.NotApplicable):
+            self.evaluate([host(1, "db-1")], [inventory_row(1, "db-1", False)])
+
+
+class MixedVersionTests(unittest.TestCase):
+    """PG-HA-004."""
+
+    def test_replica_on_another_version(self):
+        rows = [inventory_row(1, "db-1", False), inventory_row(2, "db-2", True),
+                inventory_row(3, "db-3", True, version="17.9 (Ubuntu 17.9-1.pgdg24.04+1)")]
+        findings = engine.evaluate_mixed_versions(rows, rule("WARNING"), [])
+        self.assertEqual([(f["subject_identifier"], f["template_values"]["version"],
+                           f["template_values"]["primary_version"]) for f in findings],
+                         [("db-3", "17.9", "17.10")])
+
+    def test_standalone_is_not_applicable(self):
+        with self.assertRaises(engine.NotApplicable):
+            engine.evaluate_mixed_versions([inventory_row(1, "db-1", False)], rule("WARNING"), [])
+
+
+class DiagnosticsDisabledTests(unittest.TestCase):
+    """PG-CONF-005."""
+
+    def test_lock_waits_and_pg_stat_statements(self):
+        rows = (settings(1, "db-1", log_lock_waits="off", shared_preload_libraries="")
+                + settings(2, "db-2", log_lock_waits="on",
+                           shared_preload_libraries="pg_stat_statements, auto_explain"))
+        findings = engine.evaluate_diagnostics_disabled(rows, rule("INFO"), [])
+        self.assertEqual([(f["subject_identifier"], bool(f["template_values"].get("_alt"))) for f in findings],
+                         [("db-1: log_lock_waits", False), ("db-1: shared_preload_libraries", True)])

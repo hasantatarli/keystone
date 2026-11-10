@@ -49,7 +49,7 @@ Sources combined:
 | **PG-CONF-002** | Unsafe durability settings | `fsync = off` or `full_page_writes = off` — CRITICAL; `synchronous_commit = off` — WARNING (may be a conscious choice) | Ready: PG-002 | DB parameters | Done |
 | **PG-CONF-003** | Settings far from the recommendation for this server | Current value far outside the recommended range computed from the server's facts (memory, CPUs, storage, connections, workload); first: memory settings. Recommendations are shown for every covered setting, findings only for large deviations | Ready: PG-002 + host memory/CPU · Gap: storage type, workload type | Memory setting | Done (V047, V048, INFO; ADR-0017) |
 | **PG-CONF-004** | Autovacuum disabled | `autovacuum = off` — CRITICAL; per-table `autovacuum_enabled = false` on large tables — WARNING | Ready (global): PG-002 · Gap (per table): reloptions in PG-005 | Vacuum & Statistics | Done |
-| PG-CONF-005 | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later. `log_min_duration_statement` is already judged by PG-CONF-003; do not judge it twice | Ready: PG-002 | pg_stat_statements extension | P2 |
+| **PG-CONF-005** | Diagnostics disabled | No slow-query logging, `log_lock_waits = off`, `pg_stat_statements` not loaded — INFO, because RCA is not possible later. `log_min_duration_statement` is already judged by PG-CONF-003; do not judge it twice | Ready: PG-002 | pg_stat_statements extension | Done |
 | PG-CONF-006 | No safety timeouts | `idle_in_transaction_session_timeout = 0` while PG-TRAN-001 findings exist — recommendation, not a stand-alone finding | Ready: PG-002 | — | P3 |
 | **PG-CONF-007** | Memory overcommitment | `shared_buffers + max_connections × work_mem` above a node's physical memory — CRITICAL (OOM killer) | Ready: PG-002 + host memory | Memory setting | Done (V048) |
 
@@ -71,9 +71,9 @@ Sources combined:
 | **PG-TRAN-002** | XID wraparound risk | `age(datfrozenxid)` ≥ 1.5 / 1.8 billion | Ready: PG-006 | Transaction ID TXID | Done |
 | **PG-TRAN-004** | MultiXact wraparound risk | `mxid_age` relative to limits | Ready: PG-006 | datminmxid | Done |
 | **PG-TRAN-005** | Orphaned prepared transactions | A prepared transaction older than 5 min — WARNING, 1 h — CRITICAL (holds locks and xmin, survives restarts) | Ready: PG_PREPARED_TRANSACTIONS | Orphaned prepare transactions | Done |
-| PG-TRAN-006 | XID age relative to `autovacuum_freeze_max_age` | Anti-wraparound vacuum overdue or repeatedly not finishing | Ready: PG-006 + PG-002 | Transaction ID TXID | P2 |
+| **PG-TRAN-006** | XID age relative to `autovacuum_freeze_max_age` | Anti-wraparound vacuum overdue or repeatedly not finishing | Ready: PG-006 + PG-002 | Transaction ID TXID | Done |
 | PG-LOCK-001 | Blocking and lock waits | Sessions waiting on locks longer than N seconds; the blocking session named | Gap: PG-009 locking | — | P2 |
-| PG-TRAN-007 | Long-running query | An active statement running longer than N minutes | Ready: PG-009 (activity) | active sessions monitor | P2 |
+| **PG-TRAN-007** | Long-running query | An active statement running longer than N minutes | Ready: PG-009 (activity) | active sessions monitor | Done |
 
 ## 4. Maintenance — Vacuum, Analyze, Bloat
 
@@ -81,7 +81,7 @@ Sources combined:
 | --- | --- | --- | --- | --- | --- |
 | **PG-MAINT-001** | Dead tuple pressure | Dead tuples ≥ X % of live **and** ≥ N rows (two parameters; revisits the one-threshold model) | Ready: PG-005 | Vacuum & Statistics | Done |
 | **PG-MAINT-002** | Stale statistics | Many modifications since the last analyze on an active table | Ready: PG-005 | Vacuum & Statistics | Done |
-| PG-MAINT-003 | Table never vacuumed / analyzed | Active table with no vacuum or analyze since the statistics reset (constraint: a null timestamp alone is not a finding) | Ready: PG-005 | Vacuum & Statistics | P2 |
+| **PG-MAINT-003** | Table never vacuumed / analyzed | Active table with no vacuum or analyze since the statistics reset (constraint: a null timestamp alone is not a finding) | Ready: PG-005 | Vacuum & Statistics | Done |
 | PG-MAINT-004 | Table and index bloat | Estimated bloat ≥ X % and ≥ N MB | Gap: PG-014 | Fragmentation (Bloat) | P2 |
 
 ## 5. Indexes
@@ -101,7 +101,7 @@ Sources combined:
 | **PG-CAP-001** | Data disk usage | Data disk ≥ 80 / 90 % (as `df`) | Ready: host + PG-002 | — | Done |
 | **PG-CAP-002** | Integer key / sequence exhaustion | last value ≥ 75 % — WARNING, ≥ 90 % — CRITICAL of the smaller of the sequence's and the fed column's limit; without SELECT on the sequences INSUFFICIENT_EVIDENCE naming the privilege | Ready: PG_SEQUENCE_CAPACITY | PK or FK using numeric or integer data type | Done |
 | PG-CAP-003 | Separate WAL disk and tablespaces | Like PG-CAP-001 for `pg_wal` on its own mount and tablespaces | Gap: PG-013 + tablespace paths | Tablespaces Info | P2 |
-| PG-CAP-004 | Memory pressure | Swap in use on a database server above X % | Ready: host | — | P2 |
+| **PG-CAP-004** | Memory pressure | Swap in use on a database server above X % | Ready: host | — | Done |
 | PG-CAP-005 | Heavy temporary file use | Temp bytes per database high | Gap: PG-024 / database statistics | — | P2 |
 | PG-CAP-006 | Growth and time to full | Disk or database growth rate; days until full | History of host / PG-003 (Phase 3) | Database size, Table Size | P3 |
 
@@ -116,9 +116,9 @@ Sources combined:
 | **PG-REP-005** | Inactive replication slot | `active = false` (retains WAL, holds xmin) | Ready: PG-007 | Replication slot | Done |
 | **PG-REP-006** | Synchronous replication without a synchronous standby | `synchronous_standby_names` set but no standby in `sync` state — CRITICAL, writes can hang | Ready: PG-002 + PG_REPLICATION_STATUS | — | Done |
 | **PG-HA-001** | Recent failover | The primary's current timeline began within the last 24 h (history file time; no history needed) — WARNING | Ready: PG_WAL_STATUS | — | Done |
-| PG-HA-002 | Recently restarted node | `postmaster_start_time` within the last 24 h — INFO, context for other findings | Ready: PG-001 | DB_START_DATE, UP_TIME | P2 |
-| PG-HA-003 | Replica smaller than primary | Replica with fewer CPUs or < 90 % of the primary's memory | Ready: host | — | P2 |
-| PG-HA-004 | Mixed versions across nodes | Different PostgreSQL minor versions in one cluster | Ready: PG-001 | — | P2 |
+| **PG-HA-002** | Recently restarted node | `postmaster_start_time` within the last 24 h — INFO, context for other findings | Ready: PG-001 | DB_START_DATE, UP_TIME | Done |
+| **PG-HA-003** | Replica smaller than primary | Replica with fewer CPUs or < 90 % of the primary's memory | Ready: host | — | Done |
+| **PG-HA-004** | Mixed versions across nodes | Different PostgreSQL minor versions in one cluster | Ready: PG-001 | — | Done |
 
 ## 8. Backup & Recovery
 
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 31 | 0 | 22 | 10 |
-| of which evidence ready | 31 | 0 | 9 | 5 |
+| Checks | 39 | 0 | 14 | 10 |
+| of which evidence ready | 39 | 0 | 1 | 5 |
 
-Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
