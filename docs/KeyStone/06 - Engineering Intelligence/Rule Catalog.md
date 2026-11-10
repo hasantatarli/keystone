@@ -763,7 +763,7 @@ Expected during a rolling update; reported because it should not stay.
 `log_min_duration_statement` is judged by PG-CONF-003 and not here. Whether `CREATE EXTENSION pg_stat_statements` was run is not checked (needs the extension inventory, P2 group 2).
 
 **Verification (V056)**  
-Unit tests for every condition and boundary; an end-to-end test on a disposable PostgreSQL runs the real collectors (offline scripts), import and both report languages: a running `pg_sleep` gives PG-TRAN-007 WARNING (test threshold), a table with `autovacuum_enabled = false` and 30 000 inserted rows gives PG-MAINT-003, default settings give PG-CONF-005 INFO, a standalone server makes PG-HA-003/004 not applicable. Lab: pending.
+Unit tests for every condition and boundary; an end-to-end test on a disposable PostgreSQL runs the real collectors (offline scripts), import and both report languages: a running `pg_sleep` gives PG-TRAN-007 WARNING (test threshold), a table with `autovacuum_enabled = false` and 30 000 inserted rows gives PG-MAINT-003, default settings give PG-CONF-005 INFO, a standalone server makes PG-HA-003/004 not applicable. Lab 2026-11-10 on the Patroni cluster: hc106 clean state, 38 of 39 assessed (the known sequence privilege), PG-CONF-005 six INFO (log_lock_waits off, only timescaledb preloaded), PG-HA-002 three INFO (VMs started 22 h earlier), PG-HA-003/004 healthy; hc107 with a running `pg_sleep(600)`, a table with `autovacuum_enabled = false` and 30 000 rows, and a replica restart: PG-TRAN-007 WARNING after 6 minutes (wait event Timeout: PgSleep), PG-MAINT-003 WARNING (analyze trigger 3 050 rows) next to PG-MAINT-002 CRITICAL for the same table, PG-HA-002 INFO for postgre-1 started 4 minutes earlier.
 
 ---
 
