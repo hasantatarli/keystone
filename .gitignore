@@ -22,4 +22,4 @@ reports/
 deploy/lab/.env
 
 # Offline evidence scripts and the files customers send back (ADR-0018; customer data)
-offline/
+/offline/
