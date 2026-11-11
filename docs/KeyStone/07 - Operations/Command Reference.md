@@ -218,6 +218,7 @@ python -m repository.offline.import_bundle keystone_evidence_20261110-1300.zip -
 python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
 ```
 
+- Evidence already imported is refused before anything is written (pilot 2026-11-11: a second import of the same archive clashed with its own rows and doubled others). To see an imported check with newer report code, generate its report again: `python -m repository.report.health_check_report --health-check <id> --lang tr`.
 - Several archives in one import become one system (e.g. the collector run on each Windows server over RDP, since host facts over SSH are Linux only): `import_bundle a.zip b.zip --report tr`.
 - Without `--target`: a system seen before (live or offline) is found by its identifier; a server by any name it was reached by before (typed, resolved address, address PostgreSQL reports, connection address; with the port, `keystone.target_identity`); new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
 

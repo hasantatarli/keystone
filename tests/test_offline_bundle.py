@@ -338,6 +338,18 @@ class OfflineImportTests(unittest.TestCase):
         self.assertEqual([r["record_type"] for r in latest], ["DATABASE"])
         self.assertEqual(engine.table_rows(latest), [])
 
+    def test_the_same_evidence_is_not_imported_twice(self):
+        # Pilot 2026-11-11 (hc113): a second import clashed with its own rows and doubled others.
+        files, host = self.evidence_files()
+        check_id, _ = imp.import_bundle(self.connect, self.target, files, [host])
+        with self.connect() as conn:
+            before = conn.execute("SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"]
+        with self.assertRaisesRegex(imp.BundleError, rf"already imported as health check {check_id}"):
+            imp.import_bundle(self.connect, self.target, files, [host])
+        with self.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"],
+                             before)
+
     def test_files_of_another_system_are_refused(self):
         files, _ = self.evidence_files()
         doc = json.loads(Path(files[0]).read_text())
@@ -510,21 +522,27 @@ class OfflineImportTests(unittest.TestCase):
 
     def test_without_a_target_the_system_is_created_then_recognised(self):
         # The customer never knows Keystone's names: the import creates the system, then finds it again.
-        files, host = self.evidence_files()
-        renamed = []
-        for f in files:
-            to = Path(f).with_name(Path(f).name.replace("pg-off_", "dbsrv7_").replace("dbsrv7_app", "dbsrv7_db_app")
-                                   .replace("dbsrv7_postgres", "dbsrv7_db_postgres"))
-            Path(f).rename(to)
-            renamed.append(str(to))
-        host_file = Path(host).with_name("dbsrv7_host.txt")
-        Path(host).rename(host_file)
+        def collect():                               # each import is a new collection
+            files, host = self.evidence_files()
+            renamed = []
+            for f in files:
+                to = Path(f).with_name(Path(f).name.replace("pg-off_", "dbsrv7_")
+                                       .replace("dbsrv7_app", "dbsrv7_db_app")
+                                       .replace("dbsrv7_postgres", "dbsrv7_db_postgres"))
+                Path(f).replace(to)
+                renamed.append(str(to))
+            host_file = Path(host).with_name("dbsrv7_host.txt")
+            Path(host).replace(host_file)
+            return renamed, host_file
+
+        renamed, host_file = collect()
         with self.connect() as conn:                 # this server's earlier imports are not the customer's
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
             conn.commit()
         first, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)], name="Musteri DB",
                                          environment="PROD")
         self.assertEqual(notes[0], "created in Keystone: Musteri DB, dbsrv7")
+        renamed, host_file = collect()
         second, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)])
         self.assertFalse(any(n.startswith("created") for n in notes))
         with self.connect() as conn:
@@ -541,7 +559,6 @@ class OfflineImportTests(unittest.TestCase):
 
     def test_a_server_is_one_node_whether_typed_by_address_or_name(self):
         # Hasan 2026-11-10: first by IP, then by host name; the collector records what the name resolves to.
-        files, _ = self.evidence_files()
         with self.connect() as conn:
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
             conn.commit()
@@ -550,7 +567,7 @@ class OfflineImportTests(unittest.TestCase):
             folder = self.dir / f"bundle_{label}"
             folder.mkdir(exist_ok=True)
             out = []
-            for f in files:
+            for f in self.evidence_files()[0]:                         # each import is a new collection
                 kind = Path(f).stem.split("_", 1)[1]                    # node / app / postgres
                 name = f"{label}_node.json" if kind == "node" else f"{label}_db_{kind}.json"
                 text = imp.document_text(Path(f).read_text(encoding="utf-8"))

@@ -369,6 +369,26 @@ def gather(scope, plan_target, docs, node_of, primary_id, hosts):
     return chosen, [d["file"] for d in chosen]
 
 
+def refuse_imported(conn, target_id, docs):
+    """An evidence file already imported is refused before anything is written.
+
+    Pilot 2026-11-11 (hc113): the same archive imported twice clashed with its own rows (duplicate
+    key) and doubled the rows of tables without a key. To see an imported check with newer report
+    code, generate its report again; nothing needs importing.
+    """
+    for d in docs:
+        row = conn.execute(
+            "SELECT health_check_id FROM keystone.health_check WHERE target_id = %s AND source = 'OFFLINE' "
+            "AND bundle_info -> 'files' @> jsonb_build_array(jsonb_build_object('sha256', %s::text)) "
+            "ORDER BY health_check_id LIMIT 1", (target_id, d["sha256"])).fetchone()
+        if row:
+            hc_id = row["health_check_id"]
+            raise BundleError(
+                f"{Path(d['file']).name} was already imported as health check {hc_id}. For its report "
+                f"with the current Keystone: python -m repository.report.health_check_report "
+                f"--health-check {hc_id} --lang tr. New evidence needs a new collection.")
+
+
 def import_bundle(connect, target_id, files, hosts=None, node_map=None, host_map=None,
                   assessment_key=None, requested_by=None, name=None, environment="UNKNOWN"):
     """Returns (health_check_id, warnings). Raises BundleError before writing anything if files are wrong.
@@ -398,6 +418,7 @@ def import_bundle(connect, target_id, files, hosts=None, node_map=None, host_map
                               f"server (for example {node_targets[0]['name']}_node.json) or use --node NAME=FILE")
         node_of = {d["file"]: mapping[server_of[d["file"]]] for d in docs}
         identifier = check_identity(conn, docs, node_of)
+        refuse_imported(conn, target_id, docs)
 
         seen = {}
         for d in docs:
