@@ -239,7 +239,8 @@ python -m repository.lifecycle.release_reference --import reference.json
 ```
 
 - `--refresh`: from postgresql.org, then endoflife.date; says why when it cannot.
-- `--export` on a Keystone with internet, `--import` on one without: the file keeps its date, and a file older than the reference already in Keystone is refused.
+- `--export` on a Keystone with internet, `--import` on one without: the file carries every product (PostgreSQL and the operating systems, V060) with their dates; a product whose copy in the file is older than Keystone's is kept as it is (the output says so).
+- Operating systems (PG-LIFE-003) are not refreshed online: migrations and reference files only.
 - PG-LIFE-001 is "not assessed" when the reference is older than 100 days; the report says how old it is.
 
 ## 7. Credential tool

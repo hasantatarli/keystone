@@ -620,7 +620,7 @@ def load_latest_host_snapshot(conn, target_id):
         """
         SELECT 'HOST' AS record_type, h.target_id, t.name AS node_name, h.captured_at,
                h.logical_cpu_count, h.memory_total_bytes, h.memory_available_bytes,
-               h.swap_total_bytes, h.swap_used_bytes
+               h.swap_total_bytes, h.swap_used_bytes, h.os_family, h.os_name, h.os_version
         FROM keystone.target t
         JOIN LATERAL (
             SELECT * FROM postgresql.host_snapshot h
@@ -2409,8 +2409,97 @@ def load_release_reference(conn, target_id):
         """).fetchall()
 
 
+def load_os_reference(conn, target_id):
+    """KEYSTONE_OS_REFERENCE (V060): operating system releases; captured_at is each product's as_of.
+
+    A source of its own, so a newer operating system reference never makes a stale PostgreSQL
+    reference look current.
+    """
+    return conn.execute(
+        """
+        SELECT NULL::bigint AS target_id, s.as_of AS captured_at, s.source, s.source_detail,
+               r.product, r.major_version, r.first_release, r.end_of_support
+        FROM keystone.release_reference r
+        JOIN keystone.release_reference_source s ON s.product = r.product
+        WHERE r.product <> 'PostgreSQL'
+        """).fetchall()
+
+
 # Evidence Keystone holds itself; health checks do not collect it (no collection plan rows).
-REFERENCE_SOURCES = {"KEYSTONE_RELEASE_REFERENCE"}
+REFERENCE_SOURCES = {"KEYSTONE_RELEASE_REFERENCE", "KEYSTONE_OS_REFERENCE"}
+
+# Windows Server release by build number (the third part of Win32_OperatingSystem.Version).
+WINDOWS_SERVER_BUILDS = {"9200": "2012", "9600": "2012 R2", "14393": "2016", "17763": "2019",
+                         "20348": "2022", "26100": "2025"}
+# Linux distributions by the start of PRETTY_NAME; the release is VERSION_ID, cut to the major
+# where the vendor supports a major as a whole (RHEL family, Debian), whole otherwise.
+LINUX_DISTRIBUTIONS = [
+    ("Red Hat Enterprise Linux", "RHEL", True),
+    ("Rocky Linux", "Rocky Linux", True),
+    ("AlmaLinux", "AlmaLinux", True),
+    ("Oracle Linux", "Oracle Linux", True),
+    ("CentOS Linux", "CentOS", True),
+    ("Ubuntu", "Ubuntu", False),           # '22.04'
+    ("Debian", "Debian", True),
+    ("SUSE Linux Enterprise Server", "SLES", False),   # '15.6': support is per service pack
+]
+
+
+def os_release_of(host):
+    """(product, release, text) of a host snapshot, or None when Keystone does not recognise it.
+
+    Windows: 'Microsoft Windows Server 2016 Standard', version '10.0.14393' -> ('Windows Server', '2016').
+    Linux: 'Red Hat Enterprise Linux 9.4 (Plow)', VERSION_ID '9.4' -> ('RHEL', '9').
+    """
+    name, version = (host.get("os_name") or "").strip(), (host.get("os_version") or "").strip()
+    if "Windows Server" in name:
+        parts = version.split(".")
+        release = WINDOWS_SERVER_BUILDS.get(parts[2]) if len(parts) >= 3 else None
+        return ("Windows Server", release, name) if release else None
+    for prefix, product, major_only in LINUX_DISTRIBUTIONS:
+        if name.startswith(prefix) and re.fullmatch(r"\d+(\.\d+)?", version):
+            return product, version.split(".")[0] if major_only else version, name
+    return None
+
+
+def evaluate_os_support(evidence, rule, thresholds):
+    """PG-LIFE-003: a node whose operating system release is out of free security updates, or soon.
+
+    Ended: CRITICAL; ends within support_warning_window: WARNING. Like PG-LIFE-002, judged on the
+    day the host snapshot was taken.
+    """
+    reference = {(r["product"], r["major_version"]): r for r in evidence["KEYSTONE_OS_REFERENCE"]}
+    window_days = parameter(rule, "support_warning_window") / 86400
+    findings = []
+    for host in evidence["PG_HOST_SNAPSHOT"]:
+        if host.get("record_type") != "HOST":
+            continue
+        known = os_release_of(host)
+        if known is None:
+            add_unassessed(rule["unassessed"], host["target_id"], host["node_name"],
+                           "PG_HOST_SNAPSHOT", "os_not_recognised")
+            continue
+        product, release, text = known
+        ref = reference.get((product, release))
+        if ref is None:
+            add_unassessed(rule["unassessed"], host["target_id"], host["node_name"],
+                           "KEYSTONE_OS_REFERENCE", "os_not_in_reference")
+            continue
+        end = ref["end_of_support"]
+        days_left = (end - host["captured_at"].date()).days
+        if days_left > window_days:
+            continue
+        values = {"node_name": host["node_name"], "os": text, "end_of_support": end.isoformat()}
+        if days_left > 0:
+            values.update(_alt=True, days_left=days_left)
+        findings.append({
+            "severity": "CRITICAL" if days_left <= 0 else "WARNING", "snapshot_id": None,
+            "template_values": values,
+            "observed_value": days_left, "observed_unit": "DAY",
+            "subject_type": "NODE", "subject_identifier": host["node_name"],
+            "details": {"node": host["node_name"], "os_product": product, "os_release": release,
+                        "end_of_support": end.isoformat(), "captured_at": iso(host["captured_at"])}})
+    return findings
 
 
 def release_of(row):
@@ -2513,6 +2602,7 @@ def evaluate_major_support(evidence, rule, thresholds):
 
 EVIDENCE_LOADERS = {
     "KEYSTONE_RELEASE_REFERENCE": load_release_reference,
+    "KEYSTONE_OS_REFERENCE": load_os_reference,
     "PG_ACTIVITY_SNAPSHOT": load_latest_activity_snapshot,
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
     "PG_REPLICATION_SLOTS": load_latest_replication_slot_snapshot,
@@ -2673,6 +2763,7 @@ RULE_EVALUATORS = {
     "PG-LIFE-004": evaluate_extension_updates,
     "PG-LIFE-001": evaluate_minor_version_behind,
     "PG-LIFE-002": evaluate_major_support,
+    "PG-LIFE-003": evaluate_os_support,
 }
 
 

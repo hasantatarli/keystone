@@ -861,6 +861,25 @@ Unit tests for both rules (thresholds, the day support ends, a major missing fro
 
 ---
 
+# Batch of 2026-11-11 (3) — operating system support (V060, ADR-0019 addendum)
+
+## PG-LIFE-003 — Operating System Support (PG_LIFECYCLE_HEALTH, topic LIFECYCLE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_HOST_SNAPSHOT`, required, 86 400 s (os_name, os_version); `KEYSTONE_OS_REFERENCE`, required, any age |
+| Recognition | Windows Server by build (9200 2012, 9600 2012 R2, 14393 2016, 17763 2019, 20348 2022, 26100 2025); RHEL, Rocky, AlmaLinux, Oracle Linux, CentOS Linux, Debian by major; Ubuntu by release (22.04); SLES by service pack (15.6) |
+| Condition | free security updates ended on or before the snapshot date → CRITICAL (FINDING); end within `support_warning_window` (365 days) → WARNING (FINDING_ALT, days left) |
+| Insufficient evidence | operating system not recognised (`os_not_recognised`) or release not in the reference (`os_not_in_reference`): node not assessed |
+| Subject | NODE |
+
+The recommendation says paid extended support (ESU, ELS, Ubuntu Pro, LTSS) makes the finding an accepted risk.
+
+**Verification (V060)**  
+Unit tests: recognition of eleven name/version forms and six that must not be recognised; ended / within window / healthy; unknown systems not judged. Database tests: the pilot host (Windows Server 2016 on 2026-11-11: WARNING, 62 days; on 2027-01-12: CRITICAL); reference files with every product, an older product kept. Full suite 434 OK. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

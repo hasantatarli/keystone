@@ -1588,3 +1588,76 @@ class MajorSupportTests(unittest.TestCase):
         r = with_params(support_warning_window=365 * 86400)
         self.assertEqual(engine.evaluate_major_support(lifecycle([node(1, "pg1", 190001)]), r, []), [])
         self.assertEqual([u["reason_code"] for u in r["unassessed"]], ["not_in_reference"])
+
+
+# V060: operating systems as the engine loads them (KEYSTONE_OS_REFERENCE).
+OS_REFERENCE = [
+    {"target_id": None, "captured_at": REFERENCE_AS_OF, "source": "SEED", "source_detail": "x",
+     "product": product, "major_version": release, "first_release": None,
+     "end_of_support": datetime.strptime(end, "%Y-%m-%d").date()}
+    for product, release, end in (("Windows Server", "2016", "2027-01-12"), ("Windows Server", "2022", "2031-10-14"),
+                                  ("RHEL", "9", "2032-05-31"), ("Ubuntu", "20.04", "2025-05-31"),
+                                  ("SLES", "15.6", "2025-12-31"), ("Debian", "12", "2028-06-30"))]
+
+
+def os_host(target_id, name, os_name, os_version, captured_at=NOW):
+    return {"record_type": "HOST", "target_id": target_id, "node_name": name, "captured_at": captured_at,
+            "os_family": None, "os_name": os_name, "os_version": os_version}
+
+
+class OsReleaseOfTests(unittest.TestCase):
+
+    def test_recognised(self):
+        cases = {
+            ("Microsoft Windows Server 2016 Standard", "10.0.14393"): ("Windows Server", "2016"),
+            ("Microsoft Windows Server 2022 Datacenter", "10.0.20348"): ("Windows Server", "2022"),
+            ("Microsoft Windows Server 2012 R2 Standard", "6.3.9600"): ("Windows Server", "2012 R2"),
+            ("Red Hat Enterprise Linux 9.4 (Plow)", "9.4"): ("RHEL", "9"),
+            ("Rocky Linux 8.10 (Green Obsidian)", "8.10"): ("Rocky Linux", "8"),
+            ("AlmaLinux 9.3 (Shamrock Pampas Cat)", "9.3"): ("AlmaLinux", "9"),
+            ("Oracle Linux Server 8.9", "8.9"): ("Oracle Linux", "8"),
+            ("CentOS Linux 7 (Core)", "7"): ("CentOS", "7"),
+            ("Ubuntu 22.04.4 LTS", "22.04"): ("Ubuntu", "22.04"),
+            ("Debian GNU/Linux 12 (bookworm)", "12"): ("Debian", "12"),
+            ("SUSE Linux Enterprise Server 15 SP6", "15.6"): ("SLES", "15.6"),
+        }
+        for (name, version), expected in cases.items():
+            self.assertEqual(engine.os_release_of({"os_name": name, "os_version": version})[:2], expected, name)
+
+    def test_not_recognised(self):
+        for name, version in (("CentOS Stream 9", "9"), ("Microsoft Windows 10 Pro", "10.0.19045"),
+                              ("Debian GNU/Linux trixie/sid", None), ("Fedora Linux 40", "40"), (None, None),
+                              ("Microsoft Windows Server 2016 Standard", "10.0")):
+            self.assertIsNone(engine.os_release_of({"os_name": name, "os_version": version}), name)
+
+
+class OsSupportTests(unittest.TestCase):
+    """PG-LIFE-003."""
+
+    def evaluate(self, hosts):
+        r = with_params(support_warning_window=365 * 86400)
+        findings = engine.evaluate_os_support(
+            {"PG_HOST_SNAPSHOT": hosts, "KEYSTONE_OS_REFERENCE": OS_REFERENCE}, r, [])
+        return r, findings
+
+    def test_ended_is_critical_ending_within_window_is_warning(self):
+        at = datetime(2026, 11, 11, 9, tzinfo=timezone.utc)
+        r, findings = self.evaluate([
+            os_host(1, "win16", "Microsoft Windows Server 2016 Standard", "10.0.14393", at),
+            os_host(2, "win22", "Microsoft Windows Server 2022 Standard", "10.0.20348", at),
+            os_host(3, "ubu20", "Ubuntu 20.04.6 LTS", "20.04", at),
+            os_host(4, "rhel9", "Red Hat Enterprise Linux 9.4 (Plow)", "9.4", at)])
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("win16", "WARNING"), ("ubu20", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"],
+                         {"node_name": "win16", "os": "Microsoft Windows Server 2016 Standard",
+                          "end_of_support": "2027-01-12", "_alt": True, "days_left": 62})
+        self.assertEqual(r["unassessed"], [])
+
+    def test_unknown_systems_are_not_judged(self):
+        r, findings = self.evaluate([os_host(1, "fed", "Fedora Linux 40", "40"),
+                                     os_host(2, "rhel7", "Red Hat Enterprise Linux Server 7.9 (Maipo)", "7.9"),
+                                     {"record_type": "STORAGE", "target_id": 1, "node_name": "fed"}])
+        self.assertEqual(findings, [])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]],
+                         [("fed", "os_not_recognised"), ("rhel7", "os_not_in_reference")])

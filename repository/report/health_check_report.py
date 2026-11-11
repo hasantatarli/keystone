@@ -188,7 +188,9 @@ TEXTS = {
         "unassessed_reason": {"not_collected": "veri toplanamadı", "no_disk": "veri diski bilgisi yok",
                               "no_memory": "bellek bilgisi yok",
                               "not_in_reference": "bu major sürüm Keystone'un sürüm referansında yok",
-                              "no_version": "sürüm bilgisi yok"},
+                              "no_version": "sürüm bilgisi yok",
+                              "os_not_recognised": "işletim sistemi tanınmadı",
+                              "os_not_in_reference": "bu işletim sistemi sürümü Keystone'un referansında yok"},
         "config_host_partial": "Bilgisi eksik sunucu: {nodes}. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
@@ -219,6 +221,7 @@ TEXTS = {
         "col_table_size": "Tablo boyutu", "col_usage": "Kullanım", "col_extension": "Extension",
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
+        "col_os": "İşletim sistemi",
         "reference_source": {"SEED": "Keystone ile gelen", "FILE": "referans dosyası", "ONLINE": "internet"},
         "date_format": "%d.%m.%Y",
         "col_installed": "Kurulu sürüm", "col_available": "Paket sürümü",
@@ -263,6 +266,7 @@ TEXTS = {
                                    "söylenmez. Yenilemek için: python -m repository.lifecycle.release_reference --refresh (internet yoksa referans "
                                    "dosyası: --import <dosya>)."),
         "reason_reference_missing": "Keystone'da PostgreSQL sürüm referansı yok. Yüklemek için: python -m repository.lifecycle.release_reference --refresh",
+        "reason_os_reference_missing": "Keystone'da işletim sistemi referansı yok. Yüklemek için bir referans dosyası: python -m repository.lifecycle.release_reference --import <dosya>",
     },
     "en": {
         "title": "Database Health Check Report",
@@ -410,7 +414,9 @@ TEXTS = {
         "unassessed_reason": {"not_collected": "data not collected", "no_disk": "no data disk information",
                               "no_memory": "no memory information",
                               "not_in_reference": "this major version is not in Keystone's release reference",
-                              "no_version": "no version information"},
+                              "no_version": "no version information",
+                              "os_not_recognised": "operating system not recognised",
+                              "os_not_in_reference": "this operating system release is not in Keystone's reference"},
         "config_host_partial": "Server data missing: {nodes}. Without the smallest server these settings are not calculated.",
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
@@ -441,6 +447,7 @@ TEXTS = {
         "col_table_size": "Table size", "col_usage": "Usage", "col_extension": "Extension",
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
+        "col_os": "Operating system",
         "reference_source": {"SEED": "shipped with Keystone", "FILE": "reference file", "ONLINE": "internet"},
         "date_format": "%Y-%m-%d",
         "col_installed": "Installed", "col_available": "Package",
@@ -485,6 +492,7 @@ TEXTS = {
                                    "current on old data. To refresh: python -m repository.lifecycle.release_reference --refresh (without internet, a "
                                    "reference file: --import <file>)."),
         "reason_reference_missing": "Keystone has no PostgreSQL release reference. To load it: python -m repository.lifecycle.release_reference --refresh",
+        "reason_os_reference_missing": "Keystone has no operating system reference. To load a reference file: python -m repository.lifecycle.release_reference --import <file>",
     },
 }
 
@@ -864,7 +872,8 @@ def explain_reason(reason, data, t, short=False):
     source = match.group("source")
     if source in REFERENCE_SOURCES:                # held by Keystone, not collected
         if match.group("missing"):
-            return t["reason_reference_missing"]
+            return t["reason_os_reference_missing" if source == "KEYSTONE_OS_REFERENCE"
+                     else "reason_reference_missing"]
         age = float(match.group("age"))
         as_of = data["check"]["finished_at"] or datetime.now(timezone.utc)
         return t["reason_reference_stale"].format(
@@ -1874,6 +1883,8 @@ FINDING_COLUMNS = {
     "PG-LIFE-001": [("node_name", "detail_node"), ("version", "col_version"), ("latest", "col_latest"),
                     ("observed", "col_behind"), ("reference", "col_reference")],
     "PG-LIFE-002": [("node_name", "detail_node"), ("version", "col_version"),
+                    ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
+    "PG-LIFE-003": [("node_name", "detail_node"), ("os", "col_os"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
     "PG-LIFE-004": [("database_name", "detail_database"), ("extension", "col_extension"),
                     ("installed", "col_installed"), ("available", "col_available")],

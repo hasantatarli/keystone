@@ -22,7 +22,7 @@ Sınıflar: **doğru bulgu**, **bağlam gerektiriyor** (bulgu doğru, karar mü�
 | Madde | Karar | Durum |
 |---|---|---|
 | PostgreSQL 14'ün destek sonu raporda yok | Doğru. Major sürüm destek takvimi Dictionary'de bir referans tablosu olarak (PG-LIFE-001); ertelemenin yanlış olduğunu pilot gösterdi | Yapıldı (V059, ADR-0019): referans Dictionary değil referans verisi; internetten, referans dosyasından ya da kurulumla gelir; minor kontrolü 100 günden eski referansla değerlendirilmez |
-| Windows Server 2016 desteği (Ocak 2027) | Doğru; PG-LIFE-003, aynı referans tablosuna işletim sistemi | PG-LIFE-001'den sonra |
+| Windows Server 2016 desteği (Ocak 2027) | Doğru; PG-LIFE-003, aynı referans tablosuna işletim sistemi | Yapıldı (V060): ücretsiz güvenlik güncellemelerinin sonu esas; ücretli uzatma (ESU vb.) varsayılmaz, müşteri kabul edilmiş risk sayabilir. Pilot sistem: 62 gün kaldı, WARNING |
 | Replica yokken replikasyon kuralları "Sağlıklı" | **Kısmen yanlış tespit.** Gecikme ve "veri almayan replica" kuralları replica yokken zaten uygulanmaz. Bu sistemde primary'ye bağlı, Keystone'un bilmediği bir replica var (172.30.207.13, walreceiver, async, streaming); kurallar onu gördüğü için sağlıklı dedi. Asıl kusur: envanter "0 replica" dedi ve bu replica'nın değerlendirilmediği söylenmedi | Giderildi: bağlı ama tanımsız replica envanterde ve değerlendirilemeyenler listesinde görünür |
 | Synchronous standby kuralı senkron replikasyon yokken "Sağlıklı" | Doğru | Giderildi: NOT_APPLICABLE |
 | Arşivleme kapalıyken arşivleme hatası kuralı "Sağlıklı" | Doğru | Giderildi: NOT_APPLICABLE |

@@ -104,7 +104,7 @@ python -m repository.lifecycle.release_reference --show
 python -m repository.lifecycle.release_reference --refresh
 ```
 
-`--show` listeyi, kaynağını (SEED kurulumla gelen, FILE dosya, ONLINE internet) ve tarihini gösterir. `--refresh` internetten yeniler; health check ve import bunu kendileri de dener. İnterneti olmayan Keystone için: interneti olanda `--export dosya.json`, olmayanda `--import dosya.json`. Liste 100 günden eskiyse minor sürüm kontrolü "değerlendirilemedi" der.
+`--show` listeyi, kaynağını (SEED kurulumla gelen, FILE dosya, ONLINE internet) ve tarihini gösterir. `--refresh` internetten yeniler; health check ve import bunu kendileri de dener. İnterneti olmayan Keystone için: interneti olanda `--export dosya.json`, olmayanda `--import dosya.json`. Liste 100 günden eskiyse minor sürüm kontrolü "değerlendirilemedi" der. İşletim sistemi destek tarihleri (PG-LIFE-003) de aynı listede; internetten yenilenmez, migration ve referans dosyasıyla gelir.
 
 ---
 

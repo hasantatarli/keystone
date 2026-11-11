@@ -151,7 +151,7 @@ Needs a **release reference table** in the Dictionary (versions, release dates, 
 | --- | --- | --- | --- | --- | --- |
 | PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Done (V059) | DB_Version | Done |
 | PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Done (V059) | DB_Version | Done |
-| PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Ready: host + reference table | — | P2 |
+| PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Done (V060): end of free security updates | DB_Version | Done |
 | **PG-LIFE-004** | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | Done |
 
 ## 11. Performance Engineering (health-check depth)
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 45 | 0 | 10 | 8 |
-| of which evidence ready | 45 | 0 | 2 | 3 |
+| Checks | 46 | 0 | 9 | 8 |
+| of which evidence ready | 46 | 0 | 1 | 3 |
 
-Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 can use the same reference. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).

@@ -393,6 +393,15 @@ EXPECTED_RULES = {
                      "KEYSTONE_RELEASE_REFERENCE": (True, None)},
         "parameters": {"support_warning_window": (Decimal("31536000"), "SECOND")},
     },
+    # V060: operating system releases, a reference source of their own.
+    "PG-LIFE-003": {
+        "assessment": "PG_LIFECYCLE_HEALTH",
+        "default_severity": None,
+        "thresholds": {},
+        "evidence": {"PG_HOST_SNAPSHOT": (True, 86400),
+                     "KEYSTONE_OS_REFERENCE": (True, None)},
+        "parameters": {"support_warning_window": (Decimal("31536000"), "SECOND")},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}
