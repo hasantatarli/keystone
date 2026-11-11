@@ -437,7 +437,36 @@ class ReportTests(test_health_check.HealthCheckTests):
         for rule in ("PG-REP-003", "PG-REP-004"):
             self.assertEqual(outcomes[rule][0], "NOT_APPLICABLE", rule)
             self.assertIn("[no_replicas]", outcomes[rule][2])
-        self.assertEqual(outcomes["PG-REP-006"][0], "HEALTHY")       # still meaningful alone
+        self.assertEqual(outcomes["PG-REP-006"][0], "NOT_APPLICABLE")   # no synchronous replication either
+
+    def test_a_replica_keystone_does_not_know_is_reported_as_not_assessed(self):
+        # Pilot hc111 (2026-11-11): an async replica at another address streamed from the primary while
+        # the inventory said "0 replica"; its settings, disk and version were never assessed.
+        check_id = self.make_check()
+        now = datetime.now(timezone.utc)
+        rid = self.conn.execute(
+            "INSERT INTO postgresql.replication_status_snapshot (target_id, captured_at, current_wal_lsn, "
+            "connected_replica_count) VALUES (%s, %s, '0/1', 2) RETURNING snapshot_id",
+            (self.system, now)).fetchone()
+        for addr in ("10.0.0.2", "172.30.207.13"):     # node2 is known (10.0.0.<id>), the other is not
+            self.conn.execute(
+                "INSERT INTO postgresql.replica_status_snapshot (target_id, captured_at, application_name, "
+                "client_addr, state, sync_state, current_wal_lsn) VALUES (%s, %s, 'walreceiver', %s, "
+                "'streaming', 'async', '0/1')", (self.system, now, addr))
+        self.conn.execute("UPDATE postgresql.instance_inventory SET server_address = %s WHERE target_id = %s",
+                          (f"10.0.0.{self.node2}", self.node2))
+        self.conn.execute(
+            "UPDATE keystone.health_check_collection SET status = 'SUCCESS' WHERE health_check_id = %s "
+            "AND collector_key = 'PG_REPLICATION_STATUS'", (check_id,))
+        self.conn.commit()
+        self.assertIsNotNone(rid)
+        data = report.load_report_data(self.conn, check_id)
+        self.assertEqual([r["client_addr"] for r in data["unknown_replicas"]], ["172.30.207.13"])
+        executive = report.render_html(data, "tr")
+        executive = executive[:executive.index(TECH_PANEL)]
+        self.assertIn("1 bağlı replica değerlendirilmedi", executive)
+        self.assertIn(report.e("Primary'ye bağlı 1 replica Keystone'da tanımlı değil ve bu kontrolde "
+                               "değerlendirilmedi: 172.30.207.13 (walreceiver, streaming, async)."), executive)
 
     def test_rules_that_do_not_apply_are_noted_not_counted(self):
         check_id = self.make_check()
@@ -454,7 +483,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(counts["total"], len(data["results"]) - 2)
         page = report.render_html(data, "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("2 kontrol bu sisteme uygulanmaz.", executive)
+        defined = len(data["results"])
+        self.assertIn(f"Tanımlı {defined} kontrolden {defined - 2} tanesi bu sisteme uygulanabilir", executive)
         self.assertIn('<li class="r-na">Replikasyon gecikmesi (uygulanmaz): Sistemde replica yok.</li>',
                       executive)
         card = executive[executive.index("Değerlendirilemeyen kontroller"):]
@@ -891,7 +921,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.commit()
 
         engine.run_assessment(self.conn, "PG_BACKUP_HEALTH", self.system)
-        self.assertEqual(self.latest_outcomes()["PG-BKP-001"][:2], ("HEALTHY", None))
+        self.assertEqual(self.latest_outcomes()["PG-BKP-001"][:2], ("NOT_APPLICABLE", None))   # archiving off
         engine.run_assessment(self.conn, "PG_TRANSACTION_HEALTH", self.system)
         self.assertEqual(self.latest_outcomes()["PG-TRAN-005"][:2], ("HEALTHY", None))
         engine.run_assessment(self.conn, "PG_REPLICATION_HEALTH", self.system)
@@ -1140,7 +1170,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.commit()
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Son failover", executive)
+        self.assertIn("Son timeline değişimi", executive)        # review 2026-11-11: not always a failover
         self.assertIn("3 saat 5 dakika önce", executive)
         self.assertIn("timeline 126", executive)
         self.assertIn("bekleme süresi: 2 saat 5 dakika.", page)

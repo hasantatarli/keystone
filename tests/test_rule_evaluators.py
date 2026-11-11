@@ -709,9 +709,10 @@ class SyncStandbyMissingTests(unittest.TestCase):
     def evaluate(self, replicas, names):
         return engine.evaluate_sync_standby_missing(status_rows(replicas, names), rule("CRITICAL"), [])
 
-    def test_asynchronous_replication_is_fine(self):
-        self.assertEqual(self.evaluate([], ""), [])
-        self.assertEqual(self.evaluate([], None), [])
+    def test_without_synchronous_replication_it_does_not_apply(self):
+        for names in ("", None):
+            with self.assertRaisesRegex(engine.NotApplicable, r"\[sync_not_configured\]"):
+                self.evaluate([], names)
 
     def test_configured_without_sync_standby_is_critical(self):
         findings = self.evaluate([{"sync_state": "async"}], "ANY 1 (*)")
@@ -966,10 +967,12 @@ class ArchiveFailureTests(unittest.TestCase):
         self.assertEqual(values["last_archived_time"], "never")
 
     def test_archiving_off_is_left_to_bkp_002(self):
-        self.assertEqual(self.evaluate(wal_row("pg-1", archive_mode="off", failed=NOW)), [])
+        # Review 2026-11-11: "no failures" read as archiving works; with archiving off it does not apply.
+        with self.assertRaisesRegex(engine.NotApplicable, r"\[archiving_off\]"):
+            self.evaluate(wal_row("pg-1", archive_mode="off", failed=NOW))
 
     def test_replica_counts_only_with_archive_mode_always(self):
-        self.assertEqual(self.evaluate(wal_row("pg-2", in_recovery=True, failed=NOW)), [])
+        self.assertEqual(self.evaluate(wal_row("pg-1"), wal_row("pg-2", in_recovery=True, failed=NOW)), [])
         self.assertEqual(len(self.evaluate(wal_row("pg-2", in_recovery=True, archive_mode="always",
                                                    failed=NOW))), 1)
 

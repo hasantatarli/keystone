@@ -60,7 +60,7 @@ TEXTS = {
         "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
         "action_NOT_COLLECTED_offline": "Eksik dosyayı toplayın: sunucu bilgisi için veritabanı sunucusunda host script'ini (host_snapshot.sh ya da host_snapshot_windows.ps1) çalıştırın; diğerleri için toplayıcıyı yeniden çalıştırın.",
         "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
-        "coverage": "{total} kontrol yapıldı, {evaluated} tanesi sonuç verdi.",
+        "coverage": "Tanımlı {defined} kontrolden {total} tanesi bu sisteme uygulanabilir; {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "not_applicable_note": "{count} kontrol bu sisteme uygulanmaz.",
         "count_critical": "Kritik", "count_warning": "Uyarı",
@@ -69,6 +69,9 @@ TEXTS = {
         "inv_servers": "Sunucu", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Bellek",
         "inv_data": "Veri", "inv_disk": "Disk",
         "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} çekirdek",
+        "inv_unknown_replicas": "{n} bağlı replica değerlendirilmedi",
+        "unknown_replica_cause": "Primary'ye bağlı {n} replica Keystone'da tanımlı değil ve bu kontrolde değerlendirilmedi: {list}.",
+        "unknown_replica_action": "Bu sunucuları da toplayın (offline script'i onlarda da çalıştırın ya da bağlantılarını tanımlayın); ayarları, diski ve sürümü ancak o zaman değerlendirilir.",
         "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
         "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
         "inv_data_disk": "Veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
@@ -78,6 +81,8 @@ TEXTS = {
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
         "findings_word": "bulgu",
         "config_title": "Konfigürasyon önerileri",
+        "config_starting_values": "Sunucu profili (iş yükü, sunucunun PostgreSQL'e ayrılmış olup olmadığı, disk tipi) tam girilmediği için önerilen değerler bir başlangıç noktasıdır: mevcut değerlerin neden seçildiği ve gerçek iş yükü doğrulanmadan uygulanmamalıdır.",
+        "config_many_connections": "max_connections = {n}: work_mem önerisi bağlantı sayısına bölündüğü için çok küçük çıkıyor. Asıl kaldıraç bağlantı sayısıdır; uygulama önünde bir connection pooler (PgBouncer gibi) ile max_connections düşürülürse sorgulara daha fazla bellek kalır.",
         "config_parts": {"DEVIATES": "{n} ayar önerilenden farklı", "NOT_ASSESSED": "{n} ayar değerlendirilemedi",
                          "FITS": "{n} ayar uygun", "NOT_APPLICABLE": "{n} ayar uygulanmaz"},
         "config_line": "{n} ayar bu sunucu için önerilen değerlerden farklı; ayrıntı teknik bölümde.",
@@ -186,6 +191,8 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
+                         "sync_not_configured": "Synchronous replikasyon tanımlı değil (synchronous_standby_names boş).",
+                         "archiving_off": "Hiçbir sunucuda WAL arşivleme açık değil; arşivlemenin kendisini PG-BKP-002 değerlendirir.",
                          "setting_missing": "{setting} ayarı primary'de toplanamadı.",
                          "no_timeline_history": "Şu anki timeline'ın history dosyası pg_wal içinde bulunamadı.",
                          "no_nodes": "Sistemin sunucu listesi bulunamadı.",
@@ -212,7 +219,7 @@ TEXTS = {
         "match_same": "Aynı tanım", "match_covered": "Kapsanıyor", "col_since": "Ne kadar önce",
         "empty_value": "(boş)",
         "detail_other_definition": "Diğer index'in tanımı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
-        "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
+        "inv_failover": "Son timeline değişimi", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
@@ -225,6 +232,12 @@ TEXTS = {
                         "nesne oluşturmaz, ayar değiştirmez, kurulum yapmaz. Sebep açıklamaları "
                         "bu tür sorunların bilinen genel sebepleridir; bu sistemdeki kesin "
                         "sebep için teknik detaylardaki bağlam bilgileri incelenmelidir."),
+        "method_text_offline": ("Kanıt, müşteri tarafında çalıştırılan salt okunur script'lerle toplandı ve "
+                                "Keystone'a aktarıldı; Keystone sisteme bağlanmadı. Script'ler yalnızca sistem "
+                                "kataloglarını ve istatistik görünümlerini okur; nesne oluşturmaz, ayar "
+                                "değiştirmez, kurulum yapmaz, tablo verisi ve sorgu metni toplamaz. Sebep "
+                                "açıklamaları bu tür sorunların bilinen genel sebepleridir; bu sistemdeki kesin "
+                                "sebep için teknik detaylardaki bağlam bilgileri incelenmelidir."),
         "generated": "Rapor oluşturma zamanı",
         "outcome": {"HEALTHY": "Sağlıklı", "ATTENTION_REQUIRED": "Dikkat",
                     "INSUFFICIENT_EVIDENCE": "Veri yetersiz", "ERROR": "Hata",
@@ -259,7 +272,7 @@ TEXTS = {
         "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
         "action_NOT_COLLECTED_offline": "Collect the missing file: for server data run the host script (host_snapshot.sh or host_snapshot_windows.ps1) on the database server; for the rest run the collector again.",
         "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
-        "coverage": "{total} checks were run, {evaluated} produced a result.",
+        "coverage": "Of {defined} defined checks, {total} apply to this system; {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "not_applicable_note": "{count} check(s) do not apply to this system.",
         "count_critical": "Critical", "count_warning": "Warning",
@@ -268,6 +281,9 @@ TEXTS = {
         "inv_servers": "Servers", "inv_version": "PostgreSQL", "inv_cpu": "CPU", "inv_memory": "Memory",
         "inv_data": "Data", "inv_disk": "Disk",
         "inv_roles": "{primary} primary, {replica} replica", "inv_cores": "{n} cores",
+        "inv_unknown_replicas": "{n} connected replica not assessed",
+        "unknown_replica_cause": "{n} replica connected to the primary is not defined in Keystone and was not assessed in this check: {list}.",
+        "unknown_replica_action": "Collect these servers too (run the offline script on them or define their connections); only then are their settings, disk and version assessed.",
         "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
         "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
         "inv_data_disk": "Data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
@@ -277,6 +293,8 @@ TEXTS = {
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
         "findings_word": "finding(s)",
         "config_title": "Configuration recommendations",
+        "config_starting_values": "The server profile (workload, whether the server is dedicated to PostgreSQL, disk type) is not complete, so the recommended values are a starting point: do not apply them before checking why the current values were chosen and what the real workload is.",
+        "config_many_connections": "max_connections = {n}: the work_mem recommendation comes out very small because it is divided by the connections. The lever is the number of connections; with a connection pooler (PgBouncer, say) in front of the application, a lower max_connections leaves more memory for queries.",
         "config_parts": {"DEVIATES": "{n} setting(s) differ from the recommendation",
                          "NOT_ASSESSED": "{n} not assessed", "FITS": "{n} fit", "NOT_APPLICABLE": "{n} not applicable"},
         "config_line": "{n} setting(s) differ from the values recommended for this server; details in the technical part.",
@@ -384,6 +402,8 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
+                         "sync_not_configured": "Synchronous replication is not configured (synchronous_standby_names is empty).",
+                         "archiving_off": "No server archives WAL; archiving itself is judged by PG-BKP-002.",
                          "setting_missing": "{setting} was not collected on the primary.",
                          "no_timeline_history": "The history file of the current timeline is not in pg_wal.",
                          "no_nodes": "The server list of the system was not found.",
@@ -410,7 +430,7 @@ TEXTS = {
         "match_same": "Same definition", "match_covered": "Covered", "col_since": "How long ago",
         "empty_value": "(empty)",
         "detail_other_definition": "Other index's definition", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
-        "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
+        "inv_failover": "Last timeline change", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
@@ -423,6 +443,12 @@ TEXTS = {
                         "changes no settings and installs nothing on the system. Causes describe "
                         "the usual reasons for such problems; for the exact cause in this system "
                         "see the context in the technical details."),
+        "method_text_offline": ("The evidence was collected on the customer side with read-only scripts and "
+                                "imported into Keystone; Keystone did not connect to the system. The scripts "
+                                "only read system catalogs and statistics views; they create no objects, "
+                                "change no settings, install nothing and collect no table data or query "
+                                "texts. Causes describe the usual reasons for such problems; for the exact "
+                                "cause in this system see the context in the technical details."),
         "generated": "Report generated",
         "outcome": {"HEALTHY": "Healthy", "ATTENTION_REQUIRED": "Attention",
                     "INSUFFICIENT_EVIDENCE": "Insufficient data", "ERROR": "Error",
@@ -638,6 +664,26 @@ def load_report_data(conn, health_check_id):
           AND cs.captured_at BETWEEN %s AND %s AND cs.setting_value <> ''
         ORDER BY cs.captured_at DESC LIMIT 1
         """, (check["target_id"], check["target_id"], since, as_of)).fetchone()
+    # Streams from the primary (pg_stat_replication) of this check, and every name Keystone knows its
+    # servers by: a replica streaming from a server Keystone does not know was not assessed (pilot
+    # hc111, 2026-11-11: an async replica at another address, inventory said "0 replica").
+    replicas_seen = conn.execute(
+        """
+        SELECT DISTINCT ON (r.target_id, r.client_addr, r.application_name)
+               r.target_id, r.captured_at, r.application_name, host(r.client_addr) AS client_addr,
+               r.state, r.sync_state
+        FROM postgresql.replica_status_snapshot r
+        JOIN keystone.target t USING (target_id)
+        WHERE (t.target_id = %s OR t.parent_target_id = %s)
+          AND r.captured_at = (SELECT max(s.captured_at) FROM postgresql.replication_status_snapshot s
+                               WHERE s.target_id = r.target_id AND s.captured_at BETWEEN %s AND %s)
+        ORDER BY r.target_id, r.client_addr, r.application_name
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchall()
+    identities = {r["identity"] for r in conn.execute(
+        """
+        SELECT i.identity FROM keystone.target_identity i JOIN keystone.target t USING (target_id)
+        WHERE t.target_id = %s OR t.parent_target_id = %s
+        """, (check["target_id"], check["target_id"]))}
     config_reasons = {}
     for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
                           "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
@@ -651,11 +697,15 @@ def load_report_data(conn, health_check_id):
     if (check["target_id"], "PG_DATABASE_INVENTORY") not in collected:
         databases = []
     wal_status = [w for w in wal_status if (w["target_id"], "PG_WAL_STATUS") in collected]
+    known = identities | {str(n.get("server_address") or "").split("/")[0] for n in nodes} - {""}
+    unknown_replicas = [r for r in replicas_seen if (r["target_id"], "PG_REPLICATION_STATUS") in collected
+                        and r["client_addr"] and r["client_addr"] not in known]
 
     return {"check": check, "results": results, "findings": findings,
             "collections": collections, "nodes": nodes, "storage": storage,
             "databases": databases, "wal_status": wal_status, "as_of": finished,
             "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen,
+            "unknown_replicas": unknown_replicas,
             "cluster_name": cluster_name["setting_value"] if cluster_name else None, **dictionary}
 
 
@@ -856,7 +906,7 @@ def summarize(data):
     results = [r for r in data["results"] if r["outcome"] != "NOT_APPLICABLE"]
     counts = {"total": len(results), "healthy": 0, "attention": 0, "not_assessed": 0,
               "critical": 0, "warning": 0,
-              "not_applicable": len(data["results"]) - len(results)}
+              "not_applicable": len(data["results"]) - len(results), "defined": len(data["results"])}
     for r in results:
         # Recommendations (INFO only) are no risk: the executive part counts the rule as healthy.
         if r["outcome"] == "HEALTHY" or advisory(r):
@@ -1235,8 +1285,10 @@ def render_inventory(data, t):
     if total:
         primary = sum(1 for n in known if n["in_recovery"] is False)
         replica = sum(1 for n in known if n["in_recovery"])
-        items.append((t["inv_servers"], str(total),
-                      t["inv_roles"].format(primary=primary, replica=replica) if known else ""))
+        roles = t["inv_roles"].format(primary=primary, replica=replica) if known else ""
+        if data.get("unknown_replicas"):
+            roles += " · " + t["inv_unknown_replicas"].format(n=len(data["unknown_replicas"]))
+        items.append((t["inv_servers"], str(total), roles))
         versions = sorted({short_version(n["server_version"]) for n in known})
         items.append((t["inv_version"], ", ".join(versions) or t["inv_unknown"], partial(len(known))))
         if hosts:
@@ -1456,11 +1508,17 @@ def unassessed_groups(data, lang, t):
 def render_unassessed(data, lang, t):
     """Executive card for checks not done: draws attention without being a finding."""
     groups = unassessed_groups(data, lang, t)
-    if not groups:
+    unknown = data.get("unknown_replicas") or []
+    if not groups and not unknown:
         return ""
     # The same number as the verdict: checks not assessed (settings without data are listed, not counted).
     count = summarize(data)[0]["not_assessed"]
     items = []
+    if unknown:
+        listed = ", ".join(f"{r['client_addr']} ({', '.join(x for x in (r['application_name'], r['state'], r['sync_state']) if x)})"
+                           for r in unknown)
+        items.append(f"<li><b>{e(t['unknown_replica_cause'].format(n=len(unknown), list=listed))}</b>"
+                     f'<div class="facts">{e(t["unassessed_action"])}: {e(t["unknown_replica_action"])}</div></li>')
     for g in groups:
         affected = ", ".join(g["rules"])
         item = f"<b>{e(g['cause'])}</b>"
@@ -1497,9 +1555,7 @@ def render_executive(data, lang, t):
              (counts["healthy"], t["count_healthy"]), (counts["not_assessed"], t["count_not_assessed"])]
     coverage = e(t["coverage"].format(**counts)) + (
         f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
-        if counts["not_assessed"] else "") + (
-        f" · {e(t['not_applicable_note'].format(count=counts['not_applicable']))}"
-        if counts["not_applicable"] else "")
+        if counts["not_assessed"] else "")   # the checks that do not apply are in the first sentence
     collections = data["collections"]
     ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
     if collections and ok < len(collections):
@@ -1719,8 +1775,8 @@ def finding_fields(f, t):
     if details.get("client_hostname"):
         details["client_addr"] = " ".join(
             x for x in (details.get("client_addr"), f"({details['client_hostname']})") if x)
-    for key in ("valid_until", "query_start", "started_at", "transaction_start"):
-        if details.get(key):
+    for key, _ in TIME_LABELS:                    # every time but the evidence time, which the table places
+        if key != "captured_at" and details.get(key):
             details[key] = fmt_clock(details[key])
     values = {k: template_value_text(k, v, t) for k, v in (f.get("template_values") or {}).items()
               if not k.startswith("_")}
@@ -1829,8 +1885,11 @@ def findings_table(result, findings, data, lang, t):
     columns = [(key, label) for key, label in columns
                if key in ("index_def", "other_def") or key in EMPTY_SHOWN
                or any(fl.get(key) not in (None, "") for fl in fields_list)]
-    times = {f.get("captured_at") for f in fields_list}
-    same_time = len(times) == 1
+    # Seconds apart within one check are one moment for the reader (lab hc114, 2026-11-11).
+    stamps = sorted(x for x in (f.get("captured_at") for f in fields_list) if x)
+    parsed = [datetime.fromisoformat(x) for x in stamps]
+    same_time = not parsed or (parsed[-1] - parsed[0]).total_seconds() < 60
+    times = {stamps[0]} if stamps else {None}
     if not same_time:
         columns = columns + [("captured_at", "detail_captured_at")]
     head = (f'<th>{e(t["col_severity"])}</th>'
@@ -2193,6 +2252,10 @@ def config_commands(data, rows, t):
     return "".join(parts)
 
 
+# From this many connections work_mem is divided so thin that the connections are the lever (pooler).
+MANY_CONNECTIONS = 500
+
+
 def render_config(data, lang, t):
     rows = data.get("config") or []
     if not rows:
@@ -2209,6 +2272,15 @@ def render_config(data, lang, t):
     parts.append(f'<p class="note">{e(inputs)}</p>' if inputs else "")
     disk_note = config_disk_note(data, t, profile)
     parts.append(f'<p class="note">{e(disk_note)}</p>' if disk_note else "")
+    # Review 2026-11-11: a recommendation is no more certain than its inputs. Without a profile the
+    # values are a starting point; with very many connections the lever is the connections.
+    if any(r.get("assumptions") for r in action):
+        parts.append(f'<p class="note"><b>{e(t["config_starting_values"])}</b></p>')
+    connections = next((r["calculation"].get("max_connections") for r in rows
+                        if r["setting_key"] == "work_mem" and (r.get("calculation") or {}).get("max_connections")),
+                       None)
+    if connections and connections >= MANY_CONNECTIONS:
+        parts.append(f'<p class="note">{e(t["config_many_connections"].format(n=f"{connections:g}"))}</p>')
     if action:
         parts.append(table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in action]))
         if any(r.get("restart_required") for r in action):
@@ -2234,10 +2306,11 @@ def render_config(data, lang, t):
 
 
 def render_technical(data, lang, t):
+    offline = data["check"].get("source") == "OFFLINE"
     return (f'<div class="part part-tech">{e(t["part_tech"])}</div>'
             + render_system(data, t) + render_findings_detail(data, lang, t)
             + render_config(data, lang, t) + render_results(data, lang, t) + render_collections(data, t)
-            + f"<h2>{e(t['method'])}</h2><p>{e(t['method_text'])}</p>")
+            + f"<h2>{e(t['method'])}</h2><p>{e(t['method_text_offline' if offline else 'method_text'])}</p>")
 
 
 def render_html(data, lang="tr"):
