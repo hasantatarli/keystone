@@ -1,6 +1,6 @@
 # Command Reference
 
-How to run Keystone components, with their variations. All commands run from the repository root (`C:\Yazılım\keystone` in the lab). Background and rules are in the ADRs; this page is only the "how".
+How to run Keystone components, with their variations. The daily lab flow, with what each command does, is in [[Lab Rehberi]] (Turkish). All commands run from the repository root (`C:\Yazılım\keystone` in the lab). Background and rules are in the ADRs; this page is only the "how".
 
 Shell syntax differs: examples are given for **PowerShell** (Windows lab) and **bash** (Linux) where they differ.
 
