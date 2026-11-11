@@ -1298,3 +1298,37 @@ for _name in [n for n in dir(test_health_check.HealthCheckTests) if n.startswith
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalculationTextTests(unittest.TestCase):
+    """The product is shown before the limit that decided the value (Hasan 2026-11-11)."""
+
+    def row(self, value, calc, value_type="INTEGER"):
+        return {"recommended_value": value, "value_type": value_type, "calculation": calc}
+
+    def test_upper_limit_after_the_product(self):
+        t = report.TEXTS["tr"]
+        text = report.calc_text(self.row("4", {"method": "cpu_share", "cpus": 36, "share": 0.5,
+                                               "min": 2, "max": 4}), t, {})
+        self.assertEqual(text, "36 CPU × 0.5 = 18 → üst sınır 4 = 4")
+
+    def test_no_limit_needed(self):
+        t = report.TEXTS["en"]
+        text = report.calc_text(self.row("3", {"method": "cpu_share", "cpus": 6, "share": 0.5,
+                                               "min": 2, "max": 4}), t, {})
+        self.assertEqual(text, "6 CPU(s) × 0.5 = 3")
+
+
+class WindowsCommandTests(unittest.TestCase):
+    """No patronictl lines for a Windows server without a sign of Patroni (pilot hc111)."""
+
+    ROWS = [{"status": "DEVIATES", "recommended_value": "4", "value_type": "INTEGER",
+             "setting_key": "max_parallel_workers_per_gather", "restart_required": False, "assumptions": []}]
+
+    def test_patroni_block_only_when_possible(self):
+        t = report.TEXTS["tr"]
+        both = report.command_blocks(self.ROWS, {}, t)
+        windows = report.command_blocks(self.ROWS, {}, t, patroni_possible=False)
+        self.assertTrue(any("patronictl" in text for _, text in both))
+        self.assertFalse(any("patronictl" in text for _, text in windows))
+        self.assertTrue(any("ALTER SYSTEM" in text for _, text in windows))

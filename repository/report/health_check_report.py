@@ -18,6 +18,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import html
 import json
+import math
 from pathlib import Path
 import re
 
@@ -107,6 +108,7 @@ TEXTS = {
         "config_restart_list": "Restart sonrası etkin olur: {names}",
         "config_connections": "bağlantı",
         "config_calc_min": "en az", "config_calc_max": "en fazla",
+        "config_calc_lower": "alt sınır", "config_calc_upper": "üst sınır",
         "config_calc_cap": "veri diskinin %{share} sınırına indirildi",
         "config_not_assessed": "{n} ayar değerlendirilemedi",
         "config_calc_checkpoints": "Son sıfırlamadan beri {total} checkpoint'ten {requested} tanesi (%{share}) WAL dolduğu için yapıldı; mevcut değer {current} × {factor} = {result}",
@@ -304,6 +306,7 @@ TEXTS = {
         "config_restart_list": "Take effect after a restart: {names}",
         "config_connections": "connections",
         "config_calc_min": "at least", "config_calc_max": "at most",
+        "config_calc_lower": "lower limit", "config_calc_upper": "upper limit",
         "config_calc_cap": "capped at {share}% of the data disk",
         "config_not_assessed": "{n} setting(s) not assessed",
         "config_calc_checkpoints": "{requested} of {total} checkpoints since the statistics reset ({share}%) were requested because WAL filled up; current value {current} × {factor} = {result}",
@@ -1695,6 +1698,9 @@ FINDINGS_SHOWN = 10
 def finding_fields(f, t):
     """A finding's values for table cells: readable details, template values, the measured value."""
     details = dict(f["details"] or {})
+    for key, value in details.items():           # 5000.0 connections are 5000 (pilot hc111)
+        if isinstance(value, float) and value.is_integer():
+            details[key] = int(value)
     if details.get("setting_unit") and details.get("value") is not None:
         details["value"] = setting_value_text(details["value"], details["setting_unit"], t)
     if details.get("never_analyzed"):
@@ -1986,18 +1992,29 @@ def calc_text(row, t, profile):
     method = c.get("method")
     half = " × ½" if c.get("dedicated_share", 1) == 0.5 else (
         f" × {c['dedicated_share']:g}" if c.get("dedicated_share", 1) != 1 else "")
-    limits = ""
     rec = config_number(row["recommended_value"])
+    # When a lower or upper limit decided the value, the product is shown first, then the limit:
+    # '36 CPU × 0.5 = 18 → upper limit 4 = 4' (Hasan 2026-11-11: '36 × 0.5 = 4' read as wrong).
+    bound = None
     if c.get("min") is not None and rec == c["min"]:
-        limits = f" ({t['config_calc_min']} {config_value(str(c['min']), vt, t)})"
+        bound = (t["config_calc_lower"], c["min"])
     elif c.get("max") is not None and rec == c["max"]:
-        limits = f" ({t['config_calc_max']} {config_value(str(c['max']), vt, t)})"
+        bound = (t["config_calc_upper"], c["max"])
+
+    def ends(raw, show):
+        if bound is None or raw is None or abs(raw - rec) < 1:
+            return f" = {result}"
+        return f" = {show(raw)} → {bound[0]} {config_value(str(bound[1]), vt, t)} = {result}"
+
     if method == "memory_share":
         share = t["percent"].format(n=f"{c['share'] * 100:g}")
-        return f"{pg(c['memory'])}{half} × {share} = {result}{limits}"
+        raw = c["memory"] * c.get("dedicated_share", 1) * c["share"]
+        return f"{pg(c['memory'])}{half} × {share}" + ends(raw, pg)
     if method == "work_mem":
+        raw = ((c["memory"] * c.get("dedicated_share", 1) - c["shared_buffers"])
+               / (c["max_connections"] * c["factor"]))
         return (f"({pg(c['memory'])}{half} − shared_buffers {pg(c['shared_buffers'])}) / "
-                f"({c['max_connections']:g} {t['config_connections']} × {c['factor']:g}) = {result}{limits}")
+                f"({c['max_connections']:g} {t['config_connections']} × {c['factor']:g})" + ends(raw, pg))
     if method == "max_wal_size":
         workload = t["profile_values"].get(profile.get("workload_type", {}).get("value"), "")
         text = f"{t['profile_workload_type']} {workload}: {pg(c['value'])}"
@@ -2016,7 +2033,8 @@ def calc_text(row, t, profile):
     if method == "share_of":
         return f"{c['of']} {pg(c['base'])} × {c['share']:g} = {result}"
     if method == "cpu_share":
-        return f"{t['config_cpus'].format(n=c['cpus'])} × {c['share']:g} = {result}{limits}"
+        raw = math.ceil(c["cpus"] * c["share"])
+        return f"{t['config_cpus'].format(n=c['cpus'])} × {c['share']:g}" + ends(raw, lambda v: f"{v:g}")
     return ""
 
 
@@ -2099,7 +2117,7 @@ def config_row(row, data, lang, t, profile):
             e(acceptable) or "—", config_why(row, data, lang, t, profile)]
 
 
-def command_blocks(rows, profile, t, cluster=None):
+def command_blocks(rows, profile, t, cluster=None, patroni_possible=True):
     """[(title, text)] of commands for the settings to change (review 2026-11-09).
 
     Reload and restart apart; ALTER SYSTEM or patronictl by the profile's cluster_manager, both
@@ -2134,7 +2152,7 @@ def command_blocks(rows, profile, t, cluster=None):
         restart = [sql_line(k, v, n) for k, v, restart, n in changes if restart]
         if restart:
             blocks.append((t["config_block_restart"], "\n".join(restart + [f"-- {t['config_restart_hint']}"])))
-    if manager in (None, "PATRONI"):
+    if manager == "PATRONI" or (manager is None and patroni_possible):
         # patronictl restart needs the cluster name (Patroni 4.1, lab 2026-11-09); Patroni sets cluster_name.
         name = f" {cluster or '<cluster>'}"
         direct = [(k, v) for k, v, _, n in changes if not n]
@@ -2155,7 +2173,10 @@ def command_blocks(rows, profile, t, cluster=None):
 
 def config_commands(data, rows, t):
     profile = data["check"].get("target_profile") or {}
-    blocks = command_blocks(rows, profile, t, data.get("cluster_name"))
+    # Windows without a sign of Patroni: patronictl lines would only confuse (pilot hc111, 2026-11-11).
+    windows = any("windows" in (n.get("os_name") or "").lower() for n in data["nodes"])
+    blocks = command_blocks(rows, profile, t, data.get("cluster_name"),
+                            patroni_possible=not windows or bool(data.get("patroni_seen")))
     if not blocks:
         return ""
     parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
