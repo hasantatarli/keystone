@@ -1331,7 +1331,9 @@ def evaluate_sync_standby_missing(rows, rule, thresholds):
     system = next((r for r in rows if r["record_type"] == "SYSTEM"), None)
     names = (system or {}).get("synchronous_standby_names")
     if not names or not names.strip():
-        return []
+        # Nothing to judge without synchronous replication (review 2026-11-11: "healthy" read as HA ok).
+        raise NotApplicable("PG_REPLICATION_STATUS", "sync_not_configured",
+                            "Synchronous replication is not configured (synchronous_standby_names is empty).")
     if any(r["record_type"] == "REPLICA" and r["sync_state"] in ("sync", "quorum") for r in rows):
         return []
     return [
@@ -1689,6 +1691,9 @@ def archives(row):
 
 def evaluate_archive_failures(rows, rule, thresholds):
     """PG-BKP-001: the last archive failure is newer than the last success (archiving stuck now)."""
+    if rows and not any(archives(row) for row in rows):
+        # Archiving is off: PG-BKP-002 judges that; "no failures" would read as archiving works.
+        raise NotApplicable("PG_WAL_STATUS", "archiving_off", "No server archives WAL.")
     findings = []
     for row in rows:
         failed, archived = row["last_failed_time"], row["last_archived_time"]

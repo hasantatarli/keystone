@@ -817,6 +817,21 @@ Unit tests for every condition; an end-to-end test on a disposable PostgreSQL 16
 
 ---
 
+# Batch of 2026-11-11 — report decision quality after the first pilot (V058)
+
+Review of the first pilot report (hc111) by Hasan and ChatGPT; decisions in `15 - ChatGPT Review/2026-11-11 - Ilk Pilot Raporu Degerlendirmesi.md`.
+
+- **PG-REP-006** is NOT_APPLICABLE (`sync_not_configured`) when `synchronous_standby_names` is empty: "healthy" read as "high availability is fine".
+- **PG-BKP-001** is NOT_APPLICABLE (`archiving_off`) when no server archives WAL; PG-BKP-002 judges archiving itself.
+- PG-REP-003/004 already were NOT_APPLICABLE without replicas. In the pilot they were healthy because a replica Keystone did not know (another address, `walreceiver`, async) streamed from the primary. The report now lists such replicas (from `pg_stat_replication`, matched against the nodes' addresses and `keystone.target_identity`) in the inventory and among the checks not assessed.
+- **PG-CONF-002** meaning and recommendation say which risk each setting carries: fsync / full_page_writes off can corrupt, synchronous_commit off can lose the last commits; ask for the accepted data-loss window.
+- Report: method text by collection mode (offline: Keystone did not connect); "Of N defined checks, M apply"; "Last timeline change" instead of "Last failover"; configuration recommendations marked as a starting point when the profile is incomplete, and with max_connections ≥ 500 a note that the connections, not work_mem, are the lever.
+
+**Verification (V058)**  
+Unit and report tests (409 OK). Lab 2026-11-11: hc111 report regenerated without import (unknown replica 172.30.207.13 listed, coverage over 43 defined checks, last timeline change, offline method text, starting-point and connections notes, new durability meaning); hc115 on Patroni: PG-REP-006 and PG-BKP-001 not applicable, no unknown replica (all three servers known).
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.
