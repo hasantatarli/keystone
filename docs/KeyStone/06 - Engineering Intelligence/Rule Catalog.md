@@ -827,6 +827,9 @@ Review of the first pilot report (hc111) by Hasan and ChatGPT; decisions in `15 
 - **PG-CONF-002** meaning and recommendation say which risk each setting carries: fsync / full_page_writes off can corrupt, synchronous_commit off can lose the last commits; ask for the accepted data-loss window.
 - Report: method text by collection mode (offline: Keystone did not connect); "Of N defined checks, M apply"; "Last timeline change" instead of "Last failover"; configuration recommendations marked as a starting point when the profile is incomplete, and with max_connections ≥ 500 a note that the connections, not work_mem, are the lever.
 
+**Verification (V058)**  
+Unit and report tests (409 OK). Lab 2026-11-11: hc111 report regenerated without import (unknown replica 172.30.207.13 listed, coverage over 43 defined checks, last timeline change, offline method text, starting-point and connections notes, new durability meaning); hc115 on Patroni: PG-REP-006 and PG-BKP-001 not applicable, no unknown replica (all three servers known).
+
 ---
 
 # Candidate Rules
