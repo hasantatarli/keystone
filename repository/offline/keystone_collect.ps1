@@ -24,9 +24,30 @@ function Ask($Prompt, $Default) {
     if ([string]::IsNullOrWhiteSpace($answer)) { return $Default } else { return $answer.Trim() }
 }
 
+# psql.exe from a folder or a file path as typed (with or without quotes).
+function Resolve-Psql($Path) {
+    if (-not $Path) { return $null }
+    $Path = $Path.Trim().Trim('"')
+    if (Test-Path -LiteralPath $Path -PathType Container) { $Path = Join-Path $Path "psql.exe" }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return $Path }
+    return $null
+}
+
 function Find-Psql {
     $command = Get-Command psql.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
+    # A PostgreSQL installed anywhere (E:\post_data\bin, say): its running server or its service.
+    $bins = @()
+    $bins += Get-Process postgres -ErrorAction SilentlyContinue | ForEach-Object { Split-Path -Parent $_.Path }
+    try {
+        $bins += Get-CimInstance Win32_Service -ErrorAction Stop |
+            Where-Object { $_.PathName -match 'pg_ctl\.exe' } |
+            ForEach-Object { if ($_.PathName -match '^"?([^"]*pg_ctl\.exe)') { Split-Path -Parent $Matches[1] } }
+    } catch { }
+    foreach ($bin in $bins | Where-Object { $_ } | Select-Object -Unique) {
+        $found = Resolve-Psql $bin
+        if ($found) { return $found }
+    }
     $patterns = @("$env:ProgramFiles\PostgreSQL\*\bin\psql.exe",
                   "$env:ProgramFiles\pgAdmin 4\runtime\psql.exe",
                   "$env:ProgramFiles\pgAdmin 4\*\runtime\psql.exe",
@@ -34,13 +55,18 @@ function Find-Psql {
                   "$env:LOCALAPPDATA\Programs\pgAdmin 4\runtime\psql.exe")
     $found = Get-ChildItem -Path $patterns -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
     if ($found) { return $found[0].FullName }
-    return (Read-Host "psql.exe bulunamadi. Tam yolunu girin")
+    for ($try = 0; $try -lt 3; $try++) {
+        $found = Resolve-Psql (Read-Host "psql.exe bulunamadi. psql.exe'nin ya da bulundugu klasorun yolunu girin (ornek: C:\Program Files\PostgreSQL\16\bin)")
+        if ($found) { return $found }
+        Write-Warning "Bu yolda psql.exe yok."
+    }
+    return $null
 }
 
 function Safe($Text) { return ($Text -replace '[^A-Za-z0-9._-]', '_') }
 
 $Psql = Find-Psql
-if (-not (Test-Path $Psql)) { Write-Error "psql.exe bulunamadi: $Psql"; exit 1 }
+if (-not $Psql) { Write-Error "psql.exe bulunamadi; hicbir sey toplanmadi."; exit 1 }
 Write-Host "Keystone offline kanit toplama (salt okunur). psql: $Psql"
 
 $Hosts = if ($Servers) { $Servers } else { Ask "Sunucu(lar), virgulle" "localhost" }
@@ -53,22 +79,25 @@ if (-not $PresetPassword) {
     $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 }
-if (-not $NoHost -and -not $PSBoundParameters.ContainsKey("SshUser")) {
-    $SshUser = Ask "Diger (Linux) sunucularin donanim bilgisi SSH ile toplansin mi? SSH kullanicisi (bos: toplanmaz)" ""
-}
 $HostScript = Join-Path $Here "host_snapshot.sh"
-$Ssh = Get-Command ssh -ErrorAction SilentlyContinue
-if ($SshUser -and -not $Ssh) { Write-Warning "ssh bulunamadi; diger sunucularin donanim bilgisi toplanmayacak."; $SshUser = "" }
 # This computer however it is typed: its names and addresses.
 $Me = @("localhost", "127.0.0.1", "::1", [Environment]::MachineName)
 try { $Me += @([System.Net.Dns]::GetHostAddresses([Environment]::MachineName) | ForEach-Object { $_.IPAddressToString }) } catch { }
+$HostList = @(($Hosts -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Asked only when a server is not this computer: this computer's facts need no SSH.
+$Remote = @($HostList | Where-Object { $_ -notin $Me })
+if ($Remote -and -not $NoHost -and -not $PSBoundParameters.ContainsKey("SshUser")) {
+    $SshUser = Ask "Diger sunucular ($($Remote -join ', ')) Linux ise donanim bilgisi SSH ile toplanabilir. SSH ile baglandiginiz kullanici adi (bilmiyorsaniz bos birakin)" ""
+}
+$Ssh = Get-Command ssh -ErrorAction SilentlyContinue
+if ($SshUser -and -not $Ssh) { Write-Warning "ssh bulunamadi; diger sunucularin donanim bilgisi toplanmayacak."; $SshUser = "" }
 $Out = if ($OutDir) { $OutDir } else { Ask "Cikti klasoru" (Join-Path $Here "keystone_evidence_$Stamp") }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $env:PGCLIENTENCODING = "UTF8"
 $env:PGCONNECT_TIMEOUT = "10"
 
 try {
-    foreach ($HostName in ($Hosts -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }) {
+    foreach ($HostName in $HostList) {
         # Files are named after the server as typed (this computer's name for localhost); Keystone matches them.
         $Label = if ($HostName -in @("localhost", "127.0.0.1", "::1")) { [Environment]::MachineName } else { $HostName }
         $Name = Safe $Label
@@ -124,6 +153,13 @@ try {
 }
 finally {
     if (-not $PresetPassword) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+}
+
+# Nothing is sent when no server could be read: say so instead of "done".
+if (-not (Get-ChildItem -Path $Out -Filter "*_node.json" -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Error "Hicbir sunucudan veri toplanamadi. Yukaridaki hata mesajlarini Keystone'a iletin."
+    exit 1
 }
 
 $Archive = "$Out.zip"

@@ -250,9 +250,105 @@ class OfflineImportTests(unittest.TestCase):
         self.assertEqual(outcomes["PG-HA-004"][0], "NOT_APPLICABLE")
         self.assertIn(outcomes["PG-HA-002"][0], ("HEALTHY", "ATTENTION_REQUIRED"))
         self.assertIn("Uzun süren sorgu", pages["tr"])
-        self.assertIn("hiç vacuum ya da analyze çalışmamış", pages["tr"])
-        self.assertIn("pg_stat_statements yüklü değil", pages["tr"])
+        self.assertIn("Autovacuum analyze eşiği (satır)", pages["tr"])        # findings table columns
+        self.assertIn("shared_preload_libraries", pages["tr"])
         self.assertIn("Long running query", pages["en"])
+
+    def test_object_structure_rules_on_real_evidence(self):
+        # V057 end to end: index definitions, foreign keys, unlogged tables and extensions.
+        with self.server.connect("app", autocommit=True) as app:
+            app.execute("""
+                DROP TABLE IF EXISTS s_child, s_parent, s_cache;
+                CREATE TABLE s_parent (id int PRIMARY KEY);
+                CREATE TABLE s_child (id int PRIMARY KEY, parent_id int REFERENCES s_parent, a int, b int);
+                INSERT INTO s_parent VALUES (1);
+                INSERT INTO s_child SELECT g, 1, g, g FROM generate_series(1, 20000) g;
+                CREATE INDEX s_child_a ON s_child (a);
+                CREATE INDEX s_child_a_again ON s_child (a);
+                CREATE INDEX s_child_a_b ON s_child (a, b);
+                CREATE UNLOGGED TABLE s_cache (k text);
+                DROP EXTENSION IF EXISTS pg_stat_statements;
+                CREATE EXTENSION pg_stat_statements VERSION '1.9';
+            """)
+        parameter = ("UPDATE keystone.rule_parameter SET parameter_value = %s WHERE parameter_key = "
+                     "'min_table_size' AND rule_id = (SELECT rule_id FROM keystone.rule_definition "
+                     "WHERE rule_key = 'PG-IDX-004')")
+        with self.connect() as conn:
+            conn.execute(parameter, (8192,))
+            conn.commit()
+        try:
+            files, host = self.evidence_files()
+            check_id, _ = imp.import_bundle(self.connect, self.target, files, [host])
+        finally:
+            with self.connect() as conn:
+                conn.execute(parameter, (10485760,))
+                conn.commit()
+            with self.server.connect("app", autocommit=True) as app:
+                app.execute("DROP TABLE s_child, s_parent, s_cache; DROP EXTENSION pg_stat_statements")
+        with self.connect() as conn:
+            found = {(r["rule_key"], r["subject_identifier"], r["severity"]) for r in conn.execute(
+                "SELECT rd.rule_key, f.subject_identifier, f.severity FROM keystone.finding f "
+                "JOIN keystone.rule_definition rd USING (rule_id) "
+                "JOIN keystone.assessment_run ar USING (assessment_run_id) WHERE ar.health_check_id = %s "
+                "AND rd.rule_key IN ('PG-IDX-003', 'PG-IDX-004', 'PG-BKP-003', 'PG-LIFE-004')", (check_id,))}
+            pages = {lang: report.render_html(report.load_report_data(conn, check_id), lang)
+                     for lang in ("tr", "en")}
+        self.assertEqual(found, {
+            ("PG-IDX-003", "app.public.s_child_a_again", "WARNING"),
+            ("PG-IDX-003", "app.public.s_child_a", "INFO"),
+            ("PG-IDX-004", "app.public.s_child.s_child_parent_id_fkey", "WARNING"),
+            ("PG-BKP-003", "app.public.s_cache", "WARNING"),
+            ("PG-LIFE-004", "app.pg_stat_statements", "INFO")})
+        self.assertIn("Sürüm ve yaşam döngüsü", pages["tr"])
+        self.assertIn("Kapsanıyor", pages["tr"])
+        self.assertIn("<code>btree (a, b)</code>", pages["tr"])
+        self.assertIn("Foreign key without index", pages["en"])
+
+    def test_a_database_without_tables_ends_with_its_latest_collection(self):
+        # Lab hc110 (2026-11-10): after the test tables were dropped the database had no tables, the
+        # collector returned nothing and the older snapshot with the dropped table was judged.
+        from repository.intelligence import assessment_engine as engine
+        sql = Path("providers/postgresql/telemetry/collectors/vacuum_analyze_snapshot.sql").read_text()
+        with self.server.connect(autocommit=True) as admin:
+            admin.execute("DROP DATABASE IF EXISTS vac_empty")
+            admin.execute("CREATE DATABASE vac_empty")
+
+        def drop():
+            with self.server.connect(autocommit=True) as admin:
+                admin.execute("DROP DATABASE IF EXISTS vac_empty")
+        self.addCleanup(drop)
+
+        def collect():
+            with self.server.connect("vac_empty", row_factory=dict_row) as db:
+                rows = db.execute(sql).fetchall()
+            with self.connect() as conn:
+                worker.save_vacuum_analyze_snapshot(
+                    conn, {"target_id": self.target, "collector_key": "PG_VACUUM_ANALYZE"}, rows)
+                conn.commit()
+                return [r for r in engine.load_latest_vacuum_analyze_snapshot(conn, self.target)
+                        if r["database_name"] == "vac_empty"]
+
+        with self.server.connect("vac_empty", autocommit=True) as db:
+            db.execute("CREATE TABLE gone (id int) WITH (autovacuum_enabled = false)")
+            db.execute("INSERT INTO gone SELECT generate_series(1, 30000)")
+        self.assertEqual({r["object_name"] for r in engine.table_rows(collect())}, {"gone"})
+        with self.server.connect("vac_empty", autocommit=True) as db:
+            db.execute("DROP TABLE gone")
+        latest = collect()
+        self.assertEqual([r["record_type"] for r in latest], ["DATABASE"])
+        self.assertEqual(engine.table_rows(latest), [])
+
+    def test_the_same_evidence_is_not_imported_twice(self):
+        # Pilot 2026-11-11 (hc113): a second import clashed with its own rows and doubled others.
+        files, host = self.evidence_files()
+        check_id, _ = imp.import_bundle(self.connect, self.target, files, [host])
+        with self.connect() as conn:
+            before = conn.execute("SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"]
+        with self.assertRaisesRegex(imp.BundleError, rf"already imported as health check {check_id}"):
+            imp.import_bundle(self.connect, self.target, files, [host])
+        with self.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"],
+                             before)
 
     def test_files_of_another_system_are_refused(self):
         files, _ = self.evidence_files()
@@ -426,21 +522,27 @@ class OfflineImportTests(unittest.TestCase):
 
     def test_without_a_target_the_system_is_created_then_recognised(self):
         # The customer never knows Keystone's names: the import creates the system, then finds it again.
-        files, host = self.evidence_files()
-        renamed = []
-        for f in files:
-            to = Path(f).with_name(Path(f).name.replace("pg-off_", "dbsrv7_").replace("dbsrv7_app", "dbsrv7_db_app")
-                                   .replace("dbsrv7_postgres", "dbsrv7_db_postgres"))
-            Path(f).rename(to)
-            renamed.append(str(to))
-        host_file = Path(host).with_name("dbsrv7_host.txt")
-        Path(host).rename(host_file)
+        def collect():                               # each import is a new collection
+            files, host = self.evidence_files()
+            renamed = []
+            for f in files:
+                to = Path(f).with_name(Path(f).name.replace("pg-off_", "dbsrv7_")
+                                       .replace("dbsrv7_app", "dbsrv7_db_app")
+                                       .replace("dbsrv7_postgres", "dbsrv7_db_postgres"))
+                Path(f).replace(to)
+                renamed.append(str(to))
+            host_file = Path(host).with_name("dbsrv7_host.txt")
+            Path(host).replace(host_file)
+            return renamed, host_file
+
+        renamed, host_file = collect()
         with self.connect() as conn:                 # this server's earlier imports are not the customer's
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
             conn.commit()
         first, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)], name="Musteri DB",
                                          environment="PROD")
         self.assertEqual(notes[0], "created in Keystone: Musteri DB, dbsrv7")
+        renamed, host_file = collect()
         second, notes = imp.import_bundle(self.connect, None, renamed, [str(host_file)])
         self.assertFalse(any(n.startswith("created") for n in notes))
         with self.connect() as conn:
@@ -457,7 +559,6 @@ class OfflineImportTests(unittest.TestCase):
 
     def test_a_server_is_one_node_whether_typed_by_address_or_name(self):
         # Hasan 2026-11-10: first by IP, then by host name; the collector records what the name resolves to.
-        files, _ = self.evidence_files()
         with self.connect() as conn:
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
             conn.commit()
@@ -466,7 +567,7 @@ class OfflineImportTests(unittest.TestCase):
             folder = self.dir / f"bundle_{label}"
             folder.mkdir(exist_ok=True)
             out = []
-            for f in files:
+            for f in self.evidence_files()[0]:                         # each import is a new collection
                 kind = Path(f).stem.split("_", 1)[1]                    # node / app / postgres
                 name = f"{label}_node.json" if kind == "node" else f"{label}_db_{kind}.json"
                 text = imp.document_text(Path(f).read_text(encoding="utf-8"))
@@ -542,7 +643,7 @@ class OfflineImportTests(unittest.TestCase):
         database = (self.dir / "scripts" / "keystone_database.sql").read_text(encoding="utf-8")
         guarded = "CASE WHEN pg_is_in_recovery() THEN NULL ELSE"
         self.assertEqual(node.count(guarded), 8)          # the SYSTEM collectors, not the 3 NODE ones
-        self.assertEqual(database.count(guarded), 5)      # the DATABASE collectors, not PG_INDEX_USAGE
+        self.assertEqual(database.count(guarded), 7)      # the DATABASE collectors, not PG_INDEX_USAGE
         # The guard is what PostgreSQL skips at run time: a failing subquery behind it does not run.
         with self.server.connect("postgres") as conn:
             skipped = conn.execute("SELECT CASE WHEN NOT pg_is_in_recovery() THEN NULL ELSE "

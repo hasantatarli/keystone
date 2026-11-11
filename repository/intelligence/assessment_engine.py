@@ -581,10 +581,14 @@ def load_instance_inventory(conn, target_id):
 
 
 def load_latest_vacuum_analyze_snapshot(conn, target_id):
-    """Latest PG_VACUUM_ANALYZE snapshot per database of the target (one row per table)."""
+    """Latest PG_VACUUM_ANALYZE snapshot per database of the target (one row per table).
+
+    The DATABASE row marks a database as read: one that has no tables any more ends with that
+    collection, not with an older snapshot (lab hc110: dropped test tables were still judged).
+    """
     return conn.execute(
         """
-        SELECT v.snapshot_id, v.target_id, v.captured_at, v.database_name, v.schema_name,
+        SELECT v.snapshot_id, v.target_id, v.captured_at, v.record_type, v.database_name, v.schema_name,
                v.object_name, v.is_partition, v.n_live_tup, v.n_dead_tup, v.n_mod_since_analyze,
                v.n_ins_since_vacuum, v.last_vacuum, v.last_autovacuum, v.last_analyze,
                v.last_autoanalyze, v.vacuum_count, v.autovacuum_count, v.analyze_count,
@@ -715,7 +719,9 @@ def load_latest_index_usage(conn, target_id):
         SELECT u.snapshot_id, u.target_id, t.name AS node_name, u.captured_at, u.record_type,
                u.database_name, u.in_recovery, u.stats_since, u.stats_since_start, u.schema_name,
                u.table_name, u.index_name, u.idx_scan, u.index_size_bytes, u.is_valid, u.is_unique,
-               u.constraint_type, u.being_built, u.extension_owned
+               u.constraint_type, u.being_built, u.extension_owned, u.access_method, u.key_count,
+               u.index_keys, u.index_opclasses, u.index_collations, u.index_expressions,
+               u.index_predicate, u.index_definition
         FROM postgresql.index_usage_snapshot u
         JOIN keystone.target t ON t.target_id = u.target_id
         JOIN (
@@ -734,6 +740,37 @@ def load_latest_index_usage(conn, target_id):
               "captured_at": max(r["captured_at"] for r in rows),
               "nodes": [{"target_id": n["target_id"], "name": n["name"]} for n in nodes]}
     return [marker] + rows
+
+
+def load_latest_per_database(conn, table, target_id, columns):
+    """Latest rows of a DATABASE-scope collector per database, with DATABASE marker rows."""
+    return conn.execute(
+        f"""
+        SELECT s.snapshot_id, s.target_id, s.captured_at, s.record_type, s.database_name, {columns}
+        FROM postgresql.{table} s
+        JOIN (
+            SELECT database_name, max(captured_at) AS captured_at
+            FROM postgresql.{table} WHERE target_id = %s AND record_type = 'DATABASE'
+            GROUP BY database_name
+        ) latest ON latest.database_name = s.database_name AND latest.captured_at = s.captured_at
+        WHERE s.target_id = %s
+        ORDER BY s.database_name, s.record_type, s.snapshot_id
+        """, (target_id, target_id)).fetchall()
+
+
+def load_latest_table_structure(conn, target_id):
+    """Latest PG_TABLE_STRUCTURE per database: foreign keys and unlogged tables."""
+    return load_latest_per_database(
+        conn, "table_structure_snapshot", target_id,
+        "s.schema_name, s.table_name, s.constraint_name, s.key_columns, s.referenced_table, "
+        "s.has_index, s.table_size_bytes, s.extension_owned")
+
+
+def load_latest_extensions(conn, target_id):
+    """Latest PG_EXTENSIONS per database."""
+    return load_latest_per_database(
+        conn, "extension_snapshot", target_id,
+        "s.extension_name, s.installed_version, s.default_version, s.schema_name")
 
 
 def load_latest_schema_privileges(conn, target_id):
@@ -1482,12 +1519,17 @@ def ratio_or_size_severity(percent, count, thresholds, large_limit):
     return None, None
 
 
+def table_rows(rows):
+    """TABLE rows of PG_VACUUM_ANALYZE; DATABASE rows only mark a database as read."""
+    return [r for r in rows if r.get("record_type", "TABLE") == "TABLE"]
+
+
 def evaluate_dead_tuple_pressure(rows, rule, thresholds):
     """PG-MAINT-001: dead rows as a share of all rows, or many dead rows in a large table."""
     minimum = parameter(rule, "min_dead_tuples")
     large = parameter(rule, "large_table_dead_tuples")
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         dead, live = row["n_dead_tup"] or 0, row["n_live_tup"] or 0
         if dead < minimum:
             continue
@@ -1509,7 +1551,7 @@ def evaluate_stale_statistics(rows, rule, thresholds):
     minimum = parameter(rule, "min_modifications")
     large = parameter(rule, "large_table_modifications")
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         modified, live = row["n_mod_since_analyze"] or 0, row["n_live_tup"] or 0
         if modified < minimum:
             continue
@@ -2036,7 +2078,7 @@ def evaluate_never_processed_tables(evidence, rule, thresholds):
     factor = parameter(rule, "overdue_factor")
     base, scale = analyze_trigger_settings(config)
     findings = []
-    for row in rows:
+    for row in table_rows(rows):
         counts = (row.get("vacuum_count"), row["autovacuum_count"], row.get("analyze_count"),
                   row["autoanalyze_count"])
         times = (row["last_vacuum"], row["last_autovacuum"], row["last_analyze"], row["last_autoanalyze"])
@@ -2206,6 +2248,146 @@ def evaluate_diagnostics_disabled(rows, rule, thresholds):
     return findings
 
 
+# ----------------------------------------------------------------------------- P2 object structure (V057)
+
+def primary_index_rows(rows):
+    """INDEX rows of the primary from PG_INDEX_USAGE (definitions are the same on replicas)."""
+    primaries = [r for r in rows if r["record_type"] == "DATABASE" and r["in_recovery"] is False]
+    if not primaries:
+        raise InsufficientEvidence("PG_INDEX_USAGE", "no_primary", "No primary among the collected nodes.")
+    primary = max(primaries, key=lambda r: r["captured_at"])["target_id"]
+    return [r for r in rows if r["record_type"] == "INDEX" and r["target_id"] == primary
+            and r["is_valid"] and not r["being_built"] and not r["extension_owned"]
+            and r.get("index_keys") is not None]
+
+
+def index_shape(r):
+    """(keys, include, opclasses, collations) as tuples; keys of an expression are 0."""
+    columns = tuple(int(x) for x in r["index_keys"].split())
+    count = r["key_count"] if r["key_count"] is not None else len(columns)
+    return (columns[:count], columns[count:], tuple(r["index_opclasses"].split()),
+            tuple(r["index_collations"].split()))
+
+
+def keeps_rule(r):
+    """A unique or constraint index enforces a rule; it is never the one to drop."""
+    return bool(r["is_unique"] or r["constraint_type"])
+
+
+def duplicate_finding(rule, r, other, severity, alt):
+    """Short index names in the sentence; the table carries database and schema."""
+    table = f"{r['database_name']}.{r['schema_name']}.{r['table_name']}"
+    values = {"index": r["index_name"], "table": table, "other": other["index_name"]}
+    if alt:
+        values["_alt"] = True
+    return {"severity": severity, "snapshot_id": r["snapshot_id"], "template_values": values,
+            "observed_value": r["index_size_bytes"], "observed_unit": "BYTE",
+            "subject_type": "INDEX", "subject_identifier": index_name(r),
+            "details": {"database": r["database_name"], "table": f"{r['schema_name']}.{r['table_name']}",
+                        "index": r["index_name"], "other_index": other["index_name"],
+                        "match": "covered" if alt else "same",
+                        "index_size_bytes": r["index_size_bytes"], "definition": r["index_definition"],
+                        "other_definition": other["index_definition"],
+                        "captured_at": iso(r["captured_at"])}}
+
+
+def evaluate_duplicate_indexes(rows, rule, thresholds):
+    """PG-IDX-003: same definition (WARNING), or a btree prefix of a longer btree index (INFO)."""
+    by_table = {}
+    for r in primary_index_rows(rows):
+        by_table.setdefault((r["database_name"], r["schema_name"], r["table_name"]), []).append(r)
+    findings = []
+    for indexes in by_table.values():
+        reported = set()
+        indexes.sort(key=lambda r: (not keeps_rule(r), r["index_name"]))   # kept ones first
+        for i, a in enumerate(indexes):
+            for b in indexes[i + 1:]:
+                same = (a["access_method"] == b["access_method"] and index_shape(a) == index_shape(b)
+                        and a["index_expressions"] == b["index_expressions"]
+                        and a["index_predicate"] == b["index_predicate"])
+                if not same:
+                    continue
+                # Report the one that enforces nothing; with two alike, the later name.
+                extra, kept = (b, a) if not keeps_rule(b) else (a, b)
+                if keeps_rule(extra) or extra["index_name"] in reported:
+                    continue
+                reported.add(extra["index_name"])
+                findings.append(duplicate_finding(rule, extra, kept, rule["default_severity"], False))
+        for a in indexes:
+            if a["index_name"] in reported or keeps_rule(a) or a["access_method"] != "btree":
+                continue
+            if a["index_expressions"] or a["index_predicate"]:
+                continue
+            keys, _, opclasses, collations = index_shape(a)
+            for b in indexes:
+                if b is a or b["access_method"] != "btree" or b["index_expressions"] or b["index_predicate"]:
+                    continue
+                b_keys, _, b_opclasses, b_collations = index_shape(b)
+                if (len(b_keys) > len(keys) and b_keys[:len(keys)] == keys
+                        and b_opclasses[:len(keys)] == opclasses and b_collations[:len(keys)] == collations):
+                    reported.add(a["index_name"])
+                    findings.append(duplicate_finding(rule, a, b, "INFO", True))
+                    break
+    return findings
+
+
+def structure_rows(rows, record_type):
+    return [r for r in rows if r["record_type"] == record_type and not r["extension_owned"]]
+
+
+def evaluate_unindexed_foreign_keys(rows, rule, thresholds):
+    """PG-IDX-004: a foreign key no index starts with, on a table of at least min_table_size."""
+    minimum = parameter(rule, "min_table_size")
+    findings = []
+    for r in structure_rows(rows, "FOREIGN_KEY"):
+        if r["has_index"] or (r["table_size_bytes"] or 0) < minimum:
+            continue
+        table = f"{r['database_name']}.{r['schema_name']}.{r['table_name']}"
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": r["snapshot_id"],
+            "template_values": {"constraint": r["constraint_name"], "table": table,
+                                "columns": r["key_columns"], "referenced": r["referenced_table"]},
+            "observed_value": r["table_size_bytes"], "observed_unit": "BYTE",
+            "subject_type": "CONSTRAINT", "subject_identifier": f"{table}.{r['constraint_name']}",
+            "details": {"database": r["database_name"], "table": f"{r['schema_name']}.{r['table_name']}",
+                        "captured_at": iso(r["captured_at"])}})
+    return findings
+
+
+def evaluate_unlogged_tables(rows, rule, thresholds):
+    """PG-BKP-003: every unlogged table (emptied after a crash, not replicated)."""
+    findings = []
+    for r in structure_rows(rows, "UNLOGGED_TABLE"):
+        table = f"{r['database_name']}.{r['schema_name']}.{r['table_name']}"
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": r["snapshot_id"],
+            "template_values": {"table": table, "size_bytes": r["table_size_bytes"]},
+            "observed_value": r["table_size_bytes"], "observed_unit": "BYTE",
+            "subject_type": "TABLE", "subject_identifier": table,
+            "details": {"database": r["database_name"], "table": f"{r['schema_name']}.{r['table_name']}",
+                        "captured_at": iso(r["captured_at"])}})
+    return findings
+
+
+def evaluate_extension_updates(rows, rule, thresholds):
+    """PG-LIFE-004: installed extension version differs from the package on the server."""
+    findings = []
+    for r in rows:
+        if r["record_type"] != "EXTENSION" or not r["default_version"]:
+            continue
+        if r["installed_version"] == r["default_version"]:
+            continue
+        subject = f"{r['database_name']}.{r['extension_name']}"
+        findings.append({
+            "severity": rule["default_severity"], "snapshot_id": r["snapshot_id"],
+            "template_values": {"extension": r["extension_name"], "database_name": r["database_name"],
+                                "installed": r["installed_version"], "available": r["default_version"]},
+            "observed_value": None, "observed_unit": None,
+            "subject_type": "EXTENSION", "subject_identifier": subject,
+            "details": {"database": r["database_name"], "captured_at": iso(r["captured_at"])}})
+    return findings
+
+
 EVIDENCE_LOADERS = {
     "PG_ACTIVITY_SNAPSHOT": load_latest_activity_snapshot,
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
@@ -2223,6 +2405,8 @@ EVIDENCE_LOADERS = {
     "PG_ROLES": load_latest_roles,
     "PG_SEQUENCE_CAPACITY": load_latest_sequence_capacity,
     "PG_CHECKPOINT_STATS": load_latest_checkpoint_stats,
+    "PG_TABLE_STRUCTURE": load_latest_table_structure,
+    "PG_EXTENSIONS": load_latest_extensions,
 }
 
 # Evaluators contain the rule-specific PostgreSQL engineering logic. All
@@ -2359,6 +2543,10 @@ RULE_EVALUATORS = {
     "PG-HA-003": evaluate_replica_smaller,
     "PG-HA-004": evaluate_mixed_versions,
     "PG-CONF-005": evaluate_diagnostics_disabled,
+    "PG-IDX-003": evaluate_duplicate_indexes,
+    "PG-IDX-004": evaluate_unindexed_foreign_keys,
+    "PG-BKP-003": evaluate_unlogged_tables,
+    "PG-LIFE-004": evaluate_extension_updates,
 }
 
 

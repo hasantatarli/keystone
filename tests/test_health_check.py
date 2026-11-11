@@ -172,7 +172,8 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual([r["assessment_key"] for r in runs],
                          ["PG_BACKUP_HEALTH", "PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH",
                           "PG_CONFIGURATION_TUNING",
-                          "PG_CONNECTION_HEALTH", "PG_INDEX_HEALTH", "PG_MAINTENANCE_HEALTH", "PG_REPLICATION_HEALTH",
+                          "PG_CONNECTION_HEALTH", "PG_INDEX_HEALTH", "PG_LIFECYCLE_HEALTH", "PG_MAINTENANCE_HEALTH",
+                          "PG_REPLICATION_HEALTH",
                           "PG_SECURITY_HEALTH", "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 

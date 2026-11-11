@@ -78,7 +78,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn('<html lang="tr">', page)
         self.assertIn("Veritabanı Sağlık Kontrolü Raporu", page)
         self.assertIn("Dikkat gerektiren sorunlar var.", page)
-        self.assertIn("Ölçülen: <b>20 dakika</b>", page)
+        self.assertIn('<td class="num">20 dakika</td>', page)            # findings table (option B)
         self.assertIn("Eşik: Uyarı ≥ 5 dakika · Kritik ≥ 15 dakika", page)
         self.assertIn("Son gözlenen sorgu", page)
         self.assertIn("Primary", page)
@@ -157,7 +157,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 20 / 27 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 22 / 29 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):
@@ -832,7 +832,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         technical = page[page.index(TECH_PANEL):]
         self.assertIn('<details class="more"><summary>Tümünü göster (15)</summary>', technical)
         shown = technical[:technical.index('<details class="more">')]
-        self.assertEqual(shown.count('class="instance"'), 10)
+        self.assertEqual(shown.count('<tr><td><span class="badge'), 10)
         self.assertIn("extra finding 13", shown)          # largest values first
         self.assertNotIn("extra finding 00", shown)
 
@@ -1161,10 +1161,13 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.execute("UPDATE keystone.finding SET template_values = %s",
                           ('{"pid": 4711, "duration_seconds": "1200.0", "dead_rows": 50000}',))
         self.conn.commit()
-        self.assertIn("4711 numaralı session 1200.0 saniyedir transaction içinde boşta bekliyor.",
-                      self.render(check_id, "tr"))
-        self.assertIn("Session 4711 has been idle in transaction for 1200.0 seconds.",
-                      self.render(check_id, "en"))
+        # The technical part shows such rules as a table; the sentence serves rules without columns.
+        data = report.load_report_data(self.conn, check_id)
+        finding = data["findings"][0]
+        self.assertEqual(report.finding_sentence(finding, data, "tr"),
+                         "4711 numaralı session 1200.0 saniyedir transaction içinde boşta bekliyor.")
+        self.assertEqual(report.finding_sentence(finding, data, "en"),
+                         "Session 4711 has been idle in transaction for 1200.0 seconds.")
         self.assertEqual(report.template_value_text("dead_rows", 50000), "50,000")
 
     def test_finding_without_values_keeps_the_stored_text(self):
@@ -1295,3 +1298,37 @@ for _name in [n for n in dir(test_health_check.HealthCheckTests) if n.startswith
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalculationTextTests(unittest.TestCase):
+    """The product is shown before the limit that decided the value (Hasan 2026-11-11)."""
+
+    def row(self, value, calc, value_type="INTEGER"):
+        return {"recommended_value": value, "value_type": value_type, "calculation": calc}
+
+    def test_upper_limit_after_the_product(self):
+        t = report.TEXTS["tr"]
+        text = report.calc_text(self.row("4", {"method": "cpu_share", "cpus": 36, "share": 0.5,
+                                               "min": 2, "max": 4}), t, {})
+        self.assertEqual(text, "36 CPU × 0.5 = 18 → üst sınır 4 = 4")
+
+    def test_no_limit_needed(self):
+        t = report.TEXTS["en"]
+        text = report.calc_text(self.row("3", {"method": "cpu_share", "cpus": 6, "share": 0.5,
+                                               "min": 2, "max": 4}), t, {})
+        self.assertEqual(text, "6 CPU(s) × 0.5 = 3")
+
+
+class WindowsCommandTests(unittest.TestCase):
+    """No patronictl lines for a Windows server without a sign of Patroni (pilot hc111)."""
+
+    ROWS = [{"status": "DEVIATES", "recommended_value": "4", "value_type": "INTEGER",
+             "setting_key": "max_parallel_workers_per_gather", "restart_required": False, "assumptions": []}]
+
+    def test_patroni_block_only_when_possible(self):
+        t = report.TEXTS["tr"]
+        both = report.command_blocks(self.ROWS, {}, t)
+        windows = report.command_blocks(self.ROWS, {}, t, patroni_possible=False)
+        self.assertTrue(any("patronictl" in text for _, text in both))
+        self.assertFalse(any("patronictl" in text for _, text in windows))
+        self.assertTrue(any("ALTER SYSTEM" in text for _, text in windows))

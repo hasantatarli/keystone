@@ -132,7 +132,7 @@ python -m repository.intelligence.assessment_engine --help
 
 The engine evaluates the evidence already in the repository; it does not collect.
 
-Assessments (2026-11-02): `PG_TRANSACTION_HEALTH`, `PG_REPLICATION_HEALTH`, `PG_CONNECTION_HEALTH`, `PG_CAPACITY_HEALTH`, `PG_CONFIGURATION_HEALTH`, `PG_BACKUP_HEALTH`, `PG_SECURITY_HEALTH`, `PG_MAINTENANCE_HEALTH`, `PG_INDEX_HEALTH`, `PG_CONFIGURATION_TUNING`. Configuration check alone: `python -m repository.healthcheck.health_check --target <id> --assessment PG_CONFIGURATION_TUNING --report tr`. Current list: `SELECT assessment_key FROM keystone.assessment_definition ORDER BY 1;`
+Assessments (2026-11-02): `PG_TRANSACTION_HEALTH`, `PG_REPLICATION_HEALTH`, `PG_CONNECTION_HEALTH`, `PG_CAPACITY_HEALTH`, `PG_CONFIGURATION_HEALTH`, `PG_BACKUP_HEALTH`, `PG_SECURITY_HEALTH`, `PG_MAINTENANCE_HEALTH`, `PG_INDEX_HEALTH`, `PG_CONFIGURATION_TUNING`, `PG_LIFECYCLE_HEALTH` (V057). Configuration check alone: `python -m repository.healthcheck.health_check --target <id> --assessment PG_CONFIGURATION_TUNING --report tr`. Current list: `SELECT assessment_key FROM keystone.assessment_definition ORDER BY 1;`
 
 ---
 
@@ -218,6 +218,7 @@ python -m repository.offline.import_bundle keystone_evidence_20261110-1300.zip -
 python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_app.json --host db-1=db-1_host.txt --report tr
 ```
 
+- Evidence already imported is refused before anything is written (pilot 2026-11-11: a second import of the same archive clashed with its own rows and doubled others). To see an imported check with newer report code, generate its report again: `python -m repository.report.health_check_report --health-check <id> --lang tr`.
 - Several archives in one import become one system (e.g. the collector run on each Windows server over RDP, since host facts over SSH are Linux only): `import_bundle a.zip b.zip --report tr`.
 - Without `--target`: a system seen before (live or offline) is found by its identifier; a server by any name it was reached by before (typed, resolved address, address PostgreSQL reports, connection address; with the port, `keystone.target_identity`); new servers become new nodes. `--name` / `--environment` only name a system created now. The output says what was created.
 

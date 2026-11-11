@@ -1405,3 +1405,100 @@ class DiagnosticsDisabledTests(unittest.TestCase):
         findings = engine.evaluate_diagnostics_disabled(rows, rule("INFO"), [])
         self.assertEqual([(f["subject_identifier"], bool(f["template_values"].get("_alt"))) for f in findings],
                          [("db-1: log_lock_waits", False), ("db-1: shared_preload_libraries", True)])
+
+
+# ----------------------------------------------------------------------------- V057 object structure
+
+def index_def(name, keys, table="orders", unique=False, constraint=None, method="btree", include=(),
+              expressions=None, predicate=None, node=1, opclass="1978"):
+    columns = list(keys) + list(include)
+    return {"snapshot_id": 1, "target_id": node, "node_name": f"db-{node}", "captured_at": NOW,
+            "record_type": "INDEX", "database_name": "app", "schema_name": "public", "table_name": table,
+            "index_name": name, "idx_scan": 0, "index_size_bytes": MB, "is_valid": True,
+            "is_unique": unique, "constraint_type": constraint, "being_built": False,
+            "extension_owned": False, "access_method": method, "key_count": len(keys),
+            "index_keys": " ".join(map(str, columns)), "index_opclasses": " ".join([opclass] * len(keys)),
+            "index_collations": " ".join(["0"] * len(keys)), "index_expressions": expressions,
+            "index_predicate": predicate, "index_definition": f"CREATE INDEX {name} ..."}
+
+
+def index_database_rows(*nodes):
+    return [{"record_type": "DATABASE", "target_id": n, "in_recovery": n != 1, "captured_at": NOW,
+             "database_name": "app"} for n in nodes]
+
+
+class DuplicateIndexTests(unittest.TestCase):
+    """PG-IDX-003."""
+
+    def evaluate(self, *indexes):
+        return engine.evaluate_duplicate_indexes(index_database_rows(1, 2) + list(indexes),
+                                                 rule("WARNING"), [])
+
+    def found(self, findings):
+        return [(f["subject_identifier"], f["severity"], f["template_values"]["other"]) for f in findings]
+
+
+    def test_exact_duplicate_keeps_the_constraint_index(self):
+        findings = self.evaluate(index_def("orders_pkey", [1], unique=True, constraint="p"),
+                                 index_def("orders_id_idx", [1]),
+                                 index_def("orders_id_idx", [1], node=2))     # replica row: ignored
+        self.assertEqual(self.found(findings), [("app.public.orders_id_idx", "WARNING", "orders_pkey")])
+
+    def test_prefix_is_redundant_but_unique_prefix_is_needed(self):
+        findings = self.evaluate(index_def("i_a", [3]), index_def("i_ab", [3, 4]),
+                                 index_def("u_c", [5], unique=True), index_def("i_cd", [5, 6]),
+                                 index_def("i_b", [4]))                       # b is not a prefix of (a, b)
+        self.assertEqual(self.found(findings), [("app.public.i_a", "INFO", "i_ab")])
+
+    def test_different_shapes_are_not_duplicates(self):
+        findings = self.evaluate(index_def("i_a", [3]), index_def("i_a_hash", [3], method="hash"),
+                                 index_def("i_a_part", [3], predicate="(a > 0)"),
+                                 index_def("i_a_inc", [3], include=[4]),
+                                 index_def("i_a_ops", [3], opclass="3128"))
+        self.assertEqual(findings, [])
+
+
+def structure_row(record_type, table, **values):
+    row = {"snapshot_id": 1, "target_id": 0, "captured_at": NOW, "record_type": record_type,
+           "database_name": "app", "schema_name": "public", "table_name": table, "constraint_name": None,
+           "key_columns": None, "referenced_table": None, "has_index": None, "table_size_bytes": 0,
+           "extension_owned": False}
+    row.update(values)
+    return row
+
+
+class TableStructureTests(unittest.TestCase):
+    """PG-IDX-004 and PG-BKP-003."""
+
+    def test_unindexed_foreign_keys_on_large_tables(self):
+        rows = [structure_row("DATABASE", None),
+                structure_row("FOREIGN_KEY", "big", constraint_name="big_fk", key_columns="parent_id",
+                              referenced_table="public.parent", has_index=False, table_size_bytes=50 * MB),
+                structure_row("FOREIGN_KEY", "small", constraint_name="small_fk", has_index=False,
+                              table_size_bytes=MB),
+                structure_row("FOREIGN_KEY", "covered", constraint_name="cov_fk", has_index=True,
+                              table_size_bytes=50 * MB),
+                structure_row("FOREIGN_KEY", "ext", constraint_name="ext_fk", has_index=False,
+                              table_size_bytes=50 * MB, extension_owned=True)]
+        findings = engine.evaluate_unindexed_foreign_keys(rows, with_params("WARNING", min_table_size=10 * MB), [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["app.public.big.big_fk"])
+        self.assertEqual(findings[0]["template_values"]["referenced"], "public.parent")
+
+    def test_unlogged_tables(self):
+        rows = [structure_row("DATABASE", None), structure_row("UNLOGGED_TABLE", "cache", table_size_bytes=8192)]
+        findings = engine.evaluate_unlogged_tables(rows, rule("WARNING"), [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["app.public.cache"])
+
+
+class ExtensionUpdateTests(unittest.TestCase):
+    """PG-LIFE-004."""
+
+    def test_installed_differs_from_package(self):
+        rows = [{"snapshot_id": 1, "target_id": 0, "captured_at": NOW, "record_type": "EXTENSION",
+                 "database_name": "app", "extension_name": name, "installed_version": installed,
+                 "default_version": available}
+                for name, installed, available in (("pg_stat_statements", "1.10", "1.11"),
+                                                   ("plpgsql", "1.0", "1.0"), ("gone", "2.0", None))]
+        findings = engine.evaluate_extension_updates(rows, rule("INFO"), [])
+        self.assertEqual([(f["subject_identifier"], f["template_values"]["available"]) for f in findings],
+                         [("app.pg_stat_statements", "1.11")])

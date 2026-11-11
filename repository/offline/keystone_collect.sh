@@ -91,6 +91,12 @@ for HOST in $(echo "$HOSTS" | tr ',' ' '); do
 done
 
 unset PGPASSWORD
+# Nothing is sent when no server could be read: say so instead of "done".
+if ! ls "$OUT"/*_node.json >/dev/null 2>&1; then
+    echo >&2
+    echo "Hicbir sunucudan veri toplanamadi. Yukaridaki hata mesajlarini Keystone'a iletin." >&2
+    exit 1
+fi
 ARCHIVE="$OUT.tar.gz"
 tar -czf "$ARCHIVE" -C "$(dirname "$OUT")" "$(basename "$OUT")"
 echo

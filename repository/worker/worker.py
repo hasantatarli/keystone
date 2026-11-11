@@ -1208,9 +1208,9 @@ def save_table_capacity_snapshot(conn, task, rows):
         cur.executemany(sql, params)
         
 def save_vacuum_analyze_snapshot(conn, task, rows):
-    """Persist PG_VACUUM_ANALYZE rows."""
-    if not rows:
-        return
+    """Persist PG_VACUUM_ANALYZE: a DATABASE row per collected database, a TABLE row per table."""
+    if not any(r.get("record_type") == "DATABASE" for r in rows):
+        raise RuntimeError("PG_VACUUM_ANALYZE returned no DATABASE rows.")
 
     captured_at_values = {
         row["captured_at"]
@@ -1227,6 +1227,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
         (
             target_id,
             captured_at,
+            record_type,
 
             database_oid,
             database_name,
@@ -1255,6 +1256,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
         (
             %(target_id)s,
             %(captured_at)s,
+            %(record_type)s,
 
             %(database_oid)s,
             %(database_name)s,
@@ -1288,6 +1290,7 @@ def save_vacuum_analyze_snapshot(conn, task, rows):
             {
                 "target_id": task["target_id"],
                 "captured_at": row["captured_at"],
+                "record_type": row["record_type"],
 
                 "database_oid": row["database_oid"],
                 "database_name": row["database_name"],
@@ -2223,7 +2226,9 @@ def insert_rows(conn, table, task, rows, columns, casts=None):
 
 INDEX_USAGE_COLUMNS = ("record_type", "database_name", "in_recovery", "stats_since", "stats_since_start",
                        "schema_name", "table_name", "index_name", "idx_scan", "index_size_bytes",
-                       "is_valid", "is_unique", "constraint_type", "being_built", "extension_owned")
+                       "is_valid", "is_unique", "constraint_type", "being_built", "extension_owned",
+                       "access_method", "key_count", "index_keys", "index_opclasses", "index_collations",
+                       "index_expressions", "index_predicate", "index_definition")
 
 
 def save_index_usage_snapshot(conn, task, rows):
@@ -2261,6 +2266,24 @@ def save_sequence_capacity_snapshot(conn, task, rows):
                  "table_name", "column_name", "column_type"))
 
 
+def save_table_structure_snapshot(conn, task, rows):
+    """Persist PG_TABLE_STRUCTURE: a DATABASE row per collected database, FOREIGN_KEY and UNLOGGED_TABLE rows."""
+    if not any(r["record_type"] == "DATABASE" for r in rows):
+        raise RuntimeError("PG_TABLE_STRUCTURE returned no DATABASE rows.")
+    insert_rows(conn, "table_structure_snapshot", task, rows,
+                ("record_type", "database_name", "schema_name", "table_name", "constraint_name",
+                 "key_columns", "referenced_table", "has_index", "table_size_bytes", "extension_owned"))
+
+
+def save_extension_snapshot(conn, task, rows):
+    """Persist PG_EXTENSIONS: a DATABASE row per collected database, an EXTENSION row per extension."""
+    if not any(r["record_type"] == "DATABASE" for r in rows):
+        raise RuntimeError("PG_EXTENSIONS returned no DATABASE rows.")
+    insert_rows(conn, "extension_snapshot", task, rows,
+                ("record_type", "database_name", "extension_name", "installed_version",
+                 "default_version", "schema_name"))
+
+
 COLLECTOR_HANDLERS = {
     "PG_INSTANCE_INVENTORY": save_instance_inventory,
     "PG_CONFIGURATION_SNAPSHOT": save_configuration_snapshot,
@@ -2280,6 +2303,8 @@ COLLECTOR_HANDLERS = {
     "PG_SCHEMA_PRIVILEGES": save_schema_privileges_snapshot,
     "PG_ROLES": save_roles_snapshot,
     "PG_SEQUENCE_CAPACITY": save_sequence_capacity_snapshot,
+    "PG_TABLE_STRUCTURE": save_table_structure_snapshot,
+    "PG_EXTENSIONS": save_extension_snapshot,
 }
 
 def persist_collector_result(conn, task, rows):

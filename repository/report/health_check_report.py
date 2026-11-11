@@ -18,6 +18,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import html
 import json
+import math
 from pathlib import Path
 import re
 
@@ -100,6 +101,7 @@ TEXTS = {
         "config_block_patroni": "Patroni (DCS'teki ayarlar; reload Patroni tarafından yapılır)",
         "config_block_patroni_restart": "Patroni: restart bekleyen sunucuları yeniden başlatır",
         "config_block_unknown": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Patroni kullanılıyorsa ALTER SYSTEM kullanmayın: ayar DCS'ten sapar. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'PATRONI' (ya da 'NONE').",
+        "config_block_unknown_plain": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'NONE'.",
         "config_patroni_seen": "Bu kontrolde Patroni oturumları görüldü.",
         "config_patroni_config": "Cluster adı PostgreSQL'in cluster_name ayarından alındı; Patroni scope'u farklıysa değiştirin. patronictl yapılandırma dosyasını varsayılan yerde bulamazsa -c <dosya> ekleyin (örneğin -c /etc/patroni/config.yml). Bir sunucunun yerel Patroni yapılandırmasında (postgresql.parameters) tanımlı ayar DCS'teki değeri ezer: uyguladıktan sonra her sunucuda SHOW <ayar> ile doğrulayın; değer değişmediyse ayarı yerel dosyadan kaldırın ve patronictl reload çalıştırın.",
         "config_assumed_cmd": "varsayım: {items}; profili doğrulayınca kullanın",
@@ -107,6 +109,7 @@ TEXTS = {
         "config_restart_list": "Restart sonrası etkin olur: {names}",
         "config_connections": "bağlantı",
         "config_calc_min": "en az", "config_calc_max": "en fazla",
+        "config_calc_lower": "alt sınır", "config_calc_upper": "üst sınır",
         "config_calc_cap": "veri diskinin %{share} sınırına indirildi",
         "config_not_assessed": "{n} ayar değerlendirilemedi",
         "config_calc_checkpoints": "Son sıfırlamadan beri {total} checkpoint'ten {requested} tanesi (%{share}) WAL dolduğu için yapıldı; mevcut değer {current} × {factor} = {result}",
@@ -199,7 +202,16 @@ TEXTS = {
         "detail_schema": "Schema", "detail_schema_owner": "Schema sahibi", "detail_role": "Rol",
         "detail_valid_until": "Geçerlilik sonu",
         "detail_wait_event": "Beklediği", "detail_query_start": "Sorgu başlangıcı",
-        "detail_started_at": "Başlama zamanı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
+        "detail_started_at": "Başlama zamanı", "detail_definition": "Tanım",
+        "col_severity": "Önem", "col_finding": "Bulgu", "col_pid": "PID", "col_duration": "Süre",
+        "col_xid_age": "XID yaşı", "col_mxid_age": "MultiXact yaşı", "col_freeze_max_age": "autovacuum_freeze_max_age",
+        "col_share": "Oran", "col_match": "Durum", "col_other_index": "Diğer index",
+        "col_foreign_key": "Foreign key", "col_columns": "Kolonlar", "col_referenced": "Referans",
+        "col_table_size": "Tablo boyutu", "col_usage": "Kullanım", "col_extension": "Extension",
+        "col_installed": "Kurulu sürüm", "col_available": "Paket sürümü",
+        "match_same": "Aynı tanım", "match_covered": "Kapsanıyor", "col_since": "Ne kadar önce",
+        "empty_value": "(boş)",
+        "detail_other_definition": "Diğer index'in tanımı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
         "inv_failover": "Son failover", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
         "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat",
@@ -288,6 +300,7 @@ TEXTS = {
         "config_block_patroni": "Patroni (settings in the DCS; Patroni reloads)",
         "config_block_patroni_restart": "Patroni: restarts the servers with a pending restart",
         "config_block_unknown": "The management type is not given in the profile, so the commands are written as comments. With Patroni do not use ALTER SYSTEM: the setting drifts from the DCS. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'PATRONI' (or 'NONE').",
+        "config_block_unknown_plain": "The management type is not given in the profile, so the commands are written as comments. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'NONE'.",
         "config_patroni_seen": "Patroni sessions were seen in this check.",
         "config_patroni_config": "The cluster name comes from PostgreSQL's cluster_name; change it if the Patroni scope differs. If patronictl does not find its configuration file, add -c <file> (for example -c /etc/patroni/config.yml). A setting in a server's local Patroni configuration (postgresql.parameters) overrides the DCS: after applying, check SHOW <setting> on every server; if the value did not change, remove the setting from the local file and run patronictl reload.",
         "config_assumed_cmd": "assumed: {items}; use after confirming the profile",
@@ -295,6 +308,7 @@ TEXTS = {
         "config_restart_list": "Take effect after a restart: {names}",
         "config_connections": "connections",
         "config_calc_min": "at least", "config_calc_max": "at most",
+        "config_calc_lower": "lower limit", "config_calc_upper": "upper limit",
         "config_calc_cap": "capped at {share}% of the data disk",
         "config_not_assessed": "{n} setting(s) not assessed",
         "config_calc_checkpoints": "{requested} of {total} checkpoints since the statistics reset ({share}%) were requested because WAL filled up; current value {current} × {factor} = {result}",
@@ -386,7 +400,16 @@ TEXTS = {
         "detail_schema": "Schema", "detail_schema_owner": "Schema owner", "detail_role": "Role",
         "detail_valid_until": "Valid until",
         "detail_wait_event": "Waiting for", "detail_query_start": "Statement start",
-        "detail_started_at": "Started at", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
+        "detail_started_at": "Started at", "detail_definition": "Definition",
+        "col_severity": "Severity", "col_finding": "Finding", "col_pid": "PID", "col_duration": "Duration",
+        "col_xid_age": "XID age", "col_mxid_age": "MultiXact age", "col_freeze_max_age": "autovacuum_freeze_max_age",
+        "col_share": "Share", "col_match": "Match", "col_other_index": "Other index",
+        "col_foreign_key": "Foreign key", "col_columns": "Columns", "col_referenced": "References",
+        "col_table_size": "Table size", "col_usage": "Usage", "col_extension": "Extension",
+        "col_installed": "Installed", "col_available": "Package",
+        "match_same": "Same definition", "match_covered": "Covered", "col_since": "How long ago",
+        "empty_value": "(empty)",
+        "detail_other_definition": "Other index's definition", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
         "inv_failover": "Last failover", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
         "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times",
@@ -1012,6 +1035,8 @@ td.num,th.num{text-align:right;white-space:nowrap}
 .card dd{margin:0}
 .items{margin:0;padding-left:18px}.items li{margin:1px 0}
 .more summary{cursor:pointer;color:var(--accent);font-size:14px;margin-top:8px}
+.ftable{font-size:13.5px;margin:12px 0 4px}.ftable th{font-size:12.5px}
+.ftable code{font:12px Consolas,monospace;color:var(--muted);white-space:pre-wrap;word-break:break-word}
 .instance{background:var(--soft);border-radius:4px;padding:8px 10px;margin-top:8px;font-size:14px}
 .instance code{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .facts{color:var(--muted);font-size:13px;margin-top:4px}
@@ -1590,7 +1615,8 @@ DETAIL_LABELS = (("node", "detail_node"), ("table", "detail_table"), ("live_rows
                  ("data_type", "detail_data_type"), ("column_type", "detail_column_type"),
                  ("last_value", "detail_last_value"), ("limit", "detail_limit"),
                  ("limit_source", "detail_limit_source"), ("wait_event", "detail_wait_event"),
-                 ("analyze_trigger", "detail_analyze_trigger"))
+                 ("analyze_trigger", "detail_analyze_trigger"), ("definition", "detail_definition"),
+                 ("other_definition", "detail_other_definition"))
 
 
 TIME_LABELS = (("transaction_start", "detail_transaction_start"),
@@ -1636,7 +1662,7 @@ COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connection
                 "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds"}
-SIZE_VALUES = {"index_size"}
+SIZE_VALUES = {"index_size", "size_bytes"}
 
 
 def template_value_text(key, value, t=None):
@@ -1665,58 +1691,172 @@ def finding_sentence(f, data, lang):
         return f["finding_text"]
 
 
-def render_instance(f, data, lang, t):
-    """One finding: technical text, measured value, subject and context (who / where)."""
-    facts = []
-    if f["observed_value"] is not None:
-        facts.append(f"{e(t['observed'])}: <b>{e(fmt_observed(f['observed_value'], f['observed_unit'], t))}</b>")
-    if f["subject_identifier"]:
-        facts.append(f"{e(t['subject'])}: {e(f['subject_type'] or '')} {e(f['subject_identifier'])}")
+# Findings shown open per rule; the rest stays in the report behind "show all".
+FINDINGS_SHOWN = 10
+
+
+# ----------------------------------------------------------------------------- findings as tables
+
+def finding_fields(f, t):
+    """A finding's values for table cells: readable details, template values, the measured value."""
     details = dict(f["details"] or {})
+    for key, value in details.items():           # 5000.0 connections are 5000 (pilot hc111)
+        if isinstance(value, float) and value.is_integer():
+            details[key] = int(value)
     if details.get("setting_unit") and details.get("value") is not None:
         details["value"] = setting_value_text(details["value"], details["setting_unit"], t)
     if details.get("never_analyzed"):
         details["analyze_status"] = t["never_analyzed"]
-    for key in ("apply_delay", "beyond_delay"):
-        if details.get(key + "_seconds") is not None:
-            details[key] = fmt_duration(float(details[key + "_seconds"]), t)
-    if details.get("trigger") == "large_table":
-        details["trigger"] = t["trigger_large_table"]
-    else:
-        details.pop("trigger", None)
-    for key in ("live_rows", "dead_rows", "modified_rows", "analyze_trigger"):
-        if isinstance(details.get(key), (int, float)):
-            details[key] = f"{details[key]:,}"
-    for key in ("last_value", "limit"):
-        if isinstance(details.get(key), int):
+    for key in ("live_rows", "dead_rows", "modified_rows", "analyze_trigger", "last_value", "limit"):
+        if isinstance(details.get(key), (int, float)) and not isinstance(details.get(key), bool):
             details[key] = f"{details[key]:,}"
     if details.get("limit_source"):
         details["limit_source"] = t.get("limit_source_" + details["limit_source"], details["limit_source"])
     if details.get("index_size_bytes") is not None:
         details["index_size"] = fmt_bytes(details["index_size_bytes"])
-    if details.get("wal_behind_bytes") is not None:
-        details["wal_behind"] = fmt_bytes(details["wal_behind_bytes"])
-    if details.get("total_bytes"):
-        details["usage"] = fmt_used_of(details.get("used_bytes") or 0, details["total_bytes"])
+    if details.get("match"):
+        details["match"] = t["match_" + details["match"]]
     if details.get("client_hostname"):
         details["client_addr"] = " ".join(
             x for x in (details.get("client_addr"), f"({details['client_hostname']})") if x)
-    context = [f"{e(t[label])}: <b>{e(details[key])}</b>" for key, label in DETAIL_LABELS
-               if details.get(key)]
-    times = [f"{e(t[label])}: {e(fmt_clock(details[key]))}" for key, label in TIME_LABELS
-             if details.get(key)]
-    query = (f'<div class="facts">{e(t["detail_last_query"])}: '
-             f'<code>{e(details["last_query"])}</code></div>' if details.get("last_query") else "")
-    return (f'<div class="instance">{badge(f["severity"], t["severity"].get(f["severity"], f["severity"]))} '
-            f"{e(finding_sentence(f, data, lang))}"
-            + (f'<div class="facts">{" · ".join(facts)}</div>' if facts else "")
-            + (f'<div class="facts">{" · ".join(context)}</div>' if context else "")
-            + (f'<div class="facts">{" · ".join(times)}</div>' if times else "")
-            + query + "</div>")
+    for key in ("valid_until", "query_start", "started_at", "transaction_start"):
+        if details.get(key):
+            details[key] = fmt_clock(details[key])
+    values = {k: template_value_text(k, v, t) for k, v in (f.get("template_values") or {}).items()
+              if not k.startswith("_")}
+    fields = {**values, **details}
+    if f["observed_value"] is not None:
+        fields["observed"] = fmt_observed(f["observed_value"], f["observed_unit"], t)
+    return fields
 
 
-# Findings shown open per rule; the rest stays in the report behind "show all".
-FINDINGS_SHOWN = 10
+def index_cell(name, definition):
+    """'ks_child_a' over 'btree (a)' from pg_get_indexdef."""
+    short = re.sub(r"^CREATE (UNIQUE )?INDEX \S+ ON \S+ USING ", "", definition or "")
+    return e(name) + (f"<br><code>{e(short)}</code>" if short else "")
+
+
+# Columns per rule (option B, Hasan 2026-11-10): (field, label key in TEXTS). Rules not listed here
+# show the finding sentence with the details that are present.
+SESSION_COLUMNS = [("pid", "col_pid"), ("observed", "col_duration"), ("database", "detail_database"),
+                   ("user", "detail_user"), ("application", "detail_application"),
+                   ("client_addr", "detail_client")]
+SETTING_COLUMNS = [("node", "detail_node"), ("setting", "detail_setting"), ("value", "detail_value"),
+                   ("setting_source", "detail_setting_source")]
+FINDING_COLUMNS = {
+    "PG-TRAN-001": SESSION_COLUMNS + [("last_query", "detail_last_query")],
+    "PG-TRAN-003": SESSION_COLUMNS + [("state", "detail_state"), ("last_query", "detail_last_query")],
+    "PG-TRAN-007": SESSION_COLUMNS + [("wait_event", "detail_wait_event"), ("last_query", "detail_last_query")],
+    "PG-TRAN-002": [("database_name", "detail_database"), ("observed", "col_xid_age")],
+    "PG-TRAN-004": [("database_name", "detail_database"), ("observed", "col_mxid_age")],
+    "PG-TRAN-006": [("database_name", "detail_database"), ("xid_age", "col_xid_age"),
+                    ("freeze_max_age", "col_freeze_max_age"), ("observed", "col_share")],
+    "PG-MAINT-001": [("database", "detail_database"), ("table", "detail_table"), ("live_rows", "detail_live_rows"),
+                     ("dead_rows", "detail_dead_rows"), ("observed", "col_share")],
+    "PG-MAINT-002": [("database", "detail_database"), ("table", "detail_table"), ("live_rows", "detail_live_rows"),
+                     ("modified_rows", "detail_modified_rows"), ("observed", "col_share"),
+                     ("analyze_status", "detail_analyze_status")],
+    "PG-MAINT-003": [("database", "detail_database"), ("table", "detail_table"), ("live_rows", "detail_live_rows"),
+                     ("modified_rows", "detail_modified_rows"), ("analyze_trigger", "detail_analyze_trigger")],
+    "PG-IDX-001": [("database", "detail_database"), ("table", "detail_table"), ("index", "detail_index"),
+                   ("index_size", "detail_index_size"), ("nodes_checked", "detail_nodes_checked")],
+    "PG-IDX-002": [("database", "detail_database"), ("table", "detail_table"), ("index", "detail_index"),
+                   ("index_size", "detail_index_size")],
+    "PG-IDX-003": [("database", "detail_database"), ("table", "detail_table"), ("index_def", "detail_index"),
+                   ("match", "col_match"), ("other_def", "col_other_index"), ("index_size", "detail_index_size")],
+    "PG-IDX-004": [("database", "detail_database"), ("table", "detail_table"), ("constraint", "col_foreign_key"),
+                   ("columns", "col_columns"), ("referenced", "col_referenced"), ("observed", "col_table_size")],
+    "PG-BKP-003": [("database", "detail_database"), ("table", "detail_table"), ("observed", "col_table_size")],
+    "PG-CAP-002": [("sequence", "detail_sequence"), ("column", "detail_column"), ("observed", "col_usage"),
+                   ("last_value", "detail_last_value"), ("limit", "detail_limit"),
+                   ("limit_source", "detail_limit_source")],
+    "PG-SEC-001": [("role", "detail_role"), ("valid_until", "detail_valid_until")],
+    "PG-SEC-004": [("database", "detail_database"), ("schema", "detail_schema"),
+                   ("schema_owner", "detail_schema_owner")],
+    "PG-HA-002": [("node_name", "detail_node"), ("started_at", "detail_started_at"), ("observed", "col_since")],
+    "PG-LIFE-004": [("database_name", "detail_database"), ("extension", "col_extension"),
+                    ("installed", "col_installed"), ("available", "col_available")],
+    **{key: SETTING_COLUMNS for key in ("PG-CONF-001", "PG-CONF-002", "PG-CONF-004", "PG-CONF-005",
+                                        "PG-SEC-002", "PG-SEC-003", "PG-BKP-002")},
+}
+CODE_FIELDS = {"last_query"}
+RIGHT_FIELDS = {"observed", "live_rows", "dead_rows", "modified_rows", "analyze_trigger", "index_size",
+                "last_value", "limit", "xid_age", "freeze_max_age", "pid"}
+# Settings whose value is empty say so; an empty cell elsewhere means nothing was observed.
+EMPTY_SHOWN = {"value"}
+
+
+def generic_columns(fields_list):
+    """Sentence, measured value, then the details present in any finding (option A)."""
+    columns = [("sentence", "col_finding")]
+    if any("observed" in f for f in fields_list):
+        columns.append(("observed", "observed"))
+    columns += [(key, label) for key, label in DETAIL_LABELS
+                if key not in ("definition", "other_definition") and any(f.get(key) for f in fields_list)]
+    columns += [(key, label) for key, label in TIME_LABELS
+                if key != "captured_at" and any(f.get(key) for f in fields_list)]
+    if any(f.get("last_query") for f in fields_list):
+        columns.append(("last_query", "detail_last_query"))
+    return columns
+
+
+def cell(key, fields):
+    if key == "index_def":
+        return index_cell(fields.get("index"), fields.get("definition"))
+    if key == "other_def":
+        return index_cell(fields.get("other_index"), fields.get("other_definition"))
+    value = fields.get(key)
+    if value == "" and key in EMPTY_SHOWN:
+        return f'<span class="note">{e(fields.get("_empty") or "")}</span>'
+    if value in (None, ""):
+        return ""
+    return f"<code>{e(value)}</code>" if key in CODE_FIELDS else e(value)
+
+
+def findings_table(result, findings, data, lang, t):
+    """The findings of one rule as one table; the evidence time below it when it is the same for all."""
+    fields_list = []
+    for f in findings:
+        fields = finding_fields(f, t)
+        fields["sentence"] = finding_sentence(f, data, lang)
+        fields["_severity"] = f["severity"]
+        fields["_empty"] = t["empty_value"]
+        fields_list.append(fields)
+    # Findings stored before their rule had structured values (or by hand) keep the sentence.
+    structured = all(f.get("details") and f.get("template_values") for f in findings)
+    columns = (FINDING_COLUMNS.get(result["rule_key"]) if structured else None) or generic_columns(fields_list)
+    # A column nobody has a value for (query texts of offline evidence, say) is left out.
+    columns = [(key, label) for key, label in columns
+               if key in ("index_def", "other_def") or key in EMPTY_SHOWN
+               or any(fl.get(key) not in (None, "") for fl in fields_list)]
+    times = {f.get("captured_at") for f in fields_list}
+    same_time = len(times) == 1
+    if not same_time:
+        columns = columns + [("captured_at", "detail_captured_at")]
+    head = (f'<th>{e(t["col_severity"])}</th>'
+            + "".join(f'<th class="num">{e(t[label])}</th>' if key in RIGHT_FIELDS
+                      else f"<th>{e(t[label])}</th>" for key, label in columns))
+
+    def rows(items):
+        out = []
+        for fields in items:
+            severity = fields["_severity"]
+            cells = "".join(
+                f'<td class="num">{cell(key, fields)}</td>' if key in RIGHT_FIELDS
+                else f"<td>{e(fmt_clock(fields[key])) if key == 'captured_at' and fields.get(key) else cell(key, fields)}</td>"
+                for key, _ in columns)
+            out.append(f"<tr><td>{badge(severity, t['severity'].get(severity, severity))}</td>{cells}</tr>")
+        return "".join(out)
+
+    shown, rest = fields_list[:FINDINGS_SHOWN], fields_list[FINDINGS_SHOWN:]
+    table = lambda items: f'<table class="ftable"><thead><tr>{head}</tr></thead><tbody>{rows(items)}</tbody></table>'
+    html_out = table(shown)
+    if rest:
+        html_out += (f'<details class="more"><summary>{e(t["show_all"].format(n=len(fields_list)))}</summary>'
+                     + table(rest) + "</details>")
+    if same_time and next(iter(times)):
+        html_out += f'<div class="facts">{e(t["detail_captured_at"])}: {e(fmt_clock(next(iter(times))))}</div>'
+    return html_out
 
 
 def parameter_line(result, t):
@@ -1752,9 +1892,6 @@ def render_findings_detail(data, lang, t):
                                                    -float(f["observed_value"] or 0)))
         worst = findings[0]["severity"]
         rid = result["rule_id"]
-        shown, rest = findings[:FINDINGS_SHOWN], findings[FINDINGS_SHOWN:]
-        more = (f'<details class="more"><summary>{e(t["show_all"].format(n=len(findings)))}</summary>'
-                + "".join(render_instance(f, data, lang, t) for f in rest) + "</details>") if rest else ""
         facts = [x for x in (threshold_line(result, t), parameter_line(result, t),
                              unassessed_line(result, t)) if x]
         cards.append(
@@ -1765,7 +1902,7 @@ def render_findings_detail(data, lang, t):
             + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + "".join(render_instance(f, data, lang, t) for f in shown) + more + "</details>")
+            + "</dl>" + findings_table(result, findings, data, lang, t) + "</details>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 
@@ -1857,18 +1994,29 @@ def calc_text(row, t, profile):
     method = c.get("method")
     half = " × ½" if c.get("dedicated_share", 1) == 0.5 else (
         f" × {c['dedicated_share']:g}" if c.get("dedicated_share", 1) != 1 else "")
-    limits = ""
     rec = config_number(row["recommended_value"])
+    # When a lower or upper limit decided the value, the product is shown first, then the limit:
+    # '36 CPU × 0.5 = 18 → upper limit 4 = 4' (Hasan 2026-11-11: '36 × 0.5 = 4' read as wrong).
+    bound = None
     if c.get("min") is not None and rec == c["min"]:
-        limits = f" ({t['config_calc_min']} {config_value(str(c['min']), vt, t)})"
+        bound = (t["config_calc_lower"], c["min"])
     elif c.get("max") is not None and rec == c["max"]:
-        limits = f" ({t['config_calc_max']} {config_value(str(c['max']), vt, t)})"
+        bound = (t["config_calc_upper"], c["max"])
+
+    def ends(raw, show):
+        if bound is None or raw is None or abs(raw - rec) < 1:
+            return f" = {result}"
+        return f" = {show(raw)} → {bound[0]} {config_value(str(bound[1]), vt, t)} = {result}"
+
     if method == "memory_share":
         share = t["percent"].format(n=f"{c['share'] * 100:g}")
-        return f"{pg(c['memory'])}{half} × {share} = {result}{limits}"
+        raw = c["memory"] * c.get("dedicated_share", 1) * c["share"]
+        return f"{pg(c['memory'])}{half} × {share}" + ends(raw, pg)
     if method == "work_mem":
+        raw = ((c["memory"] * c.get("dedicated_share", 1) - c["shared_buffers"])
+               / (c["max_connections"] * c["factor"]))
         return (f"({pg(c['memory'])}{half} − shared_buffers {pg(c['shared_buffers'])}) / "
-                f"({c['max_connections']:g} {t['config_connections']} × {c['factor']:g}) = {result}{limits}")
+                f"({c['max_connections']:g} {t['config_connections']} × {c['factor']:g})" + ends(raw, pg))
     if method == "max_wal_size":
         workload = t["profile_values"].get(profile.get("workload_type", {}).get("value"), "")
         text = f"{t['profile_workload_type']} {workload}: {pg(c['value'])}"
@@ -1887,7 +2035,8 @@ def calc_text(row, t, profile):
     if method == "share_of":
         return f"{c['of']} {pg(c['base'])} × {c['share']:g} = {result}"
     if method == "cpu_share":
-        return f"{t['config_cpus'].format(n=c['cpus'])} × {c['share']:g} = {result}{limits}"
+        raw = math.ceil(c["cpus"] * c["share"])
+        return f"{t['config_cpus'].format(n=c['cpus'])} × {c['share']:g}" + ends(raw, lambda v: f"{v:g}")
     return ""
 
 
@@ -1970,7 +2119,7 @@ def config_row(row, data, lang, t, profile):
             e(acceptable) or "—", config_why(row, data, lang, t, profile)]
 
 
-def command_blocks(rows, profile, t, cluster=None):
+def command_blocks(rows, profile, t, cluster=None, patroni_possible=True):
     """[(title, text)] of commands for the settings to change (review 2026-11-09).
 
     Reload and restart apart; ALTER SYSTEM or patronictl by the profile's cluster_manager, both
@@ -2005,7 +2154,7 @@ def command_blocks(rows, profile, t, cluster=None):
         restart = [sql_line(k, v, n) for k, v, restart, n in changes if restart]
         if restart:
             blocks.append((t["config_block_restart"], "\n".join(restart + [f"-- {t['config_restart_hint']}"])))
-    if manager in (None, "PATRONI"):
+    if manager == "PATRONI" or (manager is None and patroni_possible):
         # patronictl restart needs the cluster name (Patroni 4.1, lab 2026-11-09); Patroni sets cluster_name.
         name = f" {cluster or '<cluster>'}"
         direct = [(k, v) for k, v, _, n in changes if not n]
@@ -2026,13 +2175,17 @@ def command_blocks(rows, profile, t, cluster=None):
 
 def config_commands(data, rows, t):
     profile = data["check"].get("target_profile") or {}
-    blocks = command_blocks(rows, profile, t, data.get("cluster_name"))
+    # Windows without a sign of Patroni: patronictl lines would only confuse (pilot hc111, 2026-11-11).
+    windows = any("windows" in (n.get("os_name") or "").lower() for n in data["nodes"])
+    patroni_possible = not windows or bool(data.get("patroni_seen"))
+    blocks = command_blocks(rows, profile, t, data.get("cluster_name"), patroni_possible=patroni_possible)
     if not blocks:
         return ""
     parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
     if (profile.get("cluster_manager") or {}).get("value") is None:
         hint = f" {t['config_patroni_seen']}" if data.get("patroni_seen") else ""
-        parts.append(f'<p class="note">{e(t["config_block_unknown"] + hint)}</p>')
+        note = t["config_block_unknown"] if patroni_possible else t["config_block_unknown_plain"]
+        parts.append(f'<p class="note">{e(note + hint)}</p>')
     for title, text in blocks:
         parts.append(f'<div class="facts">{e(title)}:</div><div class="cmd">{e(text)}</div>')
     if any("patronictl" in text for _, text in blocks):
