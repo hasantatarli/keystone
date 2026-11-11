@@ -101,6 +101,7 @@ TEXTS = {
         "config_block_patroni": "Patroni (DCS'teki ayarlar; reload Patroni tarafından yapılır)",
         "config_block_patroni_restart": "Patroni: restart bekleyen sunucuları yeniden başlatır",
         "config_block_unknown": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Patroni kullanılıyorsa ALTER SYSTEM kullanmayın: ayar DCS'ten sapar. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'PATRONI' (ya da 'NONE').",
+        "config_block_unknown_plain": "Yönetim türü profilde girilmediği için komutlar yorum satırı olarak yazıldı. Profilde belirtin: UPDATE keystone.target SET cluster_manager = 'NONE'.",
         "config_patroni_seen": "Bu kontrolde Patroni oturumları görüldü.",
         "config_patroni_config": "Cluster adı PostgreSQL'in cluster_name ayarından alındı; Patroni scope'u farklıysa değiştirin. patronictl yapılandırma dosyasını varsayılan yerde bulamazsa -c <dosya> ekleyin (örneğin -c /etc/patroni/config.yml). Bir sunucunun yerel Patroni yapılandırmasında (postgresql.parameters) tanımlı ayar DCS'teki değeri ezer: uyguladıktan sonra her sunucuda SHOW <ayar> ile doğrulayın; değer değişmediyse ayarı yerel dosyadan kaldırın ve patronictl reload çalıştırın.",
         "config_assumed_cmd": "varsayım: {items}; profili doğrulayınca kullanın",
@@ -299,6 +300,7 @@ TEXTS = {
         "config_block_patroni": "Patroni (settings in the DCS; Patroni reloads)",
         "config_block_patroni_restart": "Patroni: restarts the servers with a pending restart",
         "config_block_unknown": "The management type is not given in the profile, so the commands are written as comments. With Patroni do not use ALTER SYSTEM: the setting drifts from the DCS. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'PATRONI' (or 'NONE').",
+        "config_block_unknown_plain": "The management type is not given in the profile, so the commands are written as comments. Set it in the profile: UPDATE keystone.target SET cluster_manager = 'NONE'.",
         "config_patroni_seen": "Patroni sessions were seen in this check.",
         "config_patroni_config": "The cluster name comes from PostgreSQL's cluster_name; change it if the Patroni scope differs. If patronictl does not find its configuration file, add -c <file> (for example -c /etc/patroni/config.yml). A setting in a server's local Patroni configuration (postgresql.parameters) overrides the DCS: after applying, check SHOW <setting> on every server; if the value did not change, remove the setting from the local file and run patronictl reload.",
         "config_assumed_cmd": "assumed: {items}; use after confirming the profile",
@@ -2175,14 +2177,15 @@ def config_commands(data, rows, t):
     profile = data["check"].get("target_profile") or {}
     # Windows without a sign of Patroni: patronictl lines would only confuse (pilot hc111, 2026-11-11).
     windows = any("windows" in (n.get("os_name") or "").lower() for n in data["nodes"])
-    blocks = command_blocks(rows, profile, t, data.get("cluster_name"),
-                            patroni_possible=not windows or bool(data.get("patroni_seen")))
+    patroni_possible = not windows or bool(data.get("patroni_seen"))
+    blocks = command_blocks(rows, profile, t, data.get("cluster_name"), patroni_possible=patroni_possible)
     if not blocks:
         return ""
     parts = [f"<h3>{e(t['config_commands'])}</h3><p class=\"note\">{e(t['config_commands_note'])}</p>"]
     if (profile.get("cluster_manager") or {}).get("value") is None:
         hint = f" {t['config_patroni_seen']}" if data.get("patroni_seen") else ""
-        parts.append(f'<p class="note">{e(t["config_block_unknown"] + hint)}</p>')
+        note = t["config_block_unknown"] if patroni_possible else t["config_block_unknown_plain"]
+        parts.append(f'<p class="note">{e(note + hint)}</p>')
     for title, text in blocks:
         parts.append(f'<div class="facts">{e(title)}:</div><div class="cmd">{e(text)}</div>')
     if any("patronictl" in text for _, text in blocks):
