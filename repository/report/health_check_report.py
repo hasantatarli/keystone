@@ -24,7 +24,7 @@ import re
 
 from repository.common.logging_config import configure_logging, get_logger
 from repository.intelligence.assessment_engine import (
-    CLOCK_SKEW_TOLERANCE_SECONDS, data_mount, usage_percent)
+    CLOCK_SKEW_TOLERANCE_SECONDS, REFERENCE_SOURCES, data_mount, usage_percent)
 from repository.intelligence import config_recommendations as config_rec
 from repository.worker import worker
 
@@ -186,7 +186,9 @@ TEXTS = {
         "detail_timeline_started_at": "Primary olma zamanı",
         "unassessed_line": "Değerlendirilemeyen sunucu: {items}",
         "unassessed_reason": {"not_collected": "veri toplanamadı", "no_disk": "veri diski bilgisi yok",
-                              "no_memory": "bellek bilgisi yok"},
+                              "no_memory": "bellek bilgisi yok",
+                              "not_in_reference": "bu major sürüm Keystone'un sürüm referansında yok",
+                              "no_version": "sürüm bilgisi yok"},
         "config_host_partial": "Bilgisi eksik sunucu: {nodes}. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
@@ -215,13 +217,17 @@ TEXTS = {
         "col_share": "Oran", "col_match": "Durum", "col_other_index": "Diğer index",
         "col_foreign_key": "Foreign key", "col_columns": "Kolonlar", "col_referenced": "Referans",
         "col_table_size": "Tablo boyutu", "col_usage": "Kullanım", "col_extension": "Extension",
+        "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
+        "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
+        "reference_source": {"SEED": "Keystone ile gelen", "FILE": "referans dosyası", "ONLINE": "internet"},
+        "date_format": "%d.%m.%Y",
         "col_installed": "Kurulu sürüm", "col_available": "Paket sürümü",
         "match_same": "Aynı tanım", "match_covered": "Kapsanıyor", "col_since": "Ne kadar önce",
         "empty_value": "(boş)",
         "detail_other_definition": "Diğer index'in tanımı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
         "inv_failover": "Son timeline değişimi", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat", "unit_RELEASE": "sürüm", "unit_DAY": "gün",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -252,6 +258,11 @@ TEXTS = {
         "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
+        "reason_reference_stale": ("Keystone'daki PostgreSQL sürüm referansı {age} önce alınmış ({as_of}); bu kontrol "
+                                   "en fazla {limit} eski referans kabul ediyor, eski bilgiyle güncel sürüm "
+                                   "söylenmez. Yenilemek için: python -m repository.lifecycle.release_reference --refresh (internet yoksa referans "
+                                   "dosyası: --import <dosya>)."),
+        "reason_reference_missing": "Keystone'da PostgreSQL sürüm referansı yok. Yüklemek için: python -m repository.lifecycle.release_reference --refresh",
     },
     "en": {
         "title": "Database Health Check Report",
@@ -397,7 +408,9 @@ TEXTS = {
         "detail_timeline_started_at": "Became primary at",
         "unassessed_line": "Server not assessed: {items}",
         "unassessed_reason": {"not_collected": "data not collected", "no_disk": "no data disk information",
-                              "no_memory": "no memory information"},
+                              "no_memory": "no memory information",
+                              "not_in_reference": "this major version is not in Keystone's release reference",
+                              "no_version": "no version information"},
         "config_host_partial": "Server data missing: {nodes}. Without the smallest server these settings are not calculated.",
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
@@ -426,13 +439,17 @@ TEXTS = {
         "col_share": "Share", "col_match": "Match", "col_other_index": "Other index",
         "col_foreign_key": "Foreign key", "col_columns": "Columns", "col_referenced": "References",
         "col_table_size": "Table size", "col_usage": "Usage", "col_extension": "Extension",
+        "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
+        "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
+        "reference_source": {"SEED": "shipped with Keystone", "FILE": "reference file", "ONLINE": "internet"},
+        "date_format": "%Y-%m-%d",
         "col_installed": "Installed", "col_available": "Package",
         "match_same": "Same definition", "match_covered": "Covered", "col_since": "How long ago",
         "empty_value": "(empty)",
         "detail_other_definition": "Other index's definition", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
         "inv_failover": "Last timeline change", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times", "unit_RELEASE": "releases", "unit_DAY": "days",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -463,6 +480,11 @@ TEXTS = {
         "reason_not_collected_short": "{source} not collected{status}; details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
+        "reason_reference_stale": ("Keystone's PostgreSQL release reference was taken {age} ago ({as_of}); this "
+                                   "check accepts a reference at most {limit} old, and no version is called "
+                                   "current on old data. To refresh: python -m repository.lifecycle.release_reference --refresh (without internet, a "
+                                   "reference file: --import <file>)."),
+        "reason_reference_missing": "Keystone has no PostgreSQL release reference. To load it: python -m repository.lifecycle.release_reference --refresh",
     },
 }
 
@@ -840,6 +862,14 @@ def explain_reason(reason, data, t, short=False):
     if not match:
         return reason or ""
     source = match.group("source")
+    if source in REFERENCE_SOURCES:                # held by Keystone, not collected
+        if match.group("missing"):
+            return t["reason_reference_missing"]
+        age = float(match.group("age"))
+        as_of = data["check"]["finished_at"] or datetime.now(timezone.utc)
+        return t["reason_reference_stale"].format(
+            age=fmt_duration(age, t), limit=fmt_duration(int(match.group("max")), t),
+            as_of=(as_of - timedelta(seconds=age)).strftime(t["date_format"]))
     failed = [c for c in data["collections"] if c["collector_key"] == source
               and c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS")]
     if failed:
@@ -1719,9 +1749,15 @@ COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connection
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds"}
 SIZE_VALUES = {"index_size", "size_bytes"}
+DATE_VALUES = {"end_of_support"}
 
 
 def template_value_text(key, value, t=None):
+    if key in DATE_VALUES and t is not None and isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).strftime(t["date_format"])
+        except ValueError:
+            return value
     if key in COUNT_VALUES and isinstance(value, int) and not isinstance(value, bool):
         return f"{value:,}"
     if key in DURATION_VALUES and t is not None and isinstance(value, (int, float)):
@@ -1778,6 +1814,11 @@ def finding_fields(f, t):
     for key, _ in TIME_LABELS:                    # every time but the evidence time, which the table places
         if key != "captured_at" and details.get(key):
             details[key] = fmt_clock(details[key])
+    if details.get("reference_as_of"):
+        details["reference"] = (t["reference_source"].get(details.get("reference_source"), "") + " · "
+                                + datetime.fromisoformat(details["reference_as_of"]).strftime(t["date_format"]))
+    for key in DATE_VALUES & details.keys():
+        details[key] = template_value_text(key, details[key], t)
     values = {k: template_value_text(k, v, t) for k, v in (f.get("template_values") or {}).items()
               if not k.startswith("_")}
     fields = {**values, **details}
@@ -1830,6 +1871,10 @@ FINDING_COLUMNS = {
     "PG-SEC-004": [("database", "detail_database"), ("schema", "detail_schema"),
                    ("schema_owner", "detail_schema_owner")],
     "PG-HA-002": [("node_name", "detail_node"), ("started_at", "detail_started_at"), ("observed", "col_since")],
+    "PG-LIFE-001": [("node_name", "detail_node"), ("version", "col_version"), ("latest", "col_latest"),
+                    ("observed", "col_behind"), ("reference", "col_reference")],
+    "PG-LIFE-002": [("node_name", "detail_node"), ("version", "col_version"),
+                    ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
     "PG-LIFE-004": [("database_name", "detail_database"), ("extension", "col_extension"),
                     ("installed", "col_installed"), ("available", "col_available")],
     **{key: SETTING_COLUMNS for key in ("PG-CONF-001", "PG-CONF-002", "PG-CONF-004", "PG-CONF-005",

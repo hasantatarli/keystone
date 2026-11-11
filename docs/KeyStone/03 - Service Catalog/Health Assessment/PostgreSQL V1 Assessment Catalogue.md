@@ -149,8 +149,8 @@ Needs a **release reference table** in the Dictionary (versions, release dates, 
 
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
-| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Ready: PG-001 + reference table | DB_Version | P3 |
-| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Ready: PG-001 + reference table | DB_Version | P3 |
+| PG-LIFE-001 | Minor version behind | Behind the current minor of its major — WARNING; missed a release with a security fix — CRITICAL | Done (V059) | DB_Version | Done |
+| PG-LIFE-002 | Major version support | Support ended — CRITICAL; ends within 12 months — WARNING (PostgreSQL 14: 2026-11-12) | Done (V059) | DB_Version | Done |
 | PG-LIFE-003 | Operating system support | OS release past its standard support (for example CentOS 7, Ubuntu 18.04) | Ready: host + reference table | — | P2 |
 | **PG-LIFE-004** | Extensions with available updates | `installed_version < default_version` | Gap: PG-015 | Extensions | Done |
 
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 43 | 0 | 10 | 10 |
-| of which evidence ready | 43 | 0 | 2 | 5 |
+| Checks | 45 | 0 | 10 | 8 |
+| of which evidence ready | 45 | 0 | 2 | 3 |
 
-Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 can use the same reference. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
@@ -243,7 +243,7 @@ Beyond pg_collector: host and disk capacity, replication lag and topology, failo
 4. **Backup:** PostgreSQL has no backup catalogue like SQL Server's `msdb`. Keystone detects the method in use and reports backups through that method. First signal without SSH: `archive_command` (pgBackRest `archive-push`, Barman `barman-wal-archive`, WAL-G `wal-push`, pg_probackup); then the tool's own status over SSH (`pgbackrest info --output=json` and equivalents) and `pg_dump` jobs in cron. Barman usually runs on a separate backup server; Keystone does not connect to it. The backup check then ends INSUFFICIENT_EVIDENCE — never healthy — with the reason "Backups are managed by Barman on a separate server; verify them there."
 5. **Conscious choices** (`synchronous_commit = off`, `archive_mode = off` and similar) are WARNING by default. A customer's explicit acceptance ("accepted risk" with a reason) belongs to the finding lifecycle (MVP Plan Phase 2).
 
-6. **Version checks deferred** (2026-10-21, Hasan): PG-LIFE-001/002 need current release data. Many customer servers have no internet access, and a manually maintained list creates recurring work. Moved to P3; revisit with a release table shipped with Keystone updates.
+6. **Version checks deferred** (2026-10-21, Hasan): PG-LIFE-001/002 need current release data. Many customer servers have no internet access, and a manually maintained list creates recurring work. Moved to P3; revisit with a release table shipped with Keystone updates. **Revised 2026-11-11** after the first pilot (PostgreSQL 14 one day before end of support, not in the report): done with ADR-0019 — refreshed online when Keystone's machine reaches the internet, or from a reference file; the minor check is not assessed on a reference older than 100 days.
 
 7. **Group 1 of the collector P1s** (2026-10-26, Hasan): PG-BKP-001 is CRITICAL only while the last failure is newer than the last success; "no success for a long time" is not judged. PG-TRAN-005 uses 5 / 60 minutes. PG-HA-001 dates the last failover from the current timeline's history file (works on a first check); a failover within 24 h is a WARNING.
 

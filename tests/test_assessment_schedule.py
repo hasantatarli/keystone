@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from repository.agent.jobs import AssessmentJobs
 from repository.agent.scheduler import Scheduler
 from repository.install import install as installer
+from repository.intelligence import assessment_engine as engine
 from test_installer_findings import DisposablePostgres
 
 
@@ -84,7 +85,7 @@ class AssessmentScheduleTests(unittest.TestCase):
             FROM keystone.rule_evidence_requirement rer
             JOIN keystone.rule_definition rd USING (rule_id)
             WHERE rd.is_enabled AND rer.is_required
-            """).fetchall()}
+            """).fetchall()} - engine.REFERENCE_SOURCES       # held by Keystone, not collected (ADR-0019)
 
     # ---------------------------------------------------------------- defaults
 

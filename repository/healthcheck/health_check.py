@@ -19,6 +19,7 @@ from repository.agent.pool import WorkerPool
 from repository.common.logging_config import configure_logging, get_logger
 from repository.common.server_profile import server_profile
 from repository.intelligence import assessment_engine
+from repository.lifecycle import release_reference
 from repository.worker import worker
 
 
@@ -90,7 +91,9 @@ def load_evidence_collectors(conn, assessment_keys):
         """,
         (assessment_keys,),
     ).fetchall()
-    return [r["evidence_source"] for r in rows]
+    # Reference evidence is held by Keystone itself (release reference), nothing to collect.
+    return [r["evidence_source"] for r in rows
+            if r["evidence_source"] not in assessment_engine.REFERENCE_SOURCES]
 
 
 def load_collectors(conn, keys):
@@ -446,6 +449,7 @@ def main(argv=None):
         user = getpass.getuser()
     except Exception:
         user = None
+    release_reference.refresh(worker.connect_repository)     # best effort: offline goes on silently
     health_check_id = run_health_check(worker.connect_repository, args.target,
                                        args.assessment, args.wait_minutes, requested_by=user)
     with worker.connect_repository() as conn:

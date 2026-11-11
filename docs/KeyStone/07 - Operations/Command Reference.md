@@ -227,6 +227,21 @@ python -m repository.offline.import_bundle --target 20 db-1_node.json db-1_db_ap
 - A collector changed since the scripts were generated is not imported (FAILED: generate the scripts again). Missing files make their collections NOT_COLLECTED; the rules then say "not assessed".
 - The report header says "collected offline" with the import time; the date is the capture time.
 
+### Release reference (ADR-0019)
+
+PostgreSQL versions and support dates for PG-LIFE-001/002. Health checks and imports refresh it from the internet by themselves when they can; without internet it stays as it is.
+
+```
+python -m repository.lifecycle.release_reference --show
+python -m repository.lifecycle.release_reference --refresh
+python -m repository.lifecycle.release_reference --export reference.json
+python -m repository.lifecycle.release_reference --import reference.json
+```
+
+- `--refresh`: from postgresql.org, then endoflife.date; says why when it cannot.
+- `--export` on a Keystone with internet, `--import` on one without: the file keeps its date, and a file older than the reference already in Keystone is refused.
+- PG-LIFE-001 is "not assessed" when the reference is older than 100 days; the report says how old it is.
+
 ## 7. Credential tool
 
 Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.credential_data`. The password is typed hidden.
