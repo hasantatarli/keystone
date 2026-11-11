@@ -832,6 +832,35 @@ Unit and report tests (409 OK). Lab 2026-11-11: hc111 report regenerated without
 
 ---
 
+# Batch of 2026-11-11 (2) — version lifecycle (V059, ADR-0019)
+
+The release reference (ADR-0019) is the evidence `KEYSTONE_RELEASE_REFERENCE`, whose capture time is the reference's `as_of`; it is refreshed online at every health check and import, or imported from a reference file, and seeded by V059 (postgresql.org, 2026-11-11). Versions are read from `server_version_num` of every node.
+
+## PG-LIFE-001 — Minor Version Behind (PG_LIFECYCLE_HEALTH, topic LIFECYCLE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INSTANCE_INVENTORY`, required, 3 600 s; `KEYSTONE_RELEASE_REFERENCE`, required, 8 640 000 s (100 days) |
+| Condition | releases behind the latest minor of the node's major ≥ 1 → WARNING; ≥ 4 (about a year of fixes) → CRITICAL (thresholds, unit RELEASE) |
+| Insufficient evidence | reference older than 100 days (the report gives its age and the refresh command); a major missing from the reference: node not assessed (`not_in_reference`) |
+| Subject | NODE |
+
+A node newer than the reference is not a finding. The table shows the reference's source and date.
+
+## PG-LIFE-002 — Major Version Support (PG_LIFECYCLE_HEALTH, topic LIFECYCLE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_INSTANCE_INVENTORY`, required, 3 600 s; `KEYSTONE_RELEASE_REFERENCE`, required, any age |
+| Condition | community support ended on or before the inventory date → CRITICAL (FINDING); ends within parameter `support_warning_window` (365 days) → WARNING (FINDING_ALT, days left) |
+| Insufficient evidence | a major missing from the reference: node not assessed |
+| Subject | NODE |
+
+**Verification (V059)**  
+Unit tests for both rules (thresholds, the day support ends, a major missing from the reference); parser tests on the postgresql.org table and the endoflife.date API, a changed page refused; database tests: seed installed, online refresh with fallback, export and import keeping the file date, an older file refused, PG-LIFE-001 INSUFFICIENT_EVIDENCE on a 101-day-old reference with the report text, PG-LIFE-002 on an old reference, the reference not planned as a collection nor warned as unscheduled (`schedule_consistency_warning` redefined without it). Full suite 429 OK. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

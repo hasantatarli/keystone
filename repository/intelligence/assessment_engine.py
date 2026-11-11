@@ -2393,7 +2393,126 @@ def evaluate_extension_updates(rows, rule, thresholds):
     return findings
 
 
+def load_release_reference(conn, target_id):
+    """KEYSTONE_RELEASE_REFERENCE (V059): the PostgreSQL release reference; captured_at is its as_of.
+
+    Reference data held by Keystone, not collected from the target: its age is the age of the
+    reference, so a reference older than a rule accepts is stale evidence, never current.
+    """
+    return conn.execute(
+        """
+        SELECT NULL::bigint AS target_id, s.as_of AS captured_at, s.source, s.source_detail,
+               r.major_version, r.latest_minor, r.first_release, r.end_of_support
+        FROM keystone.release_reference r
+        JOIN keystone.release_reference_source s ON s.product = r.product
+        WHERE r.product = 'PostgreSQL'
+        """).fetchall()
+
+
+# Evidence Keystone holds itself; health checks do not collect it (no collection plan rows).
+REFERENCE_SOURCES = {"KEYSTONE_RELEASE_REFERENCE"}
+
+
+def release_of(row):
+    """(major, minor) of a node from server_version_num: 140020 -> ('14', 20), 90624 -> ('9.6', 24)."""
+    num = row.get("server_version_num")
+    if not num:
+        return None, None
+    num = int(num)
+    if num >= 100000:
+        return str(num // 10000), num % 10000
+    return f"{num // 10000}.{num // 100 % 100}", num % 100
+
+
+def minor_of(version):
+    """'17.11' -> 11, '9.6.24' -> 24."""
+    return int(version.rsplit(".", 1)[1])
+
+
+def reference_by_major(evidence, rule):
+    """{major: reference row}; nodes are judged one by one against it."""
+    return {r["major_version"]: r for r in evidence["KEYSTONE_RELEASE_REFERENCE"]}
+
+
+def node_release(rule, node, reference):
+    """(major, minor, reference row) of a node, or None after recording why it is not judged."""
+    major, minor = release_of(node)
+    if major is None:
+        add_unassessed(rule["unassessed"], node["target_id"], node["node_name"],
+                       "PG_INSTANCE_INVENTORY", "no_version")
+        return None
+    if major not in reference:
+        add_unassessed(rule["unassessed"], node["target_id"], node["node_name"],
+                       "KEYSTONE_RELEASE_REFERENCE", "not_in_reference")
+        return None
+    return major, minor, reference[major]
+
+
+def evaluate_minor_version_behind(evidence, rule, thresholds):
+    """PG-LIFE-001: a node behind the latest minor release of its major, in releases."""
+    reference = reference_by_major(evidence, rule)
+    findings = []
+    for node in evidence["PG_INSTANCE_INVENTORY"]:
+        known = node_release(rule, node, reference)
+        if known is None:
+            continue
+        major, minor, ref = known
+        if not ref["latest_minor"]:
+            add_unassessed(rule["unassessed"], node["target_id"], node["node_name"],
+                           "KEYSTONE_RELEASE_REFERENCE", "not_in_reference")
+            continue
+        behind = minor_of(ref["latest_minor"]) - minor
+        matched = match_threshold(behind, thresholds, "RELEASE") if behind > 0 else None
+        if matched is None:
+            continue
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": None,
+            "template_values": {"node_name": node["node_name"], "version": f"{major}.{minor}",
+                                "major": major, "latest": ref["latest_minor"], "behind": behind},
+            "observed_value": behind, "observed_unit": "RELEASE",
+            "subject_type": "NODE", "subject_identifier": node["node_name"],
+            "details": {"node": node["node_name"], "version": f"{major}.{minor}",
+                        "latest": ref["latest_minor"], "reference_as_of": iso(ref["captured_at"]),
+                        "reference_source": ref["source"], "captured_at": iso(node["captured_at"])}})
+    return findings
+
+
+def evaluate_major_support(evidence, rule, thresholds):
+    """PG-LIFE-002: a node whose major version is out of community support, or soon will be.
+
+    Ended: CRITICAL; ends within support_warning_window: WARNING. Judged on the day the
+    inventory was taken; end-of-support dates are fixed, so the reference may be of any age.
+    """
+    reference = reference_by_major(evidence, rule)
+    window_days = parameter(rule, "support_warning_window") / 86400
+    findings = []
+    for node in evidence["PG_INSTANCE_INVENTORY"]:
+        known = node_release(rule, node, reference)
+        if known is None:
+            continue
+        major, minor, ref = known
+        end = ref["end_of_support"]
+        if end is None:
+            continue                     # no end announced yet
+        days_left = (end - node["captured_at"].date()).days
+        if days_left > window_days:
+            continue
+        values = {"node_name": node["node_name"], "major": major, "end_of_support": end.isoformat()}
+        if days_left > 0:
+            values.update(_alt=True, days_left=days_left)
+        findings.append({
+            "severity": "CRITICAL" if days_left <= 0 else "WARNING", "snapshot_id": None,
+            "template_values": values,
+            "observed_value": days_left, "observed_unit": "DAY",
+            "subject_type": "NODE", "subject_identifier": node["node_name"],
+            "details": {"node": node["node_name"], "version": f"{major}.{minor}",
+                        "end_of_support": end.isoformat(), "reference_source": ref["source"],
+                        "captured_at": iso(node["captured_at"])}})
+    return findings
+
+
 EVIDENCE_LOADERS = {
+    "KEYSTONE_RELEASE_REFERENCE": load_release_reference,
     "PG_ACTIVITY_SNAPSHOT": load_latest_activity_snapshot,
     "PG_TRANSACTION_WRAPAROUND": load_latest_transaction_wraparound_snapshot,
     "PG_REPLICATION_SLOTS": load_latest_replication_slot_snapshot,
@@ -2552,6 +2671,8 @@ RULE_EVALUATORS = {
     "PG-IDX-004": evaluate_unindexed_foreign_keys,
     "PG-BKP-003": evaluate_unlogged_tables,
     "PG-LIFE-004": evaluate_extension_updates,
+    "PG-LIFE-001": evaluate_minor_version_behind,
+    "PG-LIFE-002": evaluate_major_support,
 }
 
 

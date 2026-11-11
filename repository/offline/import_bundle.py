@@ -32,6 +32,7 @@ from repository.common.server_profile import server_profile
 from repository.healthcheck import health_check as hc
 from repository.install import install as installer
 from repository.intelligence import assessment_engine
+from repository.lifecycle import release_reference
 from repository.offline.bundle import BUNDLE_FORMAT
 from repository.worker import worker
 
@@ -555,6 +556,7 @@ def main(argv=None):
         user = getpass.getuser()
     except Exception:
         user = None
+    release_reference.refresh(worker.connect_repository)     # best effort: offline goes on silently
     workdir = tempfile.mkdtemp(prefix="keystone_import_")
     try:
         files, found_hosts = expand(args.files, workdir)

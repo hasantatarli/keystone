@@ -1505,3 +1505,86 @@ class ExtensionUpdateTests(unittest.TestCase):
         findings = engine.evaluate_extension_updates(rows, rule("INFO"), [])
         self.assertEqual([(f["subject_identifier"], f["template_values"]["available"]) for f in findings],
                          [("app.pg_stat_statements", "1.11")])
+
+
+# V059: the release reference as the engine loads it; captured_at is the reference's as_of.
+REFERENCE_AS_OF = datetime(2026, 11, 11, 9, 0, 0, tzinfo=timezone.utc)
+REFERENCE = [
+    {"target_id": None, "captured_at": REFERENCE_AS_OF, "source": "SEED", "source_detail": "x",
+     "major_version": major, "latest_minor": latest, "first_release": None,
+     "end_of_support": datetime.strptime(end, "%Y-%m-%d").date()}
+    for major, latest, end in (("17", "17.11", "2029-11-08"), ("14", "14.24", "2026-11-12"),
+                               ("13", "13.23", "2025-11-13"), ("9.6", "9.6.24", "2021-11-11"))]
+
+
+def node(target_id, name, version_num, captured_at=NOW):
+    return {"target_id": target_id, "node_name": name, "captured_at": captured_at,
+            "server_version": None, "server_version_num": version_num, "in_recovery": False}
+
+
+def lifecycle(nodes):
+    return {"PG_INSTANCE_INVENTORY": nodes, "KEYSTONE_RELEASE_REFERENCE": REFERENCE}
+
+
+class ReleaseOfTests(unittest.TestCase):
+
+    def test_major_and_minor_from_version_num(self):
+        self.assertEqual(engine.release_of({"server_version_num": 140020}), ("14", 20))
+        self.assertEqual(engine.release_of({"server_version_num": 170010}), ("17", 10))
+        self.assertEqual(engine.release_of({"server_version_num": 90624}), ("9.6", 24))
+        self.assertEqual(engine.release_of({"server_version_num": None}), (None, None))
+
+
+class MinorVersionBehindTests(unittest.TestCase):
+    """PG-LIFE-001."""
+
+    THRESHOLDS = [threshold("WARNING", 1, "RELEASE"), threshold("CRITICAL", 4, "RELEASE")]
+
+    def test_behind_is_counted_in_releases(self):
+        r = rule()
+        findings = engine.evaluate_minor_version_behind(
+            lifecycle([node(1, "pg1", 170011), node(2, "pg2", 170010), node(3, "pg3", 140020),
+                       node(4, "pg4", 90624)]), r, self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["severity"], f["observed_value"]) for f in findings],
+                         [("pg2", "WARNING", 1), ("pg3", "CRITICAL", 4)])
+        self.assertEqual(findings[1]["template_values"],
+                         {"node_name": "pg3", "version": "14.20", "major": "14", "latest": "14.24", "behind": 4})
+        self.assertEqual(r["unassessed"], [])
+
+    def test_major_missing_from_reference_is_not_judged(self):
+        r = rule()
+        findings = engine.evaluate_minor_version_behind(lifecycle([node(1, "pg1", 190001)]), r, self.THRESHOLDS)
+        self.assertEqual(findings, [])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]], [("pg1", "not_in_reference")])
+
+    def test_newer_than_reference_is_no_finding(self):
+        findings = engine.evaluate_minor_version_behind(lifecycle([node(1, "pg1", 170012)]), rule(), self.THRESHOLDS)
+        self.assertEqual(findings, [])
+
+
+class MajorSupportTests(unittest.TestCase):
+    """PG-LIFE-002."""
+
+    def test_ended_is_critical_ending_within_window_is_warning(self):
+        r = with_params(support_warning_window=365 * 86400)
+        at = datetime(2026, 10, 5, tzinfo=timezone.utc)
+        findings = engine.evaluate_major_support(
+            lifecycle([node(1, "pg17", 170011, at), node(2, "pg14", 140020, at), node(3, "pg13", 130023, at)]),
+            r, [])
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings],
+                         [("pg14", "WARNING"), ("pg13", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"],
+                         {"node_name": "pg14", "major": "14", "end_of_support": "2026-11-12",
+                          "_alt": True, "days_left": 38})
+        self.assertNotIn("_alt", findings[1]["template_values"])
+
+    def test_support_ends_on_its_day(self):
+        at = datetime(2026, 11, 12, 8, 0, tzinfo=timezone.utc)
+        findings = engine.evaluate_major_support(lifecycle([node(1, "pg14", 140024, at)]),
+                                                 with_params(support_warning_window=365 * 86400), [])
+        self.assertEqual(severities(findings), ["CRITICAL"])
+
+    def test_major_missing_from_reference_is_not_judged(self):
+        r = with_params(support_warning_window=365 * 86400)
+        self.assertEqual(engine.evaluate_major_support(lifecycle([node(1, "pg1", 190001)]), r, []), [])
+        self.assertEqual([u["reason_code"] for u in r["unassessed"]], ["not_in_reference"])
