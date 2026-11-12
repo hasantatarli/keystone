@@ -23,3 +23,13 @@ Version checks were deferred to P3 (Assessment Catalogue, decision 6): they need
 - PG-LIFE-001 and PG-LIFE-002 are in the product (V059); PG-LIFE-003 (operating system support) uses the same structure with another product.
 - Installations without internet stay correct for support dates and honest about minors: after 100 days without a new reference, the minor check says it was not assessed and how to fix that.
 - A quarterly reference package for customers (Hasan) is the export file of a Keystone with internet; producing it is an operational task, not code.
+
+## Addendum (2026-11-11): operating systems (V060)
+
+| # | Topic | Decision |
+| --- | --- | --- |
+| 7 | Products | Operating system releases live in the same tables, one source row per product. Their evidence is `KEYSTONE_OS_REFERENCE`, separate from PostgreSQL's, so a newer operating system reference never makes a stale PostgreSQL reference look current. |
+| 8 | Which date | The end of **free** security updates (Hasan): Windows Server extended support, RHEL maintenance support, Ubuntu standard support, Debian LTS (free, community), SLES general support of the service pack, Rocky / Alma security support, Oracle Linux premier support. Paid extensions (ESU, ELS, Ubuntu Pro, ELTS, LTSS) are not assumed; a customer who has one can accept the finding. |
+| 9 | Recognition | From the host snapshot as collected (no collector change): Windows Server by build, Linux by distribution name and VERSION_ID. Not recognised, or a release the reference does not list: the node is not assessed. |
+| 10 | Refresh | Migrations and reference files only; no online source states "end of free security updates" for every system, and the dates are fixed. A reference file carries every product; each product is imported only if the file's copy is not older. |
+

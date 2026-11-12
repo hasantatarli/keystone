@@ -45,14 +45,14 @@ VERSIONING_PAGE = """
 </table>
 """
 
-ENDOFLIFE = json.dumps([
-    {"cycle": "18", "releaseDate": "2025-09-25", "eol": "2030-11-14", "latest": "18.6"},
-    {"cycle": "17", "releaseDate": "2024-09-26", "eol": "2029-11-08", "latest": "17.11"},
-    {"cycle": "16", "releaseDate": "2023-09-14", "eol": "2028-11-09", "latest": "16.15"},
-    {"cycle": "15", "releaseDate": "2022-10-13", "eol": "2027-11-11", "latest": "15.19"},
-    {"cycle": "14", "releaseDate": "2021-09-30", "eol": "2026-11-12", "latest": "14.24"},
-    {"cycle": "9.6", "releaseDate": "2016-09-29", "eol": "2021-11-11", "latest": "9.6.24"},
-])
+# endoflife.date API v1 (schema 1.2.1, as served for rhel on 2026-11-11), with PostgreSQL rows.
+ENDOFLIFE = json.dumps({"schema_version": "1.2.1", "result": {"name": "postgresql", "releases": [
+    {"name": name, "releaseDate": released, "eolFrom": eol, "isEol": False,
+     "latest": {"name": latest, "date": "2026-11-11"}}
+    for name, released, eol, latest in (
+        ("18", "2025-09-25", "2030-11-14", "18.6"), ("17", "2024-09-26", "2029-11-08", "17.11"),
+        ("16", "2023-09-14", "2028-11-09", "16.15"), ("15", "2022-10-13", "2027-11-11", "15.19"),
+        ("14", "2021-09-30", "2026-11-12", "14.24"), ("9.6", "2016-09-29", "2021-11-11", "9.6.24"))]}})
 
 
 class ParserTests(unittest.TestCase):
@@ -73,7 +73,7 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ref.ReferenceError):
             ref.parse_versioning_page("<html><body>maintenance</body></html>")
         wrong = json.loads(ENDOFLIFE)
-        wrong[0]["latest"] = "17.3"                       # a minor of another major
+        wrong["result"]["releases"][0]["latest"]["name"] = "17.3"     # a minor of another major
         with self.assertRaises(ref.ReferenceError):
             ref.parse_endoflife(json.dumps(wrong))
 
@@ -109,18 +109,26 @@ class ReferenceStoreTests(unittest.TestCase):
     def connect(self):
         return self.server.connect(self.database, row_factory=dict_row)
 
+    def postgresql(self):
+        sources, rows = ref.load(self.conn, "PostgreSQL")
+        return sources[0], rows
+
     def test_seed_is_installed(self):
-        source, rows = ref.load(self.conn)
+        source, rows = self.postgresql()
         self.assertEqual(source["source"], "SEED")
         self.assertIn(("14", "14.24", date(2026, 11, 12)),
                       [(r["major_version"], r["latest_minor"], r["end_of_support"]) for r in rows])
+        sources, rows = ref.load(self.conn)
+        self.assertEqual(sources[0]["product"], "PostgreSQL")
+        self.assertIn(("Windows Server", "2016", date(2027, 1, 12)),
+                      [(r["product"], r["major_version"], r["end_of_support"]) for r in rows])
 
     def test_online_refresh_stores_source_and_time(self):
         newer = VERSIONING_PAGE.replace("17.11", "17.12")
         with patch.object(ref, "fetch", return_value=newer):
             ok, url = ref.refresh(self.connect)
         self.assertTrue(ok)
-        source, rows = ref.load(self.conn)
+        source, rows = self.postgresql()
         self.assertEqual((source["source"], source["source_detail"]), ("ONLINE", ref.VERSIONING_URL))
         self.assertLess(datetime.now(timezone.utc) - source["as_of"], timedelta(minutes=1))
         self.assertIn("17.12", [r["latest_minor"] for r in rows])
@@ -138,11 +146,13 @@ class ReferenceStoreTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "reference.json")
         ref.export(self.conn, path)
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
-        doc["as_of"] = "2026-12-01T09:00:00+00:00"
-        doc["releases"][0]["latest_minor"] = "18.7"
+        self.assertEqual(doc["products"][0]["product"], "PostgreSQL")
+        doc["products"][0]["as_of"] = "2026-12-01T09:00:00+00:00"
+        doc["products"][0]["releases"][0]["latest_minor"] = "18.7"
         Path(path).write_text(json.dumps(doc), encoding="utf-8")
-        ref.import_file(self.conn, path)
-        source, rows = ref.load(self.conn)
+        results = ref.import_file(self.conn, path)
+        self.assertEqual(len(results), 10)                  # PostgreSQL and nine operating systems
+        source, rows = self.postgresql()
         self.assertEqual((source["source"], source["as_of"]),
                          ("FILE", datetime(2026, 12, 1, 9, tzinfo=timezone.utc)))
         self.assertIn("18.7", [r["latest_minor"] for r in rows])
@@ -151,10 +161,13 @@ class ReferenceStoreTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "reference.json")
         ref.export(self.conn, path)
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
-        doc["as_of"] = "2026-01-01T00:00:00+00:00"
+        doc["products"][0]["as_of"] = "2026-01-01T00:00:00+00:00"
+        doc["products"][0]["releases"][0]["latest_minor"] = "18.0"
         Path(path).write_text(json.dumps(doc), encoding="utf-8")
-        with self.assertRaises(ref.ReferenceError):
-            ref.import_file(self.conn, path)
+        results = ref.import_file(self.conn, path)
+        self.assertEqual(results[0][:2], ("PostgreSQL", False))
+        self.assertEqual(self.postgresql()[0]["source"], "SEED")
+        self.assertNotIn("18.0", [r["latest_minor"] for r in self.postgresql()[1]])
 
     def evaluate(self, rule_key, evaluation_time):
         rule = self.conn.execute(
@@ -167,7 +180,7 @@ class ReferenceStoreTests(unittest.TestCase):
         return engine.evaluate_rule(self.conn, rule, 1, evaluation_time, cache)
 
     def test_minor_rule_is_not_assessed_on_a_stale_reference(self):
-        seed_as_of = ref.load(self.conn)[0]["as_of"]
+        seed_as_of = self.postgresql()[0]["as_of"]
         outcome, findings, reason, _ = self.evaluate("PG-LIFE-001", seed_as_of + timedelta(days=101))
         self.assertEqual((outcome, findings), (engine.OUTCOME_INSUFFICIENT_EVIDENCE, []))
         self.assertTrue(reason.startswith("KEYSTONE_RELEASE_REFERENCE: Evidence is stale."))
@@ -177,13 +190,13 @@ class ReferenceStoreTests(unittest.TestCase):
         self.assertIn("--refresh", text)
 
     def test_minor_rule_on_a_current_reference(self):
-        seed_as_of = ref.load(self.conn)[0]["as_of"]
+        seed_as_of = self.postgresql()[0]["as_of"]
         outcome, findings, _, _ = self.evaluate("PG-LIFE-001", seed_as_of + timedelta(days=1))
         self.assertEqual(outcome, engine.OUTCOME_ATTENTION_REQUIRED)
         self.assertEqual((findings[0]["severity"], findings[0]["observed_value"]), ("CRITICAL", 4))
 
     def test_support_rule_accepts_an_old_reference(self):
-        seed_as_of = ref.load(self.conn)[0]["as_of"]
+        seed_as_of = self.postgresql()[0]["as_of"]
         outcome, findings, _, _ = self.evaluate("PG-LIFE-002", seed_as_of + timedelta(days=400))
         self.assertEqual(outcome, engine.OUTCOME_ATTENTION_REQUIRED)
         self.assertEqual(findings[0]["severity"], "CRITICAL")
@@ -193,6 +206,24 @@ class ReferenceStoreTests(unittest.TestCase):
         keys = health_check.load_evidence_collectors(self.conn, ["PG_LIFECYCLE_HEALTH"])
         self.assertIn("PG_INSTANCE_INVENTORY", keys)
         self.assertNotIn("KEYSTONE_RELEASE_REFERENCE", keys)
+        self.assertNotIn("KEYSTONE_OS_REFERENCE", keys)
+        self.assertIn("PG_HOST_SNAPSHOT", keys)
+
+    def test_os_rule_on_the_pilot_host(self):
+        """The first pilot: Windows Server 2016, free security updates end 2027-01-12."""
+        rule = self.conn.execute(
+            "SELECT rule_id, rule_key, default_severity, finding_template FROM keystone.rule_definition "
+            "WHERE rule_key = 'PG-LIFE-003'").fetchone()
+        at = datetime(2026, 11, 11, 9, tzinfo=timezone.utc)
+        hosts = [{"record_type": "HOST", "target_id": 1, "node_name": "db1", "captured_at": at,
+                  "os_family": "WINDOWS", "os_name": "Microsoft Windows Server 2016 Standard",
+                  "os_version": "10.0.14393", "memory_total_bytes": 1}]
+        outcome, findings, _, _ = engine.evaluate_rule(self.conn, rule, 1, at, {"PG_HOST_SNAPSHOT": hosts})
+        self.assertEqual(outcome, engine.OUTCOME_ATTENTION_REQUIRED)
+        self.assertEqual((findings[0]["severity"], findings[0]["template_values"]["days_left"]), ("WARNING", 62))
+        outcome, findings, _, _ = engine.evaluate_rule(
+            self.conn, rule, 1, at, {"PG_HOST_SNAPSHOT": [dict(hosts[0], captured_at=datetime(2027, 1, 12, tzinfo=timezone.utc))]})
+        self.assertEqual(findings[0]["severity"], "CRITICAL")
 
 
 if __name__ == "__main__":
