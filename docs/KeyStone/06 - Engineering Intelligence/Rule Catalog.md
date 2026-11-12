@@ -857,7 +857,7 @@ A node newer than the reference is not a finding. The table shows the reference'
 | Subject | NODE |
 
 **Verification (V059)**  
-Unit tests for both rules (thresholds, the day support ends, a major missing from the reference); parser tests on the postgresql.org table and the endoflife.date API, a changed page refused; database tests: seed installed, online refresh with fallback, export and import keeping the file date, an older file refused, PG-LIFE-001 INSUFFICIENT_EVIDENCE on a 101-day-old reference with the report text, PG-LIFE-002 on an old reference, the reference not planned as a collection nor warned as unscheduled (`schedule_consistency_warning` redefined without it). Full suite 429 OK. Lab: pending.
+Unit tests for both rules (thresholds, the day support ends, a major missing from the reference); parser tests on the postgresql.org table and the endoflife.date API, a changed page refused; database tests: seed installed, online refresh with fallback, export and import keeping the file date, an older file refused, PG-LIFE-001 INSUFFICIENT_EVIDENCE on a 101-day-old reference with the report text, PG-LIFE-002 on an old reference, the reference not planned as a collection nor warned as unscheduled (`schedule_consistency_warning` redefined without it). Full suite 429 OK. Lab (2026-11-11, Patroni cluster, PostgreSQL 17.10, reference refreshed online): PG-LIFE-001 WARNING on all three nodes (1 behind 17.11, reference "internet · 11.11.2026" in the table), PG-LIFE-002 healthy.
 
 ---
 
@@ -876,7 +876,7 @@ Unit tests for both rules (thresholds, the day support ends, a major missing fro
 The recommendation says paid extended support (ESU, ELS, Ubuntu Pro, LTSS) makes the finding an accepted risk.
 
 **Verification (V060)**  
-Unit tests: recognition of eleven name/version forms and six that must not be recognised; ended / within window / healthy; unknown systems not judged. Database tests: the pilot host (Windows Server 2016 on 2026-11-11: WARNING, 62 days; on 2027-01-12: CRITICAL); reference files with every product, an older product kept. Full suite 434 OK. Lab: pending.
+Unit tests: recognition of eleven name/version forms and six that must not be recognised; ended / within window / healthy; unknown systems not judged. Database tests: the pilot host (Windows Server 2016 on 2026-11-11: WARNING, 62 days; on 2027-01-12: CRITICAL); reference files with every product, an older product kept. Full suite 434 OK. Lab (hc117, 2026-11-11): Ubuntu 24.04.4 LTS recognised on all three nodes, PG-LIFE-003 healthy (free updates until 2029-05-31); 46 defined, 44 applicable.
 
 ---
 

@@ -188,7 +188,9 @@ Update (2026-11-11): first pilot (Windows, PostgreSQL 14, hc111) and its review 
 
 Update (2026-11-11, 2): V058 merged (PR #40; lab hc111 regenerated, hc115). Version lifecycle on `feat/release-lifecycle` (V059, ADR-0019): release reference as reference data (seed, reference file, online refresh at every health check and import), PG-LIFE-001 minor version behind (reference at most 100 days old, otherwise not assessed), PG-LIFE-002 major version support (ended CRITICAL, within a year WARNING); 45 checks. Merged as PR #41 (lab: Patroni 17.10, PG-LIFE-001 WARNING from the online reference).
 
-Update (2026-11-11, 3): PG-LIFE-003 operating system support on `feat/os-lifecycle` (V060): operating system releases in the release reference (Windows Server, RHEL, Rocky, Alma, Oracle Linux, CentOS, Ubuntu LTS, Debian, SLES), recognised from the host snapshot without a collector change; end of free security updates, ended CRITICAL, within a year WARNING; own evidence source KEYSTONE_OS_REFERENCE; reference files carry every product; 46 checks. Lab Rehberi (daily lab commands, Turkish) on main.
+Update (2026-11-11, 3): PG-LIFE-003 operating system support on `feat/os-lifecycle` (V060): operating system releases in the release reference (Windows Server, RHEL, Rocky, Alma, Oracle Linux, CentOS, Ubuntu LTS, Debian, SLES), recognised from the host snapshot without a collector change; end of free security updates, ended CRITICAL, within a year WARNING; own evidence source KEYSTONE_OS_REFERENCE; reference files carry every product; 46 checks. Lab Rehberi (daily lab commands, Turkish) on main. Merged as PR #42 (lab hc117).
+
+Next (2026-11-13): pilot follow-ups — package version and build time in the collector banner, permanent tests for psql discovery on Windows paths. Pilot feedback on the report ("what happened, what to do, impact") awaits a clearer answer.
 
 Open before a first real engagement (MVP Plan → Readiness Criteria): offline evidence bundle; a side-by-side run with a manual health check on a real system; a short customer document on what Keystone collects and does not do; report delivery (customer name / logo, PDF).
 
