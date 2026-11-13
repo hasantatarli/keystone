@@ -79,7 +79,7 @@ Kanıtı ve sonuçları değiştirmez; yalnızca raporu güncel rapor koduyla ye
 python -m repository.offline.bundle --out C:\keystone-offline
 ```
 
-Müşteriye gidecek betikleri collector dosyalarından üretir (elle düzenlenmez). İçindeki `KILAVUZ_TOPLAMA.md` müşteri için adımları anlatır. Collector değiştiyse paket yeniden üretilmeli; eski paketle toplanan kanıt import'ta reddedilir.
+Müşteriye gidecek betikleri collector dosyalarından üretir (elle düzenlenmez). Toplama betiklerinin ilk satırı paketin üretildiği zamanı yazar (`Paket: 2026-11-13T00:10:00Z`); müşteri eski paketi çalıştırırsa ekranda görünür. Repodaki betik doğrudan çalıştırılırsa "gelistirme kopyasi" yazar. İçindeki `KILAVUZ_TOPLAMA.md` müşteri için adımları anlatır. Collector değiştiyse paket yeniden üretilmeli; eski paketle toplanan kanıt import'ta reddedilir.
 
 Müşteri tarafı (tek çalıştırma; bütün sunucular, bütün veritabanları, host bilgisi):
 

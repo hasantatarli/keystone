@@ -32,6 +32,9 @@ PRIMARY_ONLY_SCOPES = ("SYSTEM", "DATABASE")
 
 HOST_SCRIPTS = ("host_snapshot.sh", "host_snapshot_windows.ps1")
 COLLECT_SCRIPTS = ("keystone_collect.ps1", "keystone_collect.sh")
+# Replaced in the collect scripts by the package's generation time, shown when they start: an old
+# package run by mistake is visible on the customer's screen (first pilot, 2026-11-10).
+PACKAGE_TOKEN = b"__KEYSTONE_PACKAGE__"
 OFFLINE_DIR = Path(__file__).resolve().parent
 
 
@@ -116,7 +119,10 @@ def write_bundle(out_dir):
         shutil.copyfile(source, out / name)
         written.append(out / name)
     for name in COLLECT_SCRIPTS:
-        shutil.copyfile(OFFLINE_DIR / name, out / name)
+        text = (OFFLINE_DIR / name).read_bytes()
+        if text.count(PACKAGE_TOKEN) != 1:
+            raise RuntimeError(f"{name}: the package stamp is missing")
+        (out / name).write_bytes(text.replace(PACKAGE_TOKEN, generated_at.encode("ascii")))
         written.append(out / name)
     for guide in sorted(OFFLINE_DIR.glob("KILAVUZ_*.md")):
         shutil.copyfile(guide, out / guide.name)

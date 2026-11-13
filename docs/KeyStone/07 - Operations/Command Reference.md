@@ -209,6 +209,7 @@ sh keystone_collect.sh                                            # Linux
 powershell -ExecutionPolicy Bypass -File keystone_collect.ps1 -Servers 10.0.0.1,10.0.0.2 -User postgres -SshUser admin
 ```
 
+- The first line shows the package's generation time (`Paket: 2026-11-13T00:10:00Z`, stamped by `bundle`); a script run from the repository says it is not a package. psql: PATH, the running server's folder, the service's folder, then the newest standard installation, pgAdmin, and finally it asks (folder or file, quotes allowed, three tries).
 - Host facts over SSH: the host script goes on stdin (`ssh user@server "sh -s"`), nothing is copied to the server; SSH asks its own password unless a key is set up. A server SSH cannot reach is skipped with a warning; its SQL evidence still goes. Without SSH access, the host script runs on the server separately and its `<server>_host.txt` is passed with `--host`.
 
 3. Import the archive (or single files from the pgAdmin fallback) and write the report:
