@@ -29,6 +29,9 @@ Design notes (2026-11-13, Hasan)
   Statistics younger than min_window are not judged.
 - Window and min_window are per rule: the window follows how fast the
   metric changes; six hours of statistics already tell something.
+- PG-PERF-003 warns from 20 % requested (Hasan): the same line as the
+  max_wal_size recommendation (PG-CONF-003, requested_share_limit 0.2), so a
+  report never recommends a larger max_wal_size while calling this healthy.
 - PG-CAP-005 measured over less than a day: the finding says it and is at
   most WARNING, as a nightly batch can fall in or out of a short period.
 - PG-PERF-002 judges active databases only (min_blocks read in the period);
@@ -104,7 +107,7 @@ INSERT INTO keystone.rule_threshold (rule_id, severity, threshold_value, thresho
 SELECT rd.rule_id, t.severity, t.threshold_value, t.threshold_unit
 FROM keystone.rule_definition rd
 JOIN (VALUES
-    ('PG-PERF-003', 'WARNING',  50,           'PERCENT'),
+    ('PG-PERF-003', 'WARNING',  20,           'PERCENT'),
     ('PG-PERF-002', 'WARNING',  5,            'PERCENT'),
     ('PG-CAP-005',  'WARNING',  10737418240,  'BYTE_PER_DAY'),
     ('PG-CAP-005',  'CRITICAL', 107374182400, 'BYTE_PER_DAY')

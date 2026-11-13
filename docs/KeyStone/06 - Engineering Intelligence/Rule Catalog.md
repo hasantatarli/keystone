@@ -889,7 +889,7 @@ Counters are cumulative; every rule here reads them over a window (ADR-0020): th
 | | |
 | --- | --- |
 | Evidence | `PG_CHECKPOINT_STATS`, required, 3 600 s; history of 8 days; primary rows only |
-| Condition | requested / (timed + requested) in the period ≥ 50 % → WARNING |
+| Condition | requested / (timed + requested) in the period ≥ 20 % → WARNING; the same line as the max_wal_size recommendation (PG-CONF-003 `requested_share_limit` 0.2), so the report never recommends a larger max_wal_size while calling this healthy (Hasan, 2026-11-13; first proposed 50 %) |
 | Parameters | `window` 24 h, `min_window` 6 h, `min_checkpoints` 10 |
 | Insufficient evidence | no primary row (`no_primary`), reset too recently (`statistics_too_young`), fewer than 10 checkpoints (`too_few_checkpoints`) |
 | Subject | SYSTEM |

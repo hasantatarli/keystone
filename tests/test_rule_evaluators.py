@@ -1715,7 +1715,7 @@ class CounterWindowTests(unittest.TestCase):
 class CheckpointPressureTests(unittest.TestCase):
     """PG-PERF-003."""
 
-    THRESHOLDS = [threshold("WARNING", 50, "PERCENT")]
+    THRESHOLDS = [threshold("WARNING", 20, "PERCENT")]
 
     def params(self, **extra):
         return with_params(window=DAY, min_window=6 * HOUR, min_checkpoints=10, **extra)
@@ -1730,12 +1730,16 @@ class CheckpointPressureTests(unittest.TestCase):
 
     def test_recent_change_is_seen_although_the_total_is_fine(self):
         """Since the reset 20 % requested; in the last day 80 %: the window tells what happens now."""
+        rows = [checkpoints(0, 10020, 2080), checkpoints(24, 10000, 2000)]   # total 17 %, last day 80 %
+        self.assertEqual(severities(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)),
+                         ["WARNING"])
+        self.assertEqual(engine.evaluate_checkpoint_pressure(rows[:1], self.params(), self.THRESHOLDS), [])
         rows = [checkpoints(0, 10020, 2580), checkpoints(24, 10000, 2500)]
         self.assertEqual(severities(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)),
                          ["WARNING"])
 
     def test_healthy_and_too_few(self):
-        rows = [checkpoints(0, 500, 100), checkpoints(24, 400, 90)]
+        rows = [checkpoints(0, 500, 100), checkpoints(24, 400, 90)]          # 10 of 110: 9 %
         self.assertEqual(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS), [])
         rows = [checkpoints(0, 503, 104), checkpoints(24, 500, 100)]
         with self.assertRaises(engine.InsufficientEvidence) as raised:

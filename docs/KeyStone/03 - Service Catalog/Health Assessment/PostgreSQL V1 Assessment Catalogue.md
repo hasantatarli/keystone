@@ -162,7 +162,7 @@ A health check shows performance indicators; it does not replace a Performance I
 | --- | --- | --- | --- | --- | --- |
 | PG-PERF-001 | Most expensive queries | Top queries by total time shown as context; finding when one statement dominates (≥ X % of total time) | Gap: PG-012 (needs `pg_stat_statements`) | pg_stat_statements extension | P2 |
 | **PG-PERF-002** | Low cache hit ratio | Share read from disk ≥ 5 % (hit < 95 %) on a database that read ≥ 1 M blocks in the period | Done: PG_DATABASE_STATS (PG024), counter window (ADR-0020) | — | Done |
-| **PG-PERF-003** | Checkpoints too frequent | Requested checkpoints ≥ 50 % of ≥ 10 in the period (`max_wal_size` too small) | Done: PG_CHECKPOINT_STATS, counter window (ADR-0020) | — | Done |
+| **PG-PERF-003** | Checkpoints too frequent | Requested checkpoints ≥ 20 % of ≥ 10 in the period (the line of the max_wal_size recommendation) (`max_wal_size` too small) | Done: PG_CHECKPOINT_STATS, counter window (ADR-0020) | — | Done |
 | PG-PERF-004 | Deadlocks and rollbacks | Deadlocks or rollback ratio increased between checks | Gap: database statistics with history | — | P3 |
 
 ---

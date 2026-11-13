@@ -405,7 +405,7 @@ EXPECTED_RULES = {
     "PG-PERF-003": {
         "assessment": "PG_PERFORMANCE_HEALTH",
         "default_severity": None,
-        "thresholds": {"WARNING": (Decimal("50"), "PERCENT")},
+        "thresholds": {"WARNING": (Decimal("20"), "PERCENT")},
         "evidence": {"PG_CHECKPOINT_STATS": (True, 3600)},
         "parameters": {"window": (Decimal("86400"), "SECOND"), "min_window": (Decimal("21600"), "SECOND"),
                        "min_checkpoints": (Decimal("10"), "COUNT")},
