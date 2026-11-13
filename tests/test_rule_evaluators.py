@@ -1822,3 +1822,107 @@ class TempFilesTests(unittest.TestCase):
             engine.evaluate_temp_files([dbstats("app", 0, temp_bytes=40 * self.GB)], self.params(), self.THRESHOLDS)
         self.assertIn("[period_unknown]", str(raised.exception))
         self.assertIn('"minimum_hours": 6', str(raised.exception))
+
+
+# V062: sequential scans over days, lock waits at a moment.
+GB = 1024 ** 3
+
+
+def access_db(name, hours_ago, stats_reset=None):
+    return {"snapshot_id": 0, "target_id": 1, "captured_at": NOW - timedelta(hours=hours_ago),
+            "record_type": "DATABASE", "database_name": name, "schema_name": None, "object_oid": None,
+            "object_name": None, "seq_scan": None, "seq_tup_read": None, "idx_scan": None,
+            "n_live_tup": None, "table_size_bytes": None, "stats_reset": stats_reset}
+
+
+def access(name, oid, table, hours_ago, seq, read, idx, live=1_000_000, size=5 * GB, stats_reset=None):
+    return {"snapshot_id": oid * 100 + hours_ago, "target_id": 1, "captured_at": NOW - timedelta(hours=hours_ago),
+            "record_type": "TABLE", "database_name": name, "schema_name": "public", "object_oid": oid,
+            "object_name": table, "seq_scan": seq, "seq_tup_read": read, "idx_scan": idx, "n_live_tup": live,
+            "table_size_bytes": size, "stats_reset": stats_reset}
+
+
+class HeavySeqScanTests(unittest.TestCase):
+    """PG-IDX-005."""
+
+    THRESHOLDS = [threshold("WARNING", 50, "PERCENT")]
+
+    def params(self):
+        return with_params(window=7 * DAY, min_window=DAY, min_table_size=GB, min_seq_scans_per_day=100,
+                           min_rows_share=0.5)
+
+    def test_full_scans_of_a_large_table_over_the_week(self):
+        rows = [access_db("app", 0),
+                access("app", 1, "orders", 0, seq=3000, read=2_400_000_000, idx=1000),
+                access("app", 2, "customers", 0, seq=3000, read=30_000, idx=100),      # LIMIT scans
+                access("app", 3, "small", 0, seq=9000, read=9_000_000, idx=0, size=10 ** 6),
+                access("app", 4, "indexed", 0, seq=1000, read=800_000_000, idx=90_000),
+                access("app", 1, "orders", 6 * 24, seq=1000, read=800_000_000, idx=500),
+                access("app", 2, "customers", 6 * 24, seq=1000, read=10_000, idx=50),
+                access("app", 4, "indexed", 6 * 24, seq=0, read=0, idx=0)]
+        findings = engine.evaluate_heavy_seq_scans(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["observed_value"]) for f in findings],
+                         [("app.public.orders", 80.0)])
+        self.assertEqual(findings[0]["template_values"]["rows_per_scan"], 800_000)
+        self.assertEqual((findings[0]["details"]["period_mode"], findings[0]["details"]["period_seconds"]),
+                         ("WINDOW", 6 * DAY))
+
+    def test_rarely_scanned_or_dropped_tables_are_not_judged(self):
+        rows = [access_db("app", 0),
+                access("app", 1, "orders", 0, seq=1050, read=840_000_000, idx=10),     # 50 in 6 days
+                access("app", 9, "gone", 30, seq=99_999, read=99_999_000_000, idx=0),
+                access("app", 1, "orders", 6 * 24, seq=1000, read=800_000_000, idx=5)]
+        self.assertEqual(engine.evaluate_heavy_seq_scans(rows, self.params(), self.THRESHOLDS), [])
+
+    def test_without_history_since_an_unknown_start(self):
+        rows = [access_db("app", 0), access("app", 1, "orders", 0, seq=500, read=400_000_000, idx=100)]
+        findings = engine.evaluate_heavy_seq_scans(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual(findings[0]["details"]["period_mode"], "TOTAL")
+
+    def test_reset_too_recently(self):
+        reset = NOW - timedelta(hours=3)
+        rows = [access_db("app", 0, reset), access("app", 1, "orders", 0, 500, 400_000_000, 100, stats_reset=reset)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_heavy_seq_scans(rows, self.params(), self.THRESHOLDS)
+        self.assertIn("[statistics_too_young]", str(raised.exception))
+
+
+def session(pid, state="active", wait=None, blocked_by=None, wait_start=None, query_start=None, **extra):
+    return {"snapshot_id": 1, "target_id": 1, "captured_at": NOW, "pid": pid, "state": state,
+            "backend_type": "client backend", "wait_event_type": "Lock" if wait else None, "wait_event": wait,
+            "blocked_by": blocked_by, "lock_wait_start": wait_start, "query_start": query_start,
+            "transaction_start": query_start, "state_change": NOW, "database_name": "app",
+            "user_name": extra.get("user", "app"), "application_name": extra.get("app", "web"),
+            "query_text": extra.get("query", "UPDATE orders SET ...")}
+
+
+class LockWaitTests(unittest.TestCase):
+    """PG-LOCK-001."""
+
+    THRESHOLDS = [threshold("WARNING", 30, "SECOND"), threshold("CRITICAL", 300, "SECOND")]
+
+    def test_waiting_session_and_its_blocker(self):
+        rows = [session(10, state="idle in transaction", query_start=NOW - timedelta(minutes=20),
+                        user="batch", app="loader", query="UPDATE orders SET status = 'x'"),
+                session(11, wait="transactionid", blocked_by=[10], wait_start=NOW - timedelta(minutes=6),
+                        query_start=NOW - timedelta(minutes=7)),
+                session(12, wait="tuple", blocked_by=[11], wait_start=NOW - timedelta(seconds=10)),
+                session(13)]
+        findings = engine.evaluate_lock_waits(rows, rule(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings], [("11", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"], {"pid": 11, "waited_seconds": 360, "blockers": "10"})
+        details = findings[0]["details"]
+        self.assertEqual((details["blocker_pid"], details["blocker_user"], details["blocker_state"]),
+                         (10, "batch", "idle in transaction"))
+        self.assertEqual(details["blocker_query"], "UPDATE orders SET status = 'x'")
+
+    def test_before_14_the_wait_is_counted_from_the_statement(self):
+        rows = [session(11, wait="relation", blocked_by=[99], query_start=NOW - timedelta(seconds=45))]
+        findings = engine.evaluate_lock_waits(rows, rule(), self.THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])
+        self.assertTrue(findings[0]["template_values"]["_alt"])
+        self.assertNotIn("blocker_pid", findings[0]["details"])          # blocker not in the snapshot
+
+    def test_no_lock_waits(self):
+        rows = [session(10), session(11, state="idle")]
+        self.assertEqual(engine.evaluate_lock_waits(rows, rule(), self.THRESHOLDS), [])

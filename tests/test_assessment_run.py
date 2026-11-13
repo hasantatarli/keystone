@@ -155,7 +155,7 @@ class AssessmentRunTests(unittest.TestCase):
         results = self.results(run_id)
 
         self.assertEqual(set(results), {"PG-TRAN-001", "PG-TRAN-002", "PG-TRAN-003", "PG-TRAN-004",
-                                        "PG-TRAN-005", "PG-TRAN-006", "PG-TRAN-007"})
+                                        "PG-TRAN-005", "PG-TRAN-006", "PG-TRAN-007", "PG-LOCK-001"})
         self.assertEqual(results["PG-TRAN-004"]["outcome"], "INSUFFICIENT_EVIDENCE")
         self.assertEqual(results["PG-TRAN-005"]["outcome"], "INSUFFICIENT_EVIDENCE")
         self.assertEqual(results["PG-TRAN-001"]["outcome"], "HEALTHY")

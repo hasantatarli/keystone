@@ -226,6 +226,9 @@ TEXTS = {
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
         "col_os": "İşletim sistemi",
+        "col_table": "Tablo", "col_table_size": "Boyut", "col_seq_scans": "Sequential scan",
+        "col_index_scans": "Index scan", "col_seq_share": "Sequential payı", "col_rows_per_scan": "Tarama başına satır",
+        "col_wait": "Bekleme", "col_blocker": "Bloklayan oturum", "col_blocker_query": "Bloklayanın son sorgusu",
         "col_period": "Süre", "col_hit_ratio": "Cache hit", "col_blocks_read": "Diskten okunan blok",
         "col_disk_share": "Diskten okunan pay", "col_temp_bytes": "Geçici dosya", "col_temp_files": "Dosya sayısı",
         "col_per_day": "Günlük", "col_requested": "Zorunlu", "col_timed": "Zamanında", "col_requested_share": "Zorunlu payı",
@@ -462,6 +465,9 @@ TEXTS = {
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
         "col_os": "Operating system",
+        "col_table": "Table", "col_table_size": "Size", "col_seq_scans": "Sequential scans",
+        "col_index_scans": "Index scans", "col_seq_share": "Sequential share", "col_rows_per_scan": "Rows per scan",
+        "col_wait": "Waiting", "col_blocker": "Blocking session", "col_blocker_query": "Blocker's last query",
         "col_period": "Period", "col_hit_ratio": "Cache hit", "col_blocks_read": "Blocks read from disk",
         "col_disk_share": "Share read from disk", "col_temp_bytes": "Temporary files", "col_temp_files": "Files",
         "col_per_day": "Per day", "col_requested": "Requested", "col_timed": "Timed", "col_requested_share": "Requested share",
@@ -1777,9 +1783,10 @@ def setting_value_text(value, unit, t):
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
                 "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age",
-                "requested", "total", "read_blocks", "temp_files"}
+                "requested", "total", "read_blocks", "temp_files", "seq_scans", "rows_per_scan", "live_rows"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
-DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds", "period_seconds"}
+DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds", "period_seconds",
+                   "waited_seconds"}
 SIZE_VALUES = {"index_size", "size_bytes", "temp_bytes", "per_day"}
 DATE_VALUES = {"end_of_support"}
 
@@ -1859,9 +1866,16 @@ def finding_fields(f, t):
             details[key] = fmt_clock(details[key])
     if details.get("period_mode"):               # counter windows (V061)
         details["period"] = period_text(details, t)
-    for key in ("blocks_read", "blocks_hit", "requested", "timed", "temp_files"):
+    for key in ("blocks_read", "blocks_hit", "requested", "timed", "temp_files", "seq_scans", "index_scans",
+                "rows_per_scan"):
         if isinstance(details.get(key), int) and not isinstance(details.get(key), bool):
             details[key] = f"{details[key]:,}"
+    if isinstance(details.get("size_bytes"), (int, float)):
+        details["size_bytes"] = fmt_bytes(details["size_bytes"])
+    if details.get("blocker_pid") is not None:     # PG-LOCK-001: who blocks, in one cell
+        details["blocker"] = " · ".join(str(x) for x in (
+            details["blocker_pid"], details.get("blocker_user"), details.get("blocker_application"),
+            details.get("blocker_state")) if x)
     if isinstance(details.get("temp_bytes"), (int, float)):
         details["temp_bytes"] = fmt_bytes(details["temp_bytes"])
     if details.get("hit_ratio") is not None:
@@ -1927,6 +1941,13 @@ FINDING_COLUMNS = {
                     ("observed", "col_behind"), ("reference", "col_reference")],
     "PG-LIFE-002": [("node_name", "detail_node"), ("version", "col_version"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
+    "PG-IDX-005": [("database_name", "detail_database"), ("table", "col_table"), ("size_bytes", "col_table_size"),
+                   ("seq_scans", "col_seq_scans"), ("index_scans", "col_index_scans"),
+                   ("observed", "col_seq_share"), ("rows_per_scan", "col_rows_per_scan"), ("period", "col_period")],
+    "PG-LOCK-001": [("pid", "col_pid"), ("observed", "col_wait"), ("database", "detail_database"),
+                    ("user", "detail_user"), ("application", "detail_application"),
+                    ("blocker", "col_blocker"), ("blocker_query", "col_blocker_query"),
+                    ("last_query", "detail_last_query")],
     "PG-PERF-003": [("requested", "col_requested"), ("timed", "col_timed"),
                     ("observed", "col_requested_share"), ("period", "col_period")],
     "PG-PERF-002": [("database_name", "detail_database"), ("hit_ratio", "col_hit_ratio"),

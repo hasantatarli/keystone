@@ -923,6 +923,37 @@ Unit tests: the window (oldest inside, reset and failover break the series, too 
 
 ---
 
+# Batch of 2026-11-13 (2) — sequential scans and lock waits (V062, PG025)
+
+## PG-IDX-005 — Heavy Sequential Scans (PG_INDEX_HEALTH, topic INDEXES)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TABLE_ACCESS` (PG025: `pg_stat_user_tables` scans, live rows, `pg_relation_size`, the database's `stats_reset`; DATABASE row per database), required, 86 400 s; history: latest snapshot and the first snapshot of each table per day over 8 days |
+| Condition | table ≥ `min_table_size` (1 GB); ≥ `min_seq_scans_per_day` (100) sequential scans a day (in the period when its length is unknown); rows read per scan ≥ `min_rows_share` (0.5) × live rows; sequential share of scans ≥ 50 % → WARNING |
+| Window | `window` 7 days, `min_window` 24 h (ADR-0020); a ratio, so without history since the reset or an unknown start, with the period stated |
+| Insufficient evidence | large tables but statistics reset within 24 h (`statistics_too_young`) |
+| Subject | TABLE |
+
+Not a verdict (MEANING): reports reading most of a table rightly scan it.
+
+## PG-LOCK-001 — Lock Waits (PG_TRANSACTION_HEALTH, topic TRANSACTIONS)
+
+| | |
+| --- | --- |
+| Evidence | `PG_ACTIVITY_SNAPSHOT` with `blocked_by` (`pg_blocking_pids`, only for sessions waiting on a lock) and `lock_wait_start` (`pg_locks.waitstart`, PostgreSQL 14+), required, 600 s |
+| Condition | a session with wait_event_type Lock waiting ≥ 30 s → WARNING, ≥ 5 min → CRITICAL |
+| Before 14 | the wait counts from the statement's start (FINDING_ALT: approximate) |
+| Details | the first blocking session in the snapshot: pid, user, application, state, transaction start, last query |
+| Subject | SESSION |
+
+A moment: how often locks happen needs frequent collection (ADR-0020 decision 6).
+
+**Verification (V062)**  
+Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed, rarely scanned and dropped tables, no history, reset too recently; a waiting session with an idle-in-transaction blocker, before 14, no waits. Full suite 470 OK. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

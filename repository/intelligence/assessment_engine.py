@@ -414,7 +414,9 @@ def load_latest_activity_snapshot(conn, target_id):
                 wait_event,
                 state,
                 query_text,
-                backend_type
+                backend_type,
+                blocked_by,
+                lock_wait_start
             FROM postgresql.activity_snapshot
             WHERE target_id = %s
               AND captured_at =
@@ -622,6 +624,39 @@ def load_checkpoint_stats_history(conn, target_id):
                               WHERE target_id = %s) - make_interval(secs => %s)
         ORDER BY captured_at DESC
         """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
+
+
+def load_table_access_history(conn, target_id):
+    """PG_TABLE_ACCESS: the latest snapshot of every database, and one earlier snapshot of each table
+    per day over COUNTER_HISTORY_SECONDS (the first of the day), newest first.
+
+    Tables are many: a row per table per collection over a week would be too much to read; a day's
+    granularity is enough for a window of days (PG-IDX-005).
+    """
+    return conn.execute(
+        """
+        WITH latest AS (
+            SELECT database_name, max(captured_at) AS captured_at
+            FROM postgresql.table_access_snapshot WHERE target_id = %(t)s GROUP BY database_name
+        ),
+        daily AS (
+            SELECT DISTINCT ON (a.database_name, a.object_oid, date_trunc('day', a.captured_at)) a.snapshot_id
+            FROM postgresql.table_access_snapshot a
+            JOIN latest l ON l.database_name = a.database_name
+            WHERE a.target_id = %(t)s AND a.record_type = 'TABLE'
+              AND a.captured_at < l.captured_at
+              AND a.captured_at >= l.captured_at - make_interval(secs => %(h)s)
+            ORDER BY a.database_name, a.object_oid, date_trunc('day', a.captured_at), a.captured_at
+        )
+        SELECT a.snapshot_id, a.target_id, a.captured_at, a.record_type, a.database_name, a.schema_name,
+               a.object_oid, a.object_name, a.seq_scan, a.seq_tup_read, a.idx_scan, a.n_live_tup,
+               a.table_size_bytes, a.stats_reset
+        FROM postgresql.table_access_snapshot a
+        JOIN latest l ON l.database_name = a.database_name
+        WHERE a.target_id = %(t)s
+          AND (a.captured_at = l.captured_at OR a.snapshot_id IN (SELECT snapshot_id FROM daily))
+        ORDER BY a.captured_at DESC, a.database_name, a.schema_name, a.object_name
+        """, {"t": target_id, "h": COUNTER_HISTORY_SECONDS}).fetchall()
 
 
 def load_database_stats_history(conn, target_id):
@@ -2778,6 +2813,108 @@ def evaluate_temp_files(rows, rule, thresholds):
     return findings
 
 
+def evaluate_heavy_seq_scans(rows, rule, thresholds):
+    """PG-IDX-005: a large table read mostly by sequential scans that each read most of it.
+
+    Over the rule's window (days) when Keystone has history; otherwise since the reset, or since an
+    unknown start: the share of scans is a ratio. At least min_seq_scans_per_day sequential scans
+    (in the period when its length is unknown) and min_rows_share of the live rows per scan.
+    """
+    latest_at = {}
+    for row in rows:
+        if row["record_type"] == "DATABASE":
+            latest_at.setdefault(row["database_name"], row["captured_at"])
+    tables = {}
+    for row in rows:
+        if row["record_type"] == "TABLE":
+            tables.setdefault((row["database_name"], row["object_oid"]), []).append(row)
+    min_size = parameter(rule, "min_table_size")
+    findings, big, judged = [], 0, 0
+    for (database, _), snaps in tables.items():
+        latest = snaps[0]
+        if latest["captured_at"] != latest_at.get(database):
+            continue                                # dropped since
+        if (latest["table_size_bytes"] or 0) < min_size or not latest["n_live_tup"]:
+            continue
+        big += 1
+        w = counter_window(snaps, ("seq_scan", "seq_tup_read", "idx_scan"), parameter(rule, "window"),
+                           parameter(rule, "min_window"), unknown_period=True)
+        if w is None:
+            continue
+        judged += 1
+        seq, read, idx = w["delta"]["seq_scan"], w["delta"]["seq_tup_read"], w["delta"]["idx_scan"]
+        per_day = seq * 86400 / w["seconds"] if w["seconds"] else seq
+        if seq == 0 or per_day < parameter(rule, "min_seq_scans_per_day"):
+            continue
+        rows_per_scan = read / seq
+        if rows_per_scan < parameter(rule, "min_rows_share") * latest["n_live_tup"]:
+            continue                                # scans stop early (LIMIT, say): not full reads
+        share = round(100 * seq / (seq + idx), 1)
+        matched = match_threshold(share, thresholds, "PERCENT")
+        if matched is None:
+            continue
+        table = f"{latest['schema_name']}.{latest['object_name']}"
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": latest["snapshot_id"],
+            "template_values": {"table": table, "database_name": database, "seq_scans": seq, "share": share,
+                                "rows_per_scan": round(rows_per_scan), "live_rows": latest["n_live_tup"],
+                                "size_bytes": latest["table_size_bytes"]},
+            "observed_value": share, "observed_unit": "PERCENT",
+            "subject_type": "TABLE", "subject_identifier": f"{database}.{table}",
+            "details": {"database_name": database, "table": table, "seq_scans": seq, "index_scans": idx,
+                        "rows_per_scan": round(rows_per_scan), "live_rows": latest["n_live_tup"],
+                        "size_bytes": latest["table_size_bytes"], **window_details(w)}})
+    if big and not judged:
+        raise InsufficientEvidence("PG_TABLE_ACCESS", "statistics_too_young",
+                                   "Table statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    return findings
+
+
+def evaluate_lock_waits(rows, rule, thresholds):
+    """PG-LOCK-001: sessions waiting on a lock, and who blocks them, at the moment of collection.
+
+    The wait starts at pg_locks.waitstart (PostgreSQL 14+); before 14 at the statement's start,
+    which can be earlier: the finding says so. One snapshot sees only what waits at that moment.
+    """
+    by_pid = {row["pid"]: row for row in rows}
+    findings = []
+    for row in rows:
+        if row.get("wait_event_type") != "Lock":
+            continue
+        start, exact = row.get("lock_wait_start"), True
+        if start is None:
+            start, exact = row.get("query_start"), False
+        if start is None:
+            continue
+        waited = (row["captured_at"] - start).total_seconds()
+        matched = match_threshold(waited, thresholds, "SECOND")
+        if matched is None:
+            continue
+        blockers = [by_pid[p] for p in (row.get("blocked_by") or []) if p in by_pid]
+        blocker = blockers[0] if blockers else None
+        values = {"pid": row["pid"], "waited_seconds": round(waited),
+                  "blockers": ", ".join(str(p) for p in (row.get("blocked_by") or [])) or "?"}
+        if not exact:
+            values["_alt"] = True
+        details = session_details(row)
+        details.update({"wait_event": f"Lock: {row.get('wait_event')}", "wait_start_exact": exact,
+                        "blocked_by": values["blockers"]})
+        if blocker is not None:
+            details.update({
+                "blocker_pid": blocker["pid"], "blocker_user": blocker.get("user_name"),
+                "blocker_application": blocker.get("application_name"),
+                "blocker_state": blocker.get("state"),
+                "blocker_transaction_start": iso(blocker.get("transaction_start")),
+                "blocker_query": session_details(blocker).get("last_query")})
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": values, "observed_value": round(waited, 1), "observed_unit": "SECOND",
+            "subject_type": "SESSION", "subject_identifier": str(row["pid"]),
+            "details": {k: v for k, v in details.items() if v is not None}})
+    return findings
+
+
 EVIDENCE_LOADERS = {
     "KEYSTONE_RELEASE_REFERENCE": load_release_reference,
     "KEYSTONE_OS_REFERENCE": load_os_reference,
@@ -2798,6 +2935,7 @@ EVIDENCE_LOADERS = {
     "PG_SEQUENCE_CAPACITY": load_latest_sequence_capacity,
     "PG_CHECKPOINT_STATS": load_checkpoint_stats_history,
     "PG_DATABASE_STATS": load_database_stats_history,
+    "PG_TABLE_ACCESS": load_table_access_history,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -2946,6 +3084,8 @@ RULE_EVALUATORS = {
     "PG-PERF-003": evaluate_checkpoint_pressure,
     "PG-PERF-002": evaluate_cache_hit,
     "PG-CAP-005": evaluate_temp_files,
+    "PG-IDX-005": evaluate_heavy_seq_scans,
+    "PG-LOCK-001": evaluate_lock_waits,
 }
 
 

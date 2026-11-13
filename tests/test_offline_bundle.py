@@ -645,7 +645,7 @@ class OfflineImportTests(unittest.TestCase):
         database = (self.dir / "scripts" / "keystone_database.sql").read_text(encoding="utf-8")
         guarded = "CASE WHEN pg_is_in_recovery() THEN NULL ELSE"
         self.assertEqual(node.count(guarded), 9)          # the SYSTEM collectors, not the 3 NODE ones
-        self.assertEqual(database.count(guarded), 7)      # the DATABASE collectors, not PG_INDEX_USAGE
+        self.assertEqual(database.count(guarded), 8)      # the DATABASE collectors, not PG_INDEX_USAGE
         # The guard is what PostgreSQL skips at run time: a failing subquery behind it does not run.
         with self.server.connect("postgres") as conn:
             skipped = conn.execute("SELECT CASE WHEN NOT pg_is_in_recovery() THEN NULL ELSE "
