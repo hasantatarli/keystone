@@ -373,7 +373,9 @@ class OfflineImportTests(unittest.TestCase):
                                 "WHERE health_check_id = %s AND collector_key = 'PG_HOST_SNAPSHOT'",
                                 (check_id,)).fetchone()
         self.assertEqual(row["status"], "FAILED")
-        self.assertIn("generate the scripts again", row["status_message"])
+        self.assertIn("generate the package again", row["status_message"])
+        made = doc["generated_at"][:16].replace("T", " ")
+        self.assertIn(f"the package of {made} UTC", row["status_message"])
         self.assertEqual(host["status"], "NOT_COLLECTED")                     # no host file given
 
     def test_cluster_files_go_to_their_servers_by_name(self):

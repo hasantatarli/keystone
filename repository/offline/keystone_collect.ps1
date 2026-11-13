@@ -16,6 +16,9 @@
 param([string]$Servers, [string]$Port, [string]$User, [string]$SshUser, [string]$OutDir, [switch]$NoHost)
 
 $ErrorActionPreference = "Continue"
+# Stamped by repository.offline.bundle when the package is generated: which package is running.
+$Package = "__KEYSTONE_PACKAGE__"
+if ($Package.StartsWith("__")) { $Package = "gelistirme kopyasi (paket degil)" }
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
@@ -53,8 +56,12 @@ function Find-Psql {
                   "$env:ProgramFiles\pgAdmin 4\*\runtime\psql.exe",
                   "${env:ProgramFiles(x86)}\pgAdmin 4\*\runtime\psql.exe",
                   "$env:LOCALAPPDATA\Programs\pgAdmin 4\runtime\psql.exe")
-    $found = Get-ChildItem -Path $patterns -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
-    if ($found) { return $found[0].FullName }
+    # The newest PostgreSQL first (16 before 9.6), then pgAdmin's psql.
+    $found = Get-ChildItem -Path $patterns -ErrorAction SilentlyContinue |
+        Sort-Object @{ Expression = { if ($_.FullName -match 'PostgreSQL[\\/](\d+)(?:\.(\d+))?') {
+                                          [int]$Matches[1] * 100 + [int]("0" + $Matches[2]) } else { -1 } }
+                       Descending = $true }, @{ Expression = { $_.FullName }; Descending = $true }
+    if ($found) { return @($found)[0].FullName }
     for ($try = 0; $try -lt 3; $try++) {
         $found = Resolve-Psql (Read-Host "psql.exe bulunamadi. psql.exe'nin ya da bulundugu klasorun yolunu girin (ornek: C:\Program Files\PostgreSQL\16\bin)")
         if ($found) { return $found }
@@ -65,9 +72,13 @@ function Find-Psql {
 
 function Safe($Text) { return ($Text -replace '[^A-Za-z0-9._-]', '_') }
 
+# Dot-sourced (tests): the functions only.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+Write-Host "Keystone offline kanit toplama (salt okunur). Paket: $Package"
 $Psql = Find-Psql
 if (-not $Psql) { Write-Error "psql.exe bulunamadi; hicbir sey toplanmadi."; exit 1 }
-Write-Host "Keystone offline kanit toplama (salt okunur). psql: $Psql"
+Write-Host "psql: $Psql"
 
 $Hosts = if ($Servers) { $Servers } else { Ask "Sunucu(lar), virgulle" "localhost" }
 if (-not $Port) { $Port = Ask "Port" "5432" }

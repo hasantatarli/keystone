@@ -24,6 +24,8 @@ powershell -ExecutionPolicy Bypass -File keystone_collect.ps1
 
 `Unblock-File`, internetten indirilen dosyalara Windows'un koyduğu engeli kaldırır.
 
+Script'in ilk satırı paketin tarihini yazar: `Keystone offline kanit toplama (salt okunur). Paket: 2026-11-13T00:10:00Z`. Bu tarih size gönderilen paketinkiyle aynı olmalı; farklıysa eski bir klasördeki script çalışıyordur.
+
 **Linux:**
 
 ```

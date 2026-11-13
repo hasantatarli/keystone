@@ -518,8 +518,11 @@ def collector_rows(chosen, key, current):
         if entry is None:
             raise BundleError(f"{Path(d['file']).name} has no {key}; generate the scripts again")
         if current.get(key) and entry["checksum"] != current[key]["checksum"]:
-            raise BundleError(f"{key} changed since {Path(d['file']).name} was generated; "
-                              "generate the scripts again and collect anew")
+            made = d.get("generated_at")
+            made = made.strftime("%Y-%m-%d %H:%M UTC") if hasattr(made, "strftime") else made or "?"
+            raise BundleError(f"{key} changed since the package of {made} that collected "
+                              f"{Path(d['file']).name} was generated; generate the package again "
+                              "(python -m repository.offline.bundle) and collect anew")
         if entry["rows"] is None:
             raise BundleError(f"{key} is collected on the primary; {Path(d['file']).name} is from a replica")
         rows.extend(entry["rows"])

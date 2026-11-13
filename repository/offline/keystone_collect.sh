@@ -16,18 +16,23 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%Y%m%d-%H%M%S)
 
+# Stamped by repository.offline.bundle when the package is generated: which package is running.
+PACKAGE="__KEYSTONE_PACKAGE__"
+case "$PACKAGE" in __*) PACKAGE="gelistirme kopyasi (paket degil)" ;; esac
+
 ask() { printf "%s" "$1" >&2; read -r answer; [ -n "$answer" ] && echo "$answer" || echo "$2"; }
 
+echo "Keystone offline kanit toplama (salt okunur). Paket: $PACKAGE"
 PSQL=$(command -v psql 2>/dev/null || true)
 if [ -z "$PSQL" ]; then
-    for p in /usr/lib/postgresql/*/bin/psql /usr/pgsql-*/bin/psql /opt/homebrew/bin/psql; do
-        [ -x "$p" ] && PSQL=$p
-    done
+    # The newest installed version (16 before 9.6).
+    PSQL=$(for p in /usr/lib/postgresql/*/bin/psql /usr/pgsql-*/bin/psql /opt/homebrew/bin/psql; do
+               [ -x "$p" ] && echo "$p"
+           done | sort -V 2>/dev/null | tail -n 1)
 fi
 [ -z "$PSQL" ] && PSQL=$(ask "psql bulunamadi. Tam yolu: " "")
 [ -x "$PSQL" ] || { echo "psql calistirilamiyor: $PSQL" >&2; exit 1; }
-
-echo "Keystone offline kanit toplama (salt okunur)"
+echo "psql: $PSQL"
 HOSTS=$(ask "Sunucu(lar), virgulle (bu makinedeki sunucu icin: local) [local]: " "local")
 PORT=$(ask "Port [5432]: " "5432")
 PGUSER_IN=$(ask "Kullanici [postgres]: " "postgres")
