@@ -206,6 +206,8 @@ PostgreSQL counterparts of the most valuable screens, in order: regressed querie
 
 Positioning: one tool for DBAs and consultancies managing many customers: company, server, rule, recommendation, fix command, offline mode.
 
+How that SQL Server tool was used (Hasan, 2026-11-13): a monitoring team's alerts reached the DBAs at once; the DBAs then opened the tool to investigate and act. Its graphs showed what was happening at that moment, or at the time of the incident; it had no alerting of its own. Keystone takes the same place (ADR-0005, ADR-0013): crisis alerting stays with the customer's monitoring; Keystone explains what happened, why, and what to do, and notifies on findings, not on raw metrics. Example: a disk filled by temporary files is CAP-001's finding (data disk usage, evaluated often); CAP-005 (temporary file use over a window) shows whether it is a habit or one query, and how to prevent it. Collection frequency, evaluation frequency (assessment schedule) and a rule's window are separate settings. Graph candidates named so far: checkpoint ratio and lock waits over time.
+
 ### AI assistant
 
 ADR-0012 already defines it. The intended interaction: a metric is high on a screen; the user asks "how was this at the same time last month?" and gets an answer built from Keystone's own history and findings, with the evidence it used. This depends on layers 1-3 above: the assistant explains derived evidence and history; it does not invent numbers.
