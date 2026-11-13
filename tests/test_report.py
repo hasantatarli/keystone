@@ -157,7 +157,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 22 / 29 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 23 / 30 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):
@@ -1362,3 +1362,44 @@ class WindowsCommandTests(unittest.TestCase):
         self.assertTrue(any("patronictl" in text for _, text in both))
         self.assertFalse(any("patronictl" in text for _, text in windows))
         self.assertTrue(any("ALTER SYSTEM" in text for _, text in windows))
+
+
+class CounterWindowTextTests(unittest.TestCase):
+    """V061: the period a counter rule measured over, and per-day sizes."""
+
+    T = report.TEXTS["tr"]
+
+    def finding(self, rule_key, observed, unit, details, values):
+        return {"rule_key": rule_key, "observed_value": observed, "observed_unit": unit,
+                "details": details, "template_values": values}
+
+    def test_period_column(self):
+        fields = report.finding_fields(self.finding(
+            "PG-PERF-002", 10.0, "PERCENT",
+            {"database_name": "app", "hit_ratio": 90.0, "blocks_read": 10_000_000, "blocks_hit": 90_000_000,
+             "period_mode": "WINDOW", "period_seconds": 86400, "period_since": "2026-11-12T12:00:00+00:00",
+             "captured_at": "2026-11-13T12:00:00+00:00"},
+            {"database_name": "app", "hit": 90.0, "read_blocks": 10_000_000}), self.T)
+        self.assertEqual((fields["period"], fields["hit_ratio"], fields["blocks_read"], fields["observed"]),
+                         ("son 1 gün", "%90", "10,000,000", "%10"))
+
+    def test_since_reset_and_unknown_start(self):
+        since = report.period_text({"period_mode": "SINCE_RESET", "period_seconds": 3 * 86400,
+                                    "period_since": "2026-11-10T09:00:00+00:00"}, self.T)
+        self.assertEqual(since, "son 3 gün · 10.11.2026 sıfırlamasından beri")
+        self.assertEqual(report.period_text({"period_mode": "TOTAL"}, self.T),
+                         "istatistiklerin başlangıcından beri (tarih bilinmiyor)")
+
+    def test_temporary_files_per_day(self):
+        self.assertEqual(report.fmt_quantity(10 * 1024 ** 3, "BYTE_PER_DAY", self.T),
+                         report.fmt_bytes(10 * 1024 ** 3) + "/gün")
+        fields = report.finding_fields(self.finding(
+            "PG-CAP-005", 160 * 1024 ** 3, "BYTE_PER_DAY",
+            {"database_name": "app", "temp_bytes": 40 * 1024 ** 3, "temp_files": 1200,
+             "period_mode": "WINDOW", "period_seconds": 6 * 3600, "period_since": "2026-11-13T06:00:00+00:00",
+             "captured_at": "2026-11-13T12:00:00+00:00"},
+            {"database_name": "app", "temp_bytes": 40 * 1024 ** 3, "temp_files": 1200,
+             "period_seconds": 6 * 3600, "per_day": 160 * 1024 ** 3, "_alt": True}), self.T)
+        self.assertEqual((fields["temp_bytes"], fields["temp_files"], fields["period"]),
+                         (report.fmt_bytes(40 * 1024 ** 3), "1,200", "son 6 saat"))
+        self.assertEqual(report.template_value_text("period_seconds", 6 * 3600, self.T), "6 saat")

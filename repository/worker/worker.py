@@ -2210,6 +2210,13 @@ def save_checkpoint_stats_snapshot(conn, task, rows):
                 ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
 
 
+def save_database_stats_snapshot(conn, task, rows):
+    """Persist PG_DATABASE_STATS: pg_stat_database counters, one row per database."""
+    insert_rows(conn, "database_stats_snapshot", task, rows,
+                ("database_name", "xact_commit", "xact_rollback", "blks_read", "blks_hit",
+                 "temp_files", "temp_bytes", "stats_reset", "in_recovery"))
+
+
 def insert_rows(conn, table, task, rows, columns, casts=None):
     """Insert collector rows into a postgresql.* table; one captured_at per collection."""
     if len({r["captured_at"] for r in rows}) > 1:
@@ -2294,6 +2301,7 @@ COLLECTOR_HANDLERS = {
     "PG_REPLICATION_STATUS": save_replication_status_snapshot,
     "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
     "PG_CHECKPOINT_STATS": save_checkpoint_stats_snapshot,
+    "PG_DATABASE_STATS": save_database_stats_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,

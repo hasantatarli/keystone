@@ -173,7 +173,7 @@ class HealthCheckTests(unittest.TestCase):
                          ["PG_BACKUP_HEALTH", "PG_CAPACITY_HEALTH", "PG_CONFIGURATION_HEALTH",
                           "PG_CONFIGURATION_TUNING",
                           "PG_CONNECTION_HEALTH", "PG_INDEX_HEALTH", "PG_LIFECYCLE_HEALTH", "PG_MAINTENANCE_HEALTH",
-                          "PG_REPLICATION_HEALTH",
+                          "PG_PERFORMANCE_HEALTH", "PG_REPLICATION_HEALTH",
                           "PG_SECURITY_HEALTH", "PG_TRANSACTION_HEALTH"])
         self.assertTrue(all(r["target_id"] == self.system for r in runs))
 
@@ -203,7 +203,7 @@ class HealthCheckTests(unittest.TestCase):
     def test_collector_past_the_wait_limit_is_not_waited_for(self):
         self.slow = {"PG_TRANSACTION_WRAPAROUND": 5}
         started = time.monotonic()
-        check_id = self.run_check(wait_minutes=2.5 / 60)       # 2.5 s: time for the queue to reach it
+        check_id = self.run_check(wait_minutes=3.5 / 60)       # 3.5 s: time for the queue to reach it
 
         row = self.collections(check_id)[(self.system, "PG_TRANSACTION_WRAPAROUND")]
         self.assertEqual(row["status"], "WAIT_LIMIT")

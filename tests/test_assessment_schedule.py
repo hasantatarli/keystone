@@ -91,7 +91,7 @@ class AssessmentScheduleTests(unittest.TestCase):
 
     def test_defaults_create_one_schedule_per_assessment_and_are_idempotent(self):
         created = self.apply_defaults()
-        self.assertEqual(created, 11)
+        self.assertEqual(created, 12)
         self.assertEqual(self.apply_defaults(), 0)
 
         rows = self.conn.execute(
@@ -104,7 +104,7 @@ class AssessmentScheduleTests(unittest.TestCase):
                           "PG_CONFIGURATION_HEALTH": 3600, "PG_BACKUP_HEALTH": 3600,
                           "PG_SECURITY_HEALTH": 3600, "PG_MAINTENANCE_HEALTH": 3600,
                           "PG_INDEX_HEALTH": 86400, "PG_CONFIGURATION_TUNING": 86400,
-                      "PG_LIFECYCLE_HEALTH": 86400})
+                      "PG_LIFECYCLE_HEALTH": 86400, "PG_PERFORMANCE_HEALTH": 3600})
         self.assertTrue(all(r["offset_seconds"] == 30 for r in rows))
 
     def test_offset_must_be_shorter_than_interval(self):
@@ -157,7 +157,7 @@ class AssessmentScheduleTests(unittest.TestCase):
         scheduler = Scheduler([jobs], clock=lambda: slot)
 
         dispatched = scheduler.tick(self.conn)
-        self.assertEqual(len(dispatched), 8)            # the two daily assessments are not due at 12:00
+        self.assertEqual(len(dispatched), 9)            # the daily assessments are not due at 12:00
 
         deadline = time.monotonic() + 5
         while len(calls) < 2 and time.monotonic() < deadline:
@@ -165,7 +165,7 @@ class AssessmentScheduleTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)                 # pool of 2: the rest waits
 
         # Still running: listed as busy, not dispatched again.
-        self.assertEqual(sum(item.is_busy for item in jobs.list_items(self.conn)), 8)
+        self.assertEqual(sum(item.is_busy for item in jobs.list_items(self.conn)), 9)
         self.assertEqual({c[2] for c in calls}, {slot})
         self.conn.commit()
 

@@ -203,6 +203,10 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
                          "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
+                         "statistics_too_young": "Sayaçlar {minimum_hours} saatten daha kısa süredir birikiyor; daha kısa süreyle verilen oran yanıltıcı olur. Birkaç saat sonra ya da Keystone düzenli topladıkça değerlendirilir.",
+                         "too_few_checkpoints": "Bu sürede yalnızca {count} checkpoint olmuş; değerlendirmek için en az {minimum} gerekiyor.",
+                         "too_little_activity": "Bu sürede hiçbir veritabanı en az {minimum:,} blok okumamış; oran ancak aktif bir veritabanında anlamlı.",
+                         "period_unknown": "Geçici dosya sayaçlarının hangi tarihten beri biriktiği bilinmiyor (istatistikler hiç sıfırlanmamış), bu yüzden günlük miktar hesaplanamıyor. Keystone en az {minimum_hours} saat arayla iki kez topladığında değerlendirilir.",
                          "sequence_privilege_missing": "{count} sequence'in değeri okunamadı ({names}); izleme kullanıcısının bu sequence'ler üzerinde SELECT yetkisi yok. Yalnızca bu sequence'ler için, ilgili veritabanında: GRANT SELECT ON SEQUENCE <sequence> TO <kullanıcı>; (SELECT değeri okumaya yeter, sequence'i ilerletemez; şemadaki bütün sequence'lere toplu yetki gerekmez)."},
         "detail_sequence": "Sequence", "detail_column": "Kolon", "detail_column_type": "Kolon tipi",
         "detail_data_type": "Sequence tipi", "detail_last_value": "Son değer", "detail_limit": "Sınır",
@@ -222,6 +226,11 @@ TEXTS = {
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
         "col_os": "İşletim sistemi",
+        "col_period": "Süre", "col_hit_ratio": "Cache hit", "col_blocks_read": "Diskten okunan blok",
+        "col_disk_share": "Diskten okunan pay", "col_temp_bytes": "Geçici dosya", "col_temp_files": "Dosya sayısı",
+        "col_per_day": "Günlük", "col_requested": "Zorunlu", "col_timed": "Zamanında", "col_requested_share": "Zorunlu payı",
+        "period_last": "son {duration}", "period_since_reset": "{date} sıfırlamasından beri",
+        "period_unknown_start": "istatistiklerin başlangıcından beri (tarih bilinmiyor)",
         "reference_source": {"SEED": "Keystone ile gelen", "FILE": "referans dosyası", "ONLINE": "internet"},
         "date_format": "%d.%m.%Y",
         "col_installed": "Kurulu sürüm", "col_available": "Paket sürümü",
@@ -230,7 +239,8 @@ TEXTS = {
         "detail_other_definition": "Diğer index'in tanımı", "detail_analyze_trigger": "Autovacuum analyze eşiği (satır)",
         "inv_failover": "Son timeline değişimi", "inv_failover_ago": "yaklaşık {ago} önce",
         "inv_failover_never": "Gözlenmedi", "inv_failover_unknown": "Bilinmiyor", "inv_timeline": "timeline {n}",
-        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat", "unit_RELEASE": "sürüm", "unit_DAY": "gün",
+        "billion": "milyar", "unit_TRANSACTION": "transaction", "unit_MULTIXACT": "multixact", "unit_CONNECTION": "bağlantı", "unit_ROW": "satır", "unit_RATIO": "kat", "unit_RELEASE": "sürüm", "unit_DAY": "gün", "unit_BLOCK": "blok",
+        "per_day": "/gün",
         "results": "Kontrol sonuçları", "area": "Alan", "rule": "Kontrol", "status": "Durum", "reason": "Neden",
         "not_assessed": "Değerlendirilemeyen kontroller", "none": "Yok.",
         "collection": "Toplanan Veriler", "collector": "Veri kaynağı",
@@ -429,6 +439,10 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
                          "no_index_usage": "Index usage was not collected from any server.",
+                         "statistics_too_young": "The counters have been accumulating for less than {minimum_hours} hours; a ratio over a shorter time would mislead. Judged a few hours later, or as Keystone collects regularly.",
+                         "too_few_checkpoints": "Only {count} checkpoint(s) in the period; at least {minimum} are needed.",
+                         "too_little_activity": "No database read at least {minimum:,} blocks in the period; the ratio means something only on an active database.",
+                         "period_unknown": "Since when the temporary file counters accumulate is not known (the statistics were never reset), so no daily amount can be computed. Judged once Keystone has collected twice at least {minimum_hours} hours apart.",
                          "sequence_privilege_missing": "The value of {count} sequence(s) could not be read ({names}); the monitoring user has no SELECT on them. Grant only these, in that database: GRANT SELECT ON SEQUENCE <sequence> TO <user>; (SELECT reads the value and cannot advance the sequence; no schema-wide grant is needed)."},
         "detail_sequence": "Sequence", "detail_column": "Column", "detail_column_type": "Column type",
         "detail_data_type": "Sequence type", "detail_last_value": "Last value", "detail_limit": "Limit",
@@ -448,6 +462,11 @@ TEXTS = {
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
         "col_os": "Operating system",
+        "col_period": "Period", "col_hit_ratio": "Cache hit", "col_blocks_read": "Blocks read from disk",
+        "col_disk_share": "Share read from disk", "col_temp_bytes": "Temporary files", "col_temp_files": "Files",
+        "col_per_day": "Per day", "col_requested": "Requested", "col_timed": "Timed", "col_requested_share": "Requested share",
+        "period_last": "last {duration}", "period_since_reset": "since the reset of {date}",
+        "period_unknown_start": "since the statistics started (date unknown)",
         "reference_source": {"SEED": "shipped with Keystone", "FILE": "reference file", "ONLINE": "internet"},
         "date_format": "%Y-%m-%d",
         "col_installed": "Installed", "col_available": "Package",
@@ -456,7 +475,8 @@ TEXTS = {
         "detail_other_definition": "Other index's definition", "detail_analyze_trigger": "Autovacuum analyze trigger (rows)",
         "inv_failover": "Last timeline change", "inv_failover_ago": "about {ago} ago",
         "inv_failover_never": "None observed", "inv_failover_unknown": "Unknown", "inv_timeline": "timeline {n}",
-        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times", "unit_RELEASE": "releases", "unit_DAY": "days",
+        "billion": "billion", "unit_TRANSACTION": "transactions", "unit_MULTIXACT": "multixacts", "unit_CONNECTION": "connections", "unit_ROW": "rows", "unit_RATIO": "times", "unit_RELEASE": "releases", "unit_DAY": "days", "unit_BLOCK": "blocks",
+        "per_day": "/day",
         "results": "Check results", "area": "Area", "rule": "Check", "status": "Status", "reason": "Reason",
         "not_assessed": "Checks not assessed", "none": "None.",
         "collection": "Collected Data", "collector": "Data source",
@@ -795,6 +815,8 @@ def fmt_quantity(value, unit, t):
         return fmt_duration(value, t)
     if unit == "BYTE":
         return fmt_bytes(value)
+    if unit == "BYTE_PER_DAY":
+        return fmt_bytes(value) + t["per_day"]
     if unit == "PERCENT":
         return t["percent"].format(n=f"{value:g}")
     if unit in ("TRANSACTION", "MULTIXACT") and value >= 1e9:
@@ -1754,10 +1776,11 @@ def setting_value_text(value, unit, t):
 
 # Counts get thousands separators; identifiers such as pid stay as they are.
 COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connections", "usable",
-                "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age"}
+                "connection_count", "last_value", "limit", "changed_rows", "freeze_max_age",
+                "requested", "total", "read_blocks", "temp_files"}
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
-DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds"}
-SIZE_VALUES = {"index_size", "size_bytes"}
+DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds", "period_seconds"}
+SIZE_VALUES = {"index_size", "size_bytes", "temp_bytes", "per_day"}
 DATE_VALUES = {"end_of_support"}
 
 
@@ -1798,6 +1821,17 @@ FINDINGS_SHOWN = 10
 
 # ----------------------------------------------------------------------------- findings as tables
 
+def period_text(details, t):
+    """The period counters were measured over: 'son 1 gün', '21.10.2026'dan beri', 'başlangıcı bilinmiyor'."""
+    if details["period_mode"] == "TOTAL":
+        return t["period_unknown_start"]
+    text = t["period_last"].format(duration=fmt_duration(details["period_seconds"], t))
+    if details["period_mode"] == "SINCE_RESET" and details.get("period_since"):
+        text += " · " + t["period_since_reset"].format(
+            date=datetime.fromisoformat(details["period_since"]).strftime(t["date_format"]))
+    return text
+
+
 def finding_fields(f, t):
     """A finding's values for table cells: readable details, template values, the measured value."""
     details = dict(f["details"] or {})
@@ -1823,6 +1857,15 @@ def finding_fields(f, t):
     for key, _ in TIME_LABELS:                    # every time but the evidence time, which the table places
         if key != "captured_at" and details.get(key):
             details[key] = fmt_clock(details[key])
+    if details.get("period_mode"):               # counter windows (V061)
+        details["period"] = period_text(details, t)
+    for key in ("blocks_read", "blocks_hit", "requested", "timed", "temp_files"):
+        if isinstance(details.get(key), int) and not isinstance(details.get(key), bool):
+            details[key] = f"{details[key]:,}"
+    if isinstance(details.get("temp_bytes"), (int, float)):
+        details["temp_bytes"] = fmt_bytes(details["temp_bytes"])
+    if details.get("hit_ratio") is not None:
+        details["hit_ratio"] = t["percent"].format(n=f"{details['hit_ratio']:g}")
     if details.get("reference_as_of"):
         details["reference"] = (t["reference_source"].get(details.get("reference_source"), "") + " · "
                                 + datetime.fromisoformat(details["reference_as_of"]).strftime(t["date_format"]))
@@ -1884,6 +1927,12 @@ FINDING_COLUMNS = {
                     ("observed", "col_behind"), ("reference", "col_reference")],
     "PG-LIFE-002": [("node_name", "detail_node"), ("version", "col_version"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
+    "PG-PERF-003": [("requested", "col_requested"), ("timed", "col_timed"),
+                    ("observed", "col_requested_share"), ("period", "col_period")],
+    "PG-PERF-002": [("database_name", "detail_database"), ("hit_ratio", "col_hit_ratio"),
+                    ("blocks_read", "col_blocks_read"), ("observed", "col_disk_share"), ("period", "col_period")],
+    "PG-CAP-005": [("database_name", "detail_database"), ("temp_bytes", "col_temp_bytes"),
+                   ("temp_files", "col_temp_files"), ("observed", "col_per_day"), ("period", "col_period")],
     "PG-LIFE-003": [("node_name", "detail_node"), ("os", "col_os"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
     "PG-LIFE-004": [("database_name", "detail_database"), ("extension", "col_extension"),

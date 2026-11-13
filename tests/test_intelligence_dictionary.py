@@ -401,6 +401,30 @@ EXPECTED_RULES = {
         "evidence": {"PG_HOST_SNAPSHOT": (True, 86400),
                      "KEYSTONE_OS_REFERENCE": (True, None)},
         "parameters": {"support_warning_window": (Decimal("31536000"), "SECOND")},
+    },    # V061: counter windows (PG024 for PG_DATABASE_STATS).
+    "PG-PERF-003": {
+        "assessment": "PG_PERFORMANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("50"), "PERCENT")},
+        "evidence": {"PG_CHECKPOINT_STATS": (True, 3600)},
+        "parameters": {"window": (Decimal("86400"), "SECOND"), "min_window": (Decimal("21600"), "SECOND"),
+                       "min_checkpoints": (Decimal("10"), "COUNT")},
+    },
+    "PG-PERF-002": {
+        "assessment": "PG_PERFORMANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("5"), "PERCENT")},
+        "evidence": {"PG_DATABASE_STATS": (True, 3600)},
+        "parameters": {"window": (Decimal("86400"), "SECOND"), "min_window": (Decimal("21600"), "SECOND"),
+                       "min_blocks": (Decimal("1000000"), "BLOCK")},
+    },
+    "PG-CAP-005": {
+        "assessment": "PG_CAPACITY_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("10737418240"), "BYTE_PER_DAY"),
+                       "CRITICAL": (Decimal("107374182400"), "BYTE_PER_DAY")},
+        "evidence": {"PG_DATABASE_STATS": (True, 3600)},
+        "parameters": {"window": (Decimal("86400"), "SECOND"), "min_window": (Decimal("21600"), "SECOND")},
     },
 }
 

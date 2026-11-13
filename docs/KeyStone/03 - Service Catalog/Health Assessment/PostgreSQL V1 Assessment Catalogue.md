@@ -102,7 +102,7 @@ Sources combined:
 | **PG-CAP-002** | Integer key / sequence exhaustion | last value ≥ 75 % — WARNING, ≥ 90 % — CRITICAL of the smaller of the sequence's and the fed column's limit; without SELECT on the sequences INSUFFICIENT_EVIDENCE naming the privilege | Ready: PG_SEQUENCE_CAPACITY | PK or FK using numeric or integer data type | Done |
 | PG-CAP-003 | Separate WAL disk and tablespaces | Like PG-CAP-001 for `pg_wal` on its own mount and tablespaces | Gap: PG-013 + tablespace paths | Tablespaces Info | P2 |
 | **PG-CAP-004** | Memory pressure | Swap in use on a database server above X % | Ready: host | — | Done |
-| PG-CAP-005 | Heavy temporary file use | Temp bytes per database high | Gap: PG-024 / database statistics | — | P2 |
+| **PG-CAP-005** | Heavy temporary file use | Temporary bytes per day per database ≥ 10 / 100 GB; under a day of statistics at most WARNING | Done: PG_DATABASE_STATS (PG024), counter window (ADR-0020) | — | Done |
 | PG-CAP-006 | Growth and time to full | Disk or database growth rate; days until full | History of host / PG-003 (Phase 3) | Database size, Table Size | P3 |
 
 ## 7. HA / DR — Replication and Topology
@@ -161,8 +161,8 @@ A health check shows performance indicators; it does not replace a Performance I
 | Key | Check | Finding when | Evidence | pg_c | Prio |
 | --- | --- | --- | --- | --- | --- |
 | PG-PERF-001 | Most expensive queries | Top queries by total time shown as context; finding when one statement dominates (≥ X % of total time) | Gap: PG-012 (needs `pg_stat_statements`) | pg_stat_statements extension | P2 |
-| PG-PERF-002 | Low cache hit ratio | Shared buffer hit ratio below X % on an active database | Gap: database statistics | — | P2 |
-| PG-PERF-003 | Checkpoints too frequent | Requested checkpoints dominate timed ones (`max_wal_size` too small) | Gap: checkpointer / bgwriter statistics | — | P2 |
+| **PG-PERF-002** | Low cache hit ratio | Share read from disk ≥ 5 % (hit < 95 %) on a database that read ≥ 1 M blocks in the period | Done: PG_DATABASE_STATS (PG024), counter window (ADR-0020) | — | Done |
+| **PG-PERF-003** | Checkpoints too frequent | Requested checkpoints ≥ 50 % of ≥ 10 in the period (`max_wal_size` too small) | Done: PG_CHECKPOINT_STATS, counter window (ADR-0020) | — | Done |
 | PG-PERF-004 | Deadlocks and rollbacks | Deadlocks or rollback ratio increased between checks | Gap: database statistics with history | — | P3 |
 
 ---
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 46 | 0 | 9 | 8 |
-| of which evidence ready | 46 | 0 | 1 | 3 |
+| Checks | 49 | 0 | 6 | 8 |
+| of which evidence ready | 49 | 0 | 0 | 3 |
 
-Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-13: P2 group 2b-1 done (V061, PG024, ADR-0020): PG-PERF-003, PG-PERF-002, PG-CAP-005 on counter windows; 2b-2 (PG-IDX-005, PG-LOCK-001) next. Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
