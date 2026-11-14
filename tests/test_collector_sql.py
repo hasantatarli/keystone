@@ -21,6 +21,7 @@ COLLECTORS = Path(__file__).resolve().parents[1] / "providers" / "postgresql" / 
 
 
 class CollectorSqlTests(unittest.TestCase):
+    """Collectors whose values come through query_to_xml, run against PostgreSQL."""
 
     @classmethod
     def setUpClass(cls):
@@ -60,3 +61,62 @@ class CollectorSqlTests(unittest.TestCase):
         self.assertEqual(rows[waiter_pid]["blocked_by"], [holder_pid])
         self.assertIsNotNone(rows[waiter_pid]["lock_wait_start"])       # PostgreSQL 14+
         self.assertIsNone(rows[holder_pid]["lock_wait_start"])
+
+
+class HbaAndBloatCollectorTests(unittest.TestCase):
+    """PG_HBA_RULES (PG026) and PG_TABLE_BLOAT (PG027) against a real server."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = DisposablePostgres()
+        cls.server.start()
+        cls.addClassCleanup(cls.server.close)
+        with cls.server.connect(autocommit=True) as conn:
+            # 1 M rows of about 140 bytes (~160 MB), half deleted and vacuumed: about half is free space.
+            conn.execute("CREATE TABLE bloated AS SELECT g AS id, repeat('x', 100) AS pad "
+                         "FROM generate_series(1, 1000000) g")
+            conn.execute("CREATE INDEX bloated_id ON bloated (id)")
+            conn.execute("DELETE FROM bloated WHERE id % 2 = 0")
+            conn.execute("VACUUM ANALYZE bloated")
+            conn.execute("CREATE ROLE monitor LOGIN IN ROLE pg_monitor")
+
+    def collect(self, name, role=None):
+        with self.server.connect(autocommit=True, row_factory=dict_row) as conn:
+            if role:
+                conn.execute(f"SET ROLE {role}")
+            return conn.execute((COLLECTORS / name).read_text(encoding="utf-8")).fetchall()
+
+    def test_hba_rules_are_read_or_said_unreadable(self):
+        rows = self.collect("hba_rules_snapshot.sql")
+        rules = [r for r in rows if r["record_type"] == "RULE"]
+        self.assertTrue(rows[0]["readable"])
+        self.assertTrue(rules and all(r["conn_type"] and r["auth_method"] and r["line_number"] for r in rules))
+        self.assertEqual([(r["record_type"], r["readable"]) for r in self.collect("hba_rules_snapshot.sql", "monitor")],
+                         [("ACCESS", False)])
+
+    def objects(self, rows):
+        return {(r["object_kind"], r["object_name"]): r for r in rows if r["record_type"] == "OBJECT"}
+
+    def test_bloat_from_statistics(self):
+        rows = self.collect("table_bloat_snapshot.sql")
+        self.assertFalse(rows[0]["pgstattuple_available"])
+        table = self.objects(rows)[("TABLE", "bloated")]
+        self.assertEqual(table["method"], "STATISTICS")
+        self.assertAlmostEqual(table["wasted_bytes"] / table["size_bytes"], 0.5, delta=0.1)
+
+    def test_without_select_on_the_table_nothing_is_guessed(self):
+        table = self.objects(self.collect("table_bloat_snapshot.sql", "monitor"))[("TABLE", "bloated")]
+        self.assertEqual((table["method"], table["wasted_bytes"]), (None, None))
+
+    def test_bloat_with_pgstattuple_for_the_monitoring_role(self):
+        with self.server.connect(autocommit=True) as conn:
+            conn.execute("CREATE EXTENSION IF NOT EXISTS pgstattuple")
+        try:
+            rows = self.collect("table_bloat_snapshot.sql", "monitor")
+            self.assertTrue(rows[0]["pgstattuple_available"])
+            table = self.objects(rows)[("TABLE", "bloated")]
+            self.assertEqual(table["method"], "PGSTATTUPLE")
+            self.assertAlmostEqual(table["wasted_bytes"] / table["size_bytes"], 0.5, delta=0.1)
+        finally:
+            with self.server.connect(autocommit=True) as conn:
+                conn.execute("DROP EXTENSION pgstattuple")

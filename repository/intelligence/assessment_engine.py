@@ -626,6 +626,33 @@ def load_checkpoint_stats_history(conn, target_id):
         """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
 
 
+def load_latest_table_bloat(conn, target_id):
+    """Latest PG_TABLE_BLOAT per database."""
+    return load_latest_per_database(
+        conn, "table_bloat_snapshot", target_id,
+        "s.object_kind, s.schema_name, s.object_name, s.table_name, s.size_bytes, s.wasted_bytes, "
+        "s.pgstattuple_available, s.method")
+
+
+def load_latest_hba_rules(conn, target_id):
+    """Latest PG_HBA_RULES per node: its ACCESS row and the rules captured with it."""
+    return conn.execute(
+        """
+        SELECT h.snapshot_id, h.target_id, t.name AS node_name, h.captured_at, h.record_type, h.readable,
+               h.line_number, h.conn_type, h.databases, h.users, h.address, h.netmask, h.auth_method,
+               h.error
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.hba_rule_snapshot s
+            WHERE s.target_id = t.target_id
+        ) latest ON latest.captured_at IS NOT NULL
+        JOIN postgresql.hba_rule_snapshot h
+            ON h.target_id = t.target_id AND h.captured_at = latest.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY h.target_id, h.record_type, h.line_number
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
 def load_table_access_history(conn, target_id):
     """PG_TABLE_ACCESS: the latest snapshot of every database, and one earlier snapshot of each table
     per day over COUNTER_HISTORY_SECONDS (the first of the day), newest first.
@@ -2881,6 +2908,99 @@ def evaluate_heavy_seq_scans(rows, rule, thresholds):
     return findings
 
 
+HBA_NETWORK_TYPES = {"host", "hostssl", "hostnossl", "hostgssenc", "hostnogssenc"}
+
+
+def hba_severity(rule_row):
+    """The risk of one pg_hba.conf line, or None.
+
+    trust over the network: anyone reaching the port logs in without a password (CRITICAL);
+    trust on the local socket: any operating system user, as any database user (WARNING);
+    password over the network: the password travels in clear text (WARNING);
+    md5: deprecated (PostgreSQL 18), weaker than scram-sha-256 (INFO).
+    """
+    method, network = rule_row["auth_method"], rule_row["conn_type"] in HBA_NETWORK_TYPES
+    if method == "trust":
+        return "CRITICAL" if network else "WARNING"
+    if method == "password" and network:
+        return "WARNING"
+    if method == "md5":
+        return "INFO"
+    return None
+
+
+def evaluate_hba_rules(rows, rule, thresholds):
+    """PG-SEC-005: pg_hba.conf lines with trust, clear-text password or md5, per node.
+
+    pg_hba_file_rules is superuser only by default: a node whose rules could not be read is
+    listed as not assessed with the privilege to grant.
+    """
+    findings = []
+    for access in (r for r in rows if r["record_type"] == "ACCESS"):
+        if not access["readable"]:
+            add_unassessed(rule["unassessed"], access["target_id"], access["node_name"],
+                           "PG_HBA_RULES", "hba_not_readable")
+            continue
+        for line in (r for r in rows if r["record_type"] == "RULE" and r["target_id"] == access["target_id"]):
+            severity = hba_severity(line)
+            if severity is None:
+                continue
+            address = line["address"] or ("local" if line["conn_type"] == "local" else "")
+            if line["netmask"]:
+                address += f" / {line['netmask']}"
+            findings.append({
+                "severity": severity, "snapshot_id": line["snapshot_id"],
+                "template_values": {"node_name": line["node_name"], "line_number": line["line_number"],
+                                    "conn_type": line["conn_type"], "databases": line["databases"],
+                                    "users": line["users"], "address": address,
+                                    "auth_method": line["auth_method"]},
+                "observed_value": None, "observed_unit": None,
+                "subject_type": "HBA_RULE", "subject_identifier": f"{line['node_name']}:{line['line_number']}",
+                "details": {"node": line["node_name"], "line_number": line["line_number"],
+                            "conn_type": line["conn_type"], "databases": line["databases"],
+                            "users": line["users"], "address": address, "auth_method": line["auth_method"],
+                            "captured_at": iso(line["captured_at"])}})
+    return findings
+
+
+def evaluate_bloat(rows, rule, thresholds):
+    """PG-MAINT-004: tables and btree indexes with much estimated wasted space.
+
+    WARNING only: every method estimates. Objects (the collector reads those of 100 MB and more)
+    whose waste is at least min_wasted bytes and the threshold percent. Objects no method could
+    measure (no pgstattuple, no SELECT for pg_stats) make the rule not assessed when nothing was.
+    """
+    min_wasted = parameter(rule, "min_wasted")
+    findings, measured, unmeasured = [], 0, 0
+    for row in rows:
+        if row["record_type"] != "OBJECT" or not row["size_bytes"]:
+            continue
+        if row["method"] is None:
+            unmeasured += 1
+            continue
+        measured += 1
+        wasted = row["wasted_bytes"] or 0
+        share = round(100 * wasted / row["size_bytes"], 1)
+        matched = match_threshold(share, thresholds, "PERCENT")
+        if matched is None or wasted < min_wasted:
+            continue
+        name = f"{row['schema_name']}.{row['object_name']}"
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": row["snapshot_id"],
+            "template_values": {"database_name": row["database_name"], "object": name,
+                                "kind": row["object_kind"], "size_bytes": row["size_bytes"],
+                                "wasted_bytes": wasted, "share": share},
+            "observed_value": share, "observed_unit": "PERCENT",
+            "subject_type": row["object_kind"], "subject_identifier": f"{row['database_name']}.{name}",
+            "details": {"database_name": row["database_name"], "object": name, "kind": row["object_kind"],
+                        "table": row["table_name"], "size_bytes": row["size_bytes"], "wasted_bytes": wasted,
+                        "method": row["method"], "captured_at": iso(row["captured_at"])}})
+    if unmeasured and not measured:
+        raise InsufficientEvidence("PG_TABLE_BLOAT", "bloat_not_measurable",
+                                   "No large table or index could be measured.", count=unmeasured)
+    return findings
+
+
 def evaluate_lock_waits(rows, rule, thresholds):
     """PG-LOCK-001: sessions waiting on a lock, and who blocks them, at the moment of collection.
 
@@ -2946,6 +3066,8 @@ EVIDENCE_LOADERS = {
     "PG_CHECKPOINT_STATS": load_checkpoint_stats_history,
     "PG_DATABASE_STATS": load_database_stats_history,
     "PG_TABLE_ACCESS": load_table_access_history,
+    "PG_HBA_RULES": load_latest_hba_rules,
+    "PG_TABLE_BLOAT": load_latest_table_bloat,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -3096,6 +3218,8 @@ RULE_EVALUATORS = {
     "PG-CAP-005": evaluate_temp_files,
     "PG-IDX-005": evaluate_heavy_seq_scans,
     "PG-LOCK-001": evaluate_lock_waits,
+    "PG-SEC-005": evaluate_hba_rules,
+    "PG-MAINT-004": evaluate_bloat,
 }
 
 
@@ -3279,9 +3403,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
     if unassessed:
         first = unassessed[0]
         names = ", ".join(u["node"] for u in unassessed)
+        reasons = {u["node"]: u["reason_code"] for u in unassessed}     # why, per node (report)
         return (OUTCOME_INSUFFICIENT_EVIDENCE, [],
                 f'{first["source"]}: [nodes_unassessed] No problem on the other servers; '
-                f'not judged on: {names} {json.dumps({"nodes": names}, ensure_ascii=False)}',
+                f'not judged on: {names} {json.dumps({"nodes": names, "reasons": reasons}, ensure_ascii=False)}',
                 unassessed)
 
     return OUTCOME_HEALTHY, [], None, []

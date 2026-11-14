@@ -954,6 +954,32 @@ Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed
 
 ---
 
+# Batch of 2026-11-14 — client authentication and bloat (V063, V064, PG026, PG027)
+
+## PG-SEC-005 — Weak Client Authentication (PG_SECURITY_HEALTH, topic SECURITY)
+
+| | |
+| --- | --- |
+| Evidence | `PG_HBA_RULES` (PG026: `pg_hba_file_rules` per node through `query_to_xml`, with an ACCESS row), required, 86 400 s |
+| Condition | per line: `trust` on host types → CRITICAL; `trust` on local → WARNING; `password` on host types → WARNING; `md5` → INFO |
+| Privilege | superuser only by default; without it the node is not assessed (`hba_not_readable`) and the report gives `GRANT SELECT ON pg_catalog.pg_hba_file_rules` and `GRANT EXECUTE ON FUNCTION pg_catalog.pg_hba_file_rules()` |
+| Subject | HBA_RULE (node:line) |
+
+## PG-MAINT-004 — Table and Index Bloat (PG_MAINTENANCE_HEALTH, topic MAINTENANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_TABLE_BLOAT` (PG027: tables and btree indexes ≥ 100 MB per database), required, 86 400 s |
+| Method | `pgstattuple_approx` (dead tuples + free space) when the extension is installed and executable (pg_monitor may); otherwise `pg_stats` column widths (heap: header + null bitmap + data aligned, fillfactor; btree: index tuple + key data, fillfactor 90) — visible only to a role that may SELECT the table; expression indexes are not estimated |
+| Condition | estimated free space ≥ 30 % and ≥ `min_wasted` (1 GB) → WARNING; no CRITICAL for an estimate |
+| Insufficient evidence | large objects but none measurable (`bloat_not_measurable`): both ways with their risks — install pgstattuple, or `pg_read_all_data` (the role can then read the data); the customer picks (Hasan) |
+| Subject | TABLE / INDEX |
+
+**Verification (V063, V064)**  
+Unit tests: severity per method and connection type, an unreadable node; share and size both needed, the method kept, nothing measurable. Real-server tests (`tests/test_collector_sql.py`): pg_hba rules read with every column by a superuser and an ACCESS row only for pg_monitor; a 160 MB table half deleted measures about 50 % by statistics as postgres, nothing (method NULL) for pg_monitor, and about 50 % with pgstattuple for pg_monitor. Lab (hc124, 2026-11-14): Keystone's lab role cannot read pg_hba, so PG-SEC-005 was not assessed on all three servers — rightly, but the reason said "no problem on the other servers" with no others and did not give the GRANTs; now a rule not assessed on servers says why per server, and "no server could be assessed" when it is all of them. PG-MAINT-004 healthy (small lab tables). PG-LOCK-001 with the #46 fix: exact wait (17 minutes), no "approximate". Full suite 484 OK. Lab (hc126, after the two GRANTs): PG-SEC-005 read every server — 27 INFO findings, the 9 md5 lines of Patroni's pg_hba on each of the three servers; no trust or password.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

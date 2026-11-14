@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG025).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG027).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -24,10 +24,12 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_SCHEMA_PRIVILEGES | DATABASE | `schema_privilege_snapshot` | PG-SEC-004 |
 | PG_TABLE_STRUCTURE | DATABASE | `table_structure_snapshot` (PG022): foreign keys with index coverage, unlogged tables | PG-IDX-004, PG-BKP-003 |
 | PG_EXTENSIONS | DATABASE | `extension_snapshot` (PG022): installed and package versions | PG-LIFE-004 |
+| PG_HBA_RULES | NODE | `hba_rule_snapshot` (PG026): `pg_hba_file_rules` through `query_to_xml`; ACCESS row says whether the role could read it (superuser only by default) | PG-SEC-005 |
+| PG_TABLE_BLOAT | DATABASE | `table_bloat_snapshot` (PG027): estimated free space of tables and btree indexes ≥ 100 MB — `pgstattuple_approx` when installed, else `pg_stats` widths; method NULL when neither | PG-MAINT-004 |
 | PG_TABLE_ACCESS | DATABASE | `table_access_snapshot` (PG025): sequential and index scans, live rows and size per table, the database's stats_reset; DATABASE row per database | PG-IDX-005 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |
 
-Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`, `PG_VACUUM_ANALYZE`, `PG_TABLE_ACCESS`).
+Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`, `PG_VACUUM_ANALYZE`, `PG_TABLE_ACCESS`, `PG_TABLE_BLOAT`); `PG_HBA_RULES` returns an ACCESS row.
 
 ## Privileges
 

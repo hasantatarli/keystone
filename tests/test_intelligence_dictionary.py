@@ -441,6 +441,19 @@ EXPECTED_RULES = {
         "default_severity": None,
         "thresholds": {"WARNING": (Decimal("30"), "SECOND"), "CRITICAL": (Decimal("300"), "SECOND")},
         "evidence": {"PG_ACTIVITY_SNAPSHOT": (True, 600)},
+    },    # V063: pg_hba rules (PG026), severity by line.
+    "PG-SEC-005": {
+        "assessment": "PG_SECURITY_HEALTH",
+        "default_severity": None,
+        "thresholds": {},
+        "evidence": {"PG_HBA_RULES": (True, 86400)},
+    },    # V064: estimated bloat (PG027), WARNING only.
+    "PG-MAINT-004": {
+        "assessment": "PG_MAINTENANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("30"), "PERCENT")},
+        "evidence": {"PG_TABLE_BLOAT": (True, 86400)},
+        "parameters": {"min_wasted": (Decimal("1073741824"), "BYTE")},
     },
 }
 
