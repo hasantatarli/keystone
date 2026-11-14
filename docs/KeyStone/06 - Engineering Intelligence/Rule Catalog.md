@@ -994,7 +994,7 @@ Unit tests: severity per method and connection type, an unreadable node; share a
 Also in this batch: PG-SEC-005 addresses as CIDR (`192.168.1.0/24`, IPv6 too) instead of address / netmask (Hasan).
 
 **Verification (V065)**  
-Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kept; the report section (order, share, period, ms under a second) and related queries of the finding's database only. Real-server tests: a server with `shared_preload_libraries = 'pg_stat_statements'` before and after CREATE EXTENSION (a sort with work_mem 64 kB seen with 3 calls and temporary blocks), and a server without it. Full suite 492 OK. Lab: pending.
+Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kept; the report section (order, share, period, ms under a second) and related queries of the finding's database only. Real-server tests: a server with `shared_preload_libraries = 'pg_stat_statements'` before and after CREATE EXTENSION (a sort with work_mem 64 kB seen with 3 calls and temporary blocks), and a server without it. Full suite 492 OK. Lab (hc128): pg_stat_statements not loaded on pg-cluster — NOT_APPLICABLE with the setup steps; PG-SEC-005 addresses shown as `192.168.1.0/24`, `/32`, `0.0.0.0/0`.
 
 ---
 
@@ -1015,7 +1015,7 @@ Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kep
 Design (Hasan 2026-11-14): what cannot be read is said, not guessed around; the customer picks a way and the next report reads it.
 
 **Verification (V066)**  
-Unit tests: separate pg_wal disk full, the data disk left to PG-CAP-001 (NOT_APPLICABLE), one finding per disk naming pg_wal and two tablespaces, unreadable pg_wal with tablespaces still judged, every reason code, a Windows junction to another drive, a server without disk data; DATA_PATHS parsing (older script, three ways, no postmaster, Windows line ends). Real-server tests: PG_TABLESPACES as postgres and pg_monitor (directory and size), the host script finding the test server's data directory and pg_wal (DIRECT). By hand: the same script as an unprivileged user gives DENIED, with the documented sudoers line SUDO. Full suite 506 OK. Lab: pending.
+Unit tests: separate pg_wal disk full, the data disk left to PG-CAP-001 (NOT_APPLICABLE), one finding per disk naming pg_wal and two tablespaces, unreadable pg_wal with tablespaces still judged, every reason code, a Windows junction to another drive, a server without disk data; DATA_PATHS parsing (older script, three ways, no postmaster, Windows line ends). Real-server tests: PG_TABLESPACES as postgres and pg_monitor (directory and size), the host script finding the test server's data directory and pg_wal (DIRECT). By hand: the same script as an unprivileged user gives DENIED, with the documented sudoers line SUDO. Full suite 506 OK. Lab (hc128): sudoers rule only on postgre-1 (SSH user `dba`): pg_wal read there (inside the data directory, nothing separate); postgre-2 and postgre-3 not assessed with the three ways; PG_TABLESPACES collected on all three.
 
 ---
 
