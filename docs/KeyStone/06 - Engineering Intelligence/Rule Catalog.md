@@ -1015,7 +1015,7 @@ Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kep
 Design (Hasan 2026-11-14): what cannot be read is said, not guessed around; the customer picks a way and the next report reads it.
 
 **Verification (V066)**  
-Unit tests: separate pg_wal disk full, the data disk left to PG-CAP-001 (NOT_APPLICABLE), one finding per disk naming pg_wal and two tablespaces, unreadable pg_wal with tablespaces still judged, every reason code, a Windows junction to another drive, a server without disk data; DATA_PATHS parsing (older script, three ways, no postmaster, Windows line ends). Real-server tests: PG_TABLESPACES as postgres and pg_monitor (directory and size), the host script finding the test server's data directory and pg_wal (DIRECT). By hand: the same script as an unprivileged user gives DENIED, with the documented sudoers line SUDO.
+Unit tests: separate pg_wal disk full, the data disk left to PG-CAP-001 (NOT_APPLICABLE), one finding per disk naming pg_wal and two tablespaces, unreadable pg_wal with tablespaces still judged, every reason code, a Windows junction to another drive, a server without disk data; DATA_PATHS parsing (older script, three ways, no postmaster, Windows line ends). Real-server tests: PG_TABLESPACES as postgres and pg_monitor (directory and size), the host script finding the test server's data directory and pg_wal (DIRECT). By hand: the same script as an unprivileged user gives DENIED, with the documented sudoers line SUDO. Full suite 506 OK. Lab: pending.
 
 ---
 
