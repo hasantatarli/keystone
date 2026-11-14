@@ -284,6 +284,8 @@ Multi-system lab done (`feat/multi-system-lab`). Open from it: the customer over
 
 Backlog (2026-10-29/30, 2026-11-09): hardware change detection (ADR-0017 3b-2b); PG-IDX-003 duplicate indexes; template1 not collected for PG-SEC-004; PG-CONF-005 must not judge `log_min_duration_statement` again; `rotate_master_key` tool (re-encrypt all credentials with a new key in one step); lab connects as `keystone_monitor` (`pg_monitor`) since 2026-10-29.
 
+Report effectiveness backlog (2026-11-14, Hasan; to think over before any change): the report feels long, and the executive part repeats the same text in several places (lab hc128: the three ways to read pg_wal appear three times — executive "not assessed" list, topic summary, technical part; likewise the SEC-005 GRANTs and the bloat alternatives). Ideas from a consultant review report Hasan shared as an example, not as a model to copy (not stored in the repository): the executive summary as a few paragraphs of prose (what was found, what to do, what is not needed and why); explicit "no concern" statements for areas that are fine (CPU, memory, version); one closing list of tactical recommendations; scope and the customer's own concerns at the start. Open: short sentence in the executive part with the full text only in the technical part; how this meets the pilot feedback ("what happened, what to do, impact").
+
 Hardening backlog:
 
 - Later (Engineering Intelligence): known activity windows, for example a weekend backup, as context so that long runs inside them are not reported. Related to the deferred time windows in ADR-0015.
