@@ -950,7 +950,7 @@ Not a verdict (MEANING): reports reading most of a table rightly scan it.
 A moment: how often locks happen needs frequent collection (ADR-0020 decision 6).
 
 **Verification (V062)**  
-Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed, rarely scanned and dropped tables, no history, reset too recently; a waiting session with an idle-in-transaction blocker, before 14, no waits. Full suite 470 OK. Lab: pending.
+Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed, rarely scanned and dropped tables, no history, reset too recently; a waiting session with an idle-in-transaction blocker, before 14, no waits. Full suite 473 OK. Lab (hc120, hc121, 2026-11-14): a lock test with two psql sessions — PG-LOCK-001 WARNING, session 999 waiting about a minute, blocker 962 · postgres · psql · idle in transaction with its UPDATE; after the rollback healthy, threshold shown as 30 seconds. PG-IDX-005 healthy (no table of 1 GB in the lab).
 
 ---
 
