@@ -2713,11 +2713,12 @@ def evaluate_checkpoint_pressure(rows, rule, thresholds):
 def evaluate_cache_hit(rows, rule, thresholds):
     """PG-PERF-002: blocks read from disk instead of shared buffers, per active database."""
     min_blocks = parameter(rule, "min_blocks")
-    findings, judged = [], 0
+    findings, judged, young = [], 0, 0
     for name, snaps in per_database(rows).items():
         w = counter_window(snaps, ("blks_hit", "blks_read"), parameter(rule, "window"),
                            parameter(rule, "min_window"), unknown_period=True)
         if w is None:
+            young += 1                              # reset (or restarted) too recently
             continue
         hit, read = w["delta"]["blks_hit"], w["delta"]["blks_read"]
         if hit + read < min_blocks:
@@ -2734,7 +2735,11 @@ def evaluate_cache_hit(rows, rule, thresholds):
             "subject_type": "DATABASE", "subject_identifier": name,
             "details": {"database_name": name, "hit_ratio": round(100 - miss, 1),
                         "blocks_read": read, "blocks_hit": hit, **window_details(w)}})
-    if not judged and not findings:
+    if not judged and young:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "statistics_too_young",
+                                   "Database statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    if not judged:
         raise InsufficientEvidence("PG_DATABASE_STATS", "too_little_activity",
                                    "No database read enough blocks in the period to judge.",
                                    minimum=int(min_blocks))
@@ -2747,11 +2752,12 @@ def evaluate_temp_files(rows, rule, thresholds):
     A rate needs a known period (a window or the reset time). Measured over less than a day the
     finding says so and is at most WARNING: a nightly batch can fall in or out of a short period.
     """
-    findings, measured = [], 0
+    findings, measured, young = [], 0, 0
     for name, snaps in per_database(rows).items():
         w = counter_window(snaps, ("temp_files", "temp_bytes"), parameter(rule, "window"),
                            parameter(rule, "min_window"))
         if w is None:
+            young += snaps[0]["stats_reset"] is not None    # known but recent; else the start is unknown
             continue
         measured += 1
         per_day = w["delta"]["temp_bytes"] * 86400 / w["seconds"]
@@ -2771,6 +2777,10 @@ def evaluate_temp_files(rows, rule, thresholds):
             "subject_type": "DATABASE", "subject_identifier": name,
             "details": {"database_name": name, "temp_bytes": w["delta"]["temp_bytes"],
                         "temp_files": w["delta"]["temp_files"], **window_details(w)}})
+    if not measured and young:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "statistics_too_young",
+                                   "Database statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
     if not measured:
         raise InsufficientEvidence("PG_DATABASE_STATS", "period_unknown",
                                    "The period of the temporary file counters is not known yet.",
