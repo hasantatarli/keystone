@@ -919,7 +919,7 @@ A signal, not a diagnosis (stated in MEANING): part of the disk reads come from 
 The recommendation warns against raising work_mem server-wide (PG-CONF-007) and gives a per-role setting.
 
 **Verification (V061)**  
-Unit tests: the window (oldest inside, reset and failover break the series, too young, too close), each rule (window against a fine total, healthy, too few, replicas left out, inactive and dropped databases, short period capped, since reset, unknown period); report: period column, per-day sizes. Full suite 463 OK. Lab: pending.
+Unit tests: the window (oldest inside, reset and failover break the series, too young, too close), each rule (window against a fine total, healthy, too few, replicas left out, inactive and dropped databases, short period capped, since reset, unknown period); report: period column, per-day sizes. Lab (hc120, 2026-11-14, five minutes after a failover on the lab laptop): all three not assessed, rightly; PG-PERF-002 and PG-CAP-005 gave the wrong reason (too little activity, never reset) — fixed: a recent reset is reported as `statistics_too_young` by every rule. Durations under a minute show in seconds (the 30 s lock threshold showed as "1 dakika"). Full suite 466 OK.
 
 ---
 

@@ -1926,3 +1926,20 @@ class LockWaitTests(unittest.TestCase):
     def test_no_lock_waits(self):
         rows = [session(10), session(11, state="idle")]
         self.assertEqual(engine.evaluate_lock_waits(rows, rule(), self.THRESHOLDS), [])
+class CounterReasonTests(unittest.TestCase):
+    """Lab hc120 (2026-11-14): five minutes after a failover the statistics were young, but PG-PERF-002
+    said "too little activity" and PG-CAP-005 "never reset". The reason must be the real one."""
+
+    def test_cache_hit_on_young_statistics(self):
+        reset = NOW - timedelta(minutes=5)
+        rows = [dbstats("app", 0, hit=10, read=10, stats_reset=reset)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_cache_hit(rows, with_params(window=DAY, min_window=6 * HOUR, min_blocks=1_000_000), [])
+        self.assertIn("[statistics_too_young]", str(raised.exception))
+
+    def test_temp_files_on_young_statistics(self):
+        reset = NOW - timedelta(minutes=5)
+        rows = [dbstats("app", 0, temp_bytes=1, stats_reset=reset)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_temp_files(rows, with_params(window=DAY, min_window=6 * HOUR), [])
+        self.assertIn("[statistics_too_young]", str(raised.exception))

@@ -1403,3 +1403,13 @@ class CounterWindowTextTests(unittest.TestCase):
         self.assertEqual((fields["temp_bytes"], fields["temp_files"], fields["period"]),
                          (report.fmt_bytes(40 * 1024 ** 3), "1,200", "son 6 saat"))
         self.assertEqual(report.template_value_text("period_seconds", 6 * 3600, self.T), "6 saat")
+
+
+class ShortDurationTests(unittest.TestCase):
+
+    def test_under_a_minute_in_seconds(self):
+        """Lab hc120: the 30 s lock wait threshold showed as '1 dakika'."""
+        t = report.TEXTS["tr"]
+        self.assertEqual(report.fmt_duration(30, t), "30 saniye")
+        self.assertEqual(report.fmt_duration(90, t), "1 dakika")
+        self.assertEqual(report.fmt_duration(7200, t), "2 saat")

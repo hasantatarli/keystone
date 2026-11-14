@@ -269,7 +269,7 @@ TEXTS = {
                               "FAILED": "Başarısız", "CONNECTION_FAILED": "Bağlantı hatası",
                               "TIMEOUT": "Zaman aşımı", "STALE": "Yarıda kaldı",
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
-        "days": "gün", "hours": "saat", "minutes": "dakika",
+        "days": "gün", "hours": "saat", "minutes": "dakika", "seconds": "saniye",
         "reason_not_collected": "{source} bu kontrolde toplanamadı ({detail}).",
         "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı teknik bölümde.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
@@ -508,7 +508,7 @@ TEXTS = {
                               "FAILED": "Failed", "CONNECTION_FAILED": "Connection failed",
                               "TIMEOUT": "Timed out", "STALE": "Interrupted",
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
-        "days": "days", "hours": "hours", "minutes": "minutes",
+        "days": "days", "hours": "hours", "minutes": "minutes", "seconds": "seconds",
         "reason_not_collected": "{source} could not be collected in this check ({detail}).",
         "reason_not_collected_short": "{source} not collected{status}; details in the technical part.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
@@ -863,8 +863,10 @@ def threshold_line(result, t):
 
 
 def fmt_duration(seconds, t):
-    """Rough human duration: '4 gün 17 saat', '10 dakika'."""
+    """Rough human duration: '4 gün 17 saat', '10 dakika', '30 saniye'."""
     seconds = int(max(seconds, 0))
+    if seconds < 60:                             # lock waits (V062): 30 s is not '1 dakika'
+        return f"{seconds} {t['seconds']}"
     days, hours, minutes = seconds // 86400, seconds % 86400 // 3600, seconds % 3600 // 60
     if days:
         return f"{days} {t['days']}" + (f" {hours} {t['hours']}" if hours else "")
