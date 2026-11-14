@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG023).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG024).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -8,9 +8,10 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_CONFIGURATION_SNAPSHOT | NODE | `configuration_snapshot` | PG-CONF-*, PG-BKP-002, PG-SEC-002/003, PG-CONN-002, PG-CAP-001 |
 | PG_HOST_SNAPSHOT (SSH) | NODE | `host_snapshot` (with `virtualization`, PG021), `storage_snapshot` (with `rotational` from lsblk ROTA, PG021) | PG-CAP-001, report inventory, storage type note |
 | PG_WAL_STATUS | NODE | `wal_status_snapshot` | PG-BKP-001, PG-HA-001, report inventory |
-| PG_CHECKPOINT_STATS | SYSTEM | `checkpoint_stats_snapshot` | PG-CONF-003 (`max_wal_size`); `pg_stat_bgwriter` before 17, `pg_stat_checkpointer` from 17, chosen through `query_to_xml` |
+| PG_CHECKPOINT_STATS | SYSTEM | `checkpoint_stats_snapshot` | PG-CONF-003 (`max_wal_size`), PG-PERF-003; `pg_stat_bgwriter` before 17, `pg_stat_checkpointer` from 17, chosen through `query_to_xml` |
 | PG_INDEX_USAGE | NODE_DATABASE | `index_usage_snapshot` (with index definitions, PG022) | PG-IDX-001/002/003 |
 | PG_DATABASE_INVENTORY | SYSTEM | `database_snapshot` | Report inventory |
+| PG_DATABASE_STATS | SYSTEM | `database_stats_snapshot` (PG024): `pg_stat_database` counters per database | PG-PERF-002, PG-CAP-005 |
 | PG_ACTIVITY_SNAPSHOT | SYSTEM | `activity_snapshot` | PG-TRAN-001/003/007 |
 | PG_CONNECTION_ACTIVITY | SYSTEM | `connection_activity_snapshot` | PG-CONN-001/002 |
 | PG_REPLICATION_STATUS | SYSTEM | `replication_status_snapshot`, `replica_status_snapshot` | PG-REP-003/004/006 |
@@ -38,7 +39,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON SEQUENCES TO keystone;   
 
 `pg_read_all_data` (PostgreSQL 14+) also works but grants reading all table data.
 
-Files ending in `.aql` (`database_stats_snapshot`, `query_stats_snapshot`, `replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
+Files ending in `.aql` (`query_stats_snapshot`, `replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
 
 Rules and their evidence: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`. Planned collectors: `docs/KeyStone/02 - Roadmap/Roadmap.md`.
 

@@ -603,15 +603,39 @@ def load_latest_vacuum_analyze_snapshot(conn, target_id):
         """, (target_id, target_id)).fetchall()
 
 
-def load_latest_checkpoint_stats(conn, target_id):
-    """Latest PG_CHECKPOINT_STATS of the target (read on the primary)."""
+# Counter history a rule's window can reach back over (the longest window is 7 days).
+COUNTER_HISTORY_SECONDS = 8 * 86400
+
+
+def load_checkpoint_stats_history(conn, target_id):
+    """PG_CHECKPOINT_STATS of the target over COUNTER_HISTORY_SECONDS, newest first (read on the primary).
+
+    The newest row is the current state (PG-CONF-003); older rows are the baselines of PG-PERF-003.
+    """
     return conn.execute(
         """
         SELECT snapshot_id, target_id, captured_at, in_recovery, checkpoints_timed,
                checkpoints_requested, stats_reset
         FROM postgresql.checkpoint_stats_snapshot
-        WHERE target_id = %s ORDER BY captured_at DESC LIMIT 1
-        """, (target_id,)).fetchall()
+        WHERE target_id = %s
+          AND captured_at >= (SELECT max(captured_at) FROM postgresql.checkpoint_stats_snapshot
+                              WHERE target_id = %s) - make_interval(secs => %s)
+        ORDER BY captured_at DESC
+        """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
+
+
+def load_database_stats_history(conn, target_id):
+    """PG_DATABASE_STATS of the target over COUNTER_HISTORY_SECONDS, newest first."""
+    return conn.execute(
+        """
+        SELECT snapshot_id, target_id, captured_at, database_name, xact_commit, xact_rollback,
+               blks_read, blks_hit, temp_files, temp_bytes, stats_reset, in_recovery
+        FROM postgresql.database_stats_snapshot
+        WHERE target_id = %s
+          AND captured_at >= (SELECT max(captured_at) FROM postgresql.database_stats_snapshot
+                              WHERE target_id = %s) - make_interval(secs => %s)
+        ORDER BY captured_at DESC, database_name
+        """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
 
 
 def load_latest_host_snapshot(conn, target_id):
@@ -2600,6 +2624,170 @@ def evaluate_major_support(evidence, rule, thresholds):
     return findings
 
 
+# ----------------------------------------------------------------------------- counter windows
+
+def counter_window(rows, counters, window_seconds, min_seconds, unknown_period=False):
+    """How much the cumulative counters grew, and over which period, from one key's snapshots.
+
+    rows: the snapshots of one counter set (one database, say), newest first.
+      WINDOW       difference from the oldest snapshot inside the window, at least min_seconds
+                   back, with the same stats_reset and no counter lower than before (a reset or a
+                   failover breaks the series);
+      SINCE_RESET  otherwise the counters themselves, since stats_reset, when that is at least
+                   min_seconds ago;
+      TOTAL        otherwise, for ratios only (unknown_period): the counters since an unknown
+                   start; no rate can be derived.
+    None when nothing can be said: statistics too recent.
+    """
+    latest = rows[0]
+    baseline = None
+    for row in rows[1:]:
+        span = (latest["captured_at"] - row["captured_at"]).total_seconds()
+        if span > window_seconds:
+            break
+        if (span >= min_seconds and row["stats_reset"] == latest["stats_reset"]
+                and all((row[c] or 0) <= (latest[c] or 0) for c in counters)):
+            baseline = row                          # keeps the oldest inside the window
+    if baseline is not None:
+        return {"mode": "WINDOW", "since": baseline["captured_at"], "latest": latest,
+                "seconds": (latest["captured_at"] - baseline["captured_at"]).total_seconds(),
+                "delta": {c: (latest[c] or 0) - (baseline[c] or 0) for c in counters}}
+    totals = {c: latest[c] or 0 for c in counters}
+    if latest["stats_reset"] is not None:
+        seconds = (latest["captured_at"] - latest["stats_reset"]).total_seconds()
+        if seconds >= min_seconds:
+            return {"mode": "SINCE_RESET", "since": latest["stats_reset"], "latest": latest,
+                    "seconds": seconds, "delta": totals}
+        return None
+    if unknown_period:
+        return {"mode": "TOTAL", "since": None, "latest": latest, "seconds": None, "delta": totals}
+    return None
+
+
+def window_details(w):
+    """What a finding says about the period it was measured over."""
+    return {"period_mode": w["mode"], "period_seconds": w["seconds"],
+            "period_since": iso(w["since"]) if w["since"] else None,
+            "captured_at": iso(w["latest"]["captured_at"])}
+
+
+def per_database(rows):
+    """{database_name: its snapshots, newest first}; databases in the latest snapshot only."""
+    latest_at = rows[0]["captured_at"]
+    groups = {}
+    for row in rows:
+        groups.setdefault(row["database_name"], []).append(row)
+    return {name: snaps for name, snaps in groups.items() if snaps[0]["captured_at"] == latest_at}
+
+
+def evaluate_checkpoint_pressure(rows, rule, thresholds):
+    """PG-PERF-003: requested checkpoints (WAL reached max_wal_size) dominate timed ones."""
+    rows = [r for r in rows if not r["in_recovery"]]
+    if not rows:
+        raise InsufficientEvidence("PG_CHECKPOINT_STATS", "no_primary",
+                                   "No checkpoint statistics from the primary.")
+    w = counter_window(rows, ("checkpoints_timed", "checkpoints_requested"),
+                       parameter(rule, "window"), parameter(rule, "min_window"), unknown_period=True)
+    if w is None:
+        raise InsufficientEvidence("PG_CHECKPOINT_STATS", "statistics_too_young",
+                                   "Checkpoint statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    requested, timed = w["delta"]["checkpoints_requested"], w["delta"]["checkpoints_timed"]
+    total = requested + timed
+    if total < parameter(rule, "min_checkpoints"):
+        raise InsufficientEvidence("PG_CHECKPOINT_STATS", "too_few_checkpoints",
+                                   "Too few checkpoints in the period to judge.",
+                                   count=total, minimum=int(parameter(rule, "min_checkpoints")))
+    share = round(100 * requested / total, 1)
+    matched = match_threshold(share, thresholds, "PERCENT")
+    if matched is None:
+        return []
+    values = {"requested": requested, "total": total, "share": share}     # the period: a table column
+    return [{
+        "severity": matched["severity"], "snapshot_id": w["latest"]["snapshot_id"],
+        "template_values": values, "observed_value": share, "observed_unit": "PERCENT",
+        "subject_type": "SYSTEM", "subject_identifier": "checkpoints",
+        "details": {"requested": requested, "timed": timed, **window_details(w)}}]
+
+
+def evaluate_cache_hit(rows, rule, thresholds):
+    """PG-PERF-002: blocks read from disk instead of shared buffers, per active database."""
+    min_blocks = parameter(rule, "min_blocks")
+    findings, judged, young = [], 0, 0
+    for name, snaps in per_database(rows).items():
+        w = counter_window(snaps, ("blks_hit", "blks_read"), parameter(rule, "window"),
+                           parameter(rule, "min_window"), unknown_period=True)
+        if w is None:
+            young += 1                              # reset (or restarted) too recently
+            continue
+        hit, read = w["delta"]["blks_hit"], w["delta"]["blks_read"]
+        if hit + read < min_blocks:
+            continue                                # too little activity to judge
+        judged += 1
+        miss = round(100 * read / (hit + read), 1)
+        matched = match_threshold(miss, thresholds, "PERCENT")
+        if matched is None:
+            continue
+        values = {"database_name": name, "hit": round(100 - miss, 1), "read_blocks": read}
+        findings.append({
+            "severity": matched["severity"], "snapshot_id": w["latest"]["snapshot_id"],
+            "template_values": values, "observed_value": miss, "observed_unit": "PERCENT",
+            "subject_type": "DATABASE", "subject_identifier": name,
+            "details": {"database_name": name, "hit_ratio": round(100 - miss, 1),
+                        "blocks_read": read, "blocks_hit": hit, **window_details(w)}})
+    if not judged and young:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "statistics_too_young",
+                                   "Database statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    if not judged:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "too_little_activity",
+                                   "No database read enough blocks in the period to judge.",
+                                   minimum=int(min_blocks))
+    return findings
+
+
+def evaluate_temp_files(rows, rule, thresholds):
+    """PG-CAP-005: temporary file bytes per day, per database.
+
+    A rate needs a known period (a window or the reset time). Measured over less than a day the
+    finding says so and is at most WARNING: a nightly batch can fall in or out of a short period.
+    """
+    findings, measured, young = [], 0, 0
+    for name, snaps in per_database(rows).items():
+        w = counter_window(snaps, ("temp_files", "temp_bytes"), parameter(rule, "window"),
+                           parameter(rule, "min_window"))
+        if w is None:
+            young += snaps[0]["stats_reset"] is not None    # known but recent; else the start is unknown
+            continue
+        measured += 1
+        per_day = w["delta"]["temp_bytes"] * 86400 / w["seconds"]
+        matched = match_threshold(per_day, thresholds, "BYTE_PER_DAY")
+        if matched is None:
+            continue
+        short = w["seconds"] < 86400
+        severity = "WARNING" if short else matched["severity"]
+        values = {"database_name": name, "temp_bytes": w["delta"]["temp_bytes"],
+                  "temp_files": w["delta"]["temp_files"], "period_seconds": w["seconds"],
+                  "per_day": round(per_day)}
+        if short:
+            values["_alt"] = True
+        findings.append({
+            "severity": severity, "snapshot_id": w["latest"]["snapshot_id"],
+            "template_values": values, "observed_value": round(per_day), "observed_unit": "BYTE_PER_DAY",
+            "subject_type": "DATABASE", "subject_identifier": name,
+            "details": {"database_name": name, "temp_bytes": w["delta"]["temp_bytes"],
+                        "temp_files": w["delta"]["temp_files"], **window_details(w)}})
+    if not measured and young:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "statistics_too_young",
+                                   "Database statistics were reset too recently.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    if not measured:
+        raise InsufficientEvidence("PG_DATABASE_STATS", "period_unknown",
+                                   "The period of the temporary file counters is not known yet.",
+                                   minimum_hours=round(parameter(rule, "min_window") / 3600))
+    return findings
+
+
 EVIDENCE_LOADERS = {
     "KEYSTONE_RELEASE_REFERENCE": load_release_reference,
     "KEYSTONE_OS_REFERENCE": load_os_reference,
@@ -2618,7 +2806,8 @@ EVIDENCE_LOADERS = {
     "PG_SCHEMA_PRIVILEGES": load_latest_schema_privileges,
     "PG_ROLES": load_latest_roles,
     "PG_SEQUENCE_CAPACITY": load_latest_sequence_capacity,
-    "PG_CHECKPOINT_STATS": load_latest_checkpoint_stats,
+    "PG_CHECKPOINT_STATS": load_checkpoint_stats_history,
+    "PG_DATABASE_STATS": load_database_stats_history,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -2764,6 +2953,9 @@ RULE_EVALUATORS = {
     "PG-LIFE-001": evaluate_minor_version_behind,
     "PG-LIFE-002": evaluate_major_support,
     "PG-LIFE-003": evaluate_os_support,
+    "PG-PERF-003": evaluate_checkpoint_pressure,
+    "PG-PERF-002": evaluate_cache_hit,
+    "PG-CAP-005": evaluate_temp_files,
 }
 
 

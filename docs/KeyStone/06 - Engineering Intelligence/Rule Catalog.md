@@ -880,6 +880,49 @@ Unit tests: recognition of eleven name/version forms and six that must not be re
 
 ---
 
+# Batch of 2026-11-13 — counter windows, performance (V061, PG024, ADR-0020)
+
+Counters are cumulative; every rule here reads them over a window (ADR-0020): the newest snapshot against the oldest inside `window` (same reset, no lower counter), otherwise since `stats_reset`, otherwise for ratios since an unknown start. Statistics younger than `min_window` are not judged. Every finding shows its period. Texts give what happens now and if it goes on (IMPACT), and what the fix costs (last line of RECOMMENDATION).
+
+## PG-PERF-003 — Checkpoint Pressure (PG_PERFORMANCE_HEALTH, topic PERFORMANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_CHECKPOINT_STATS`, required, 3 600 s; history of 8 days; primary rows only |
+| Condition | requested / (timed + requested) in the period ≥ 20 % → WARNING; the same line as the max_wal_size recommendation (PG-CONF-003 `requested_share_limit` 0.2), so the report never recommends a larger max_wal_size while calling this healthy (Hasan, 2026-11-13; first proposed 50 %) |
+| Parameters | `window` 24 h, `min_window` 6 h, `min_checkpoints` 10 |
+| Insufficient evidence | no primary row (`no_primary`), reset too recently (`statistics_too_young`), fewer than 10 checkpoints (`too_few_checkpoints`) |
+| Subject | SYSTEM |
+
+## PG-PERF-002 — Low Cache Hit Ratio (PG_PERFORMANCE_HEALTH, topic PERFORMANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_DATABASE_STATS` (PG024: `pg_stat_database` counters per database), required, 3 600 s |
+| Condition | share of blocks read from disk ≥ 5 % (hit < 95 %) → WARNING, on databases that read ≥ `min_blocks` (1 M) in the period; observed value is the disk share |
+| Parameters | `window` 24 h, `min_window` 6 h, `min_blocks` 1 000 000 |
+| Insufficient evidence | no active database (`too_little_activity`) |
+| Subject | DATABASE |
+
+A signal, not a diagnosis (stated in MEANING): part of the disk reads come from the operating system cache; the recommendation starts with the queries, not memory.
+
+## PG-CAP-005 — Heavy Temporary File Use (PG_CAPACITY_HEALTH, topic STORAGE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_DATABASE_STATS`, required, 3 600 s |
+| Condition | temporary bytes per day ≥ 10 GB → WARNING, ≥ 100 GB → CRITICAL; measured over less than a day at most WARNING, with FINDING_ALT saying it is a trend |
+| Parameters | `window` 24 h, `min_window` 6 h |
+| Insufficient evidence | period unknown: statistics never reset and no earlier snapshot (`period_unknown`; judged once Keystone has two snapshots 6 h apart) |
+| Subject | DATABASE |
+
+The recommendation warns against raising work_mem server-wide (PG-CONF-007) and gives a per-role setting.
+
+**Verification (V061)**  
+Unit tests: the window (oldest inside, reset and failover break the series, too young, too close), each rule (window against a fine total, healthy, too few, replicas left out, inactive and dropped databases, short period capped, since reset, unknown period); report: period column, per-day sizes. Lab (hc120, 2026-11-14, five minutes after a failover on the lab laptop): all three not assessed, rightly; PG-PERF-002 and PG-CAP-005 gave the wrong reason (too little activity, never reset) — fixed: a recent reset is reported as `statistics_too_young` by every rule. Durations under a minute show in seconds (the 30 s lock threshold showed as "1 dakika"). Full suite 466 OK.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

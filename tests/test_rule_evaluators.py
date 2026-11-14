@@ -1661,3 +1661,183 @@ class OsSupportTests(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]],
                          [("fed", "os_not_recognised"), ("rhel7", "os_not_in_reference")])
+
+
+# V061: counter windows over cumulative counters.
+RESET = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+
+def checkpoints(hours_ago, timed, requested, stats_reset=RESET, in_recovery=False):
+    return {"snapshot_id": hours_ago, "target_id": 1, "captured_at": NOW - timedelta(hours=hours_ago),
+            "in_recovery": in_recovery, "checkpoints_timed": timed, "checkpoints_requested": requested,
+            "stats_reset": stats_reset}
+
+
+def dbstats(name, hours_ago, hit=0, read=0, temp_files=0, temp_bytes=0, stats_reset=None):
+    return {"snapshot_id": hours_ago, "target_id": 1, "captured_at": NOW - timedelta(hours=hours_ago),
+            "database_name": name, "xact_commit": 0, "xact_rollback": 0, "blks_hit": hit, "blks_read": read,
+            "temp_files": temp_files, "temp_bytes": temp_bytes, "stats_reset": stats_reset, "in_recovery": False}
+
+
+DAY, HOUR = 86400, 3600
+
+
+class CounterWindowTests(unittest.TestCase):
+    COUNTERS = ("checkpoints_timed", "checkpoints_requested")
+
+    def test_oldest_snapshot_inside_the_window(self):
+        rows = [checkpoints(0, 500, 300), checkpoints(6, 480, 250), checkpoints(20, 450, 200),
+                checkpoints(30, 400, 100)]
+        w = engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR)
+        self.assertEqual((w["mode"], w["seconds"], w["delta"]),
+                         ("WINDOW", 20 * HOUR, {"checkpoints_timed": 50, "checkpoints_requested": 100}))
+
+    def test_a_reset_or_lower_counter_breaks_the_series(self):
+        rows = [checkpoints(0, 50, 30, stats_reset=NOW - timedelta(hours=10)),
+                checkpoints(8, 480, 250)]                                    # other reset
+        w = engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR)
+        self.assertEqual((w["mode"], w["seconds"]), ("SINCE_RESET", 10 * HOUR))
+        rows = [checkpoints(0, 50, 30, stats_reset=None), checkpoints(8, 480, 250, stats_reset=None)]
+        self.assertIsNone(engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR))     # failover: lower
+        self.assertEqual(engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR, unknown_period=True)["mode"],
+                         "TOTAL")
+
+    def test_too_young(self):
+        rows = [checkpoints(0, 5, 3, stats_reset=NOW - timedelta(hours=2)), checkpoints(1, 4, 2)]
+        self.assertIsNone(engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR, unknown_period=True))
+
+    def test_snapshots_closer_than_min_window_are_not_a_baseline(self):
+        rows = [checkpoints(0, 500, 300), checkpoints(2, 480, 250)]
+        w = engine.counter_window(rows, self.COUNTERS, DAY, 6 * HOUR)
+        self.assertEqual(w["mode"], "SINCE_RESET")
+
+
+class CheckpointPressureTests(unittest.TestCase):
+    """PG-PERF-003."""
+
+    THRESHOLDS = [threshold("WARNING", 20, "PERCENT")]
+
+    def params(self, **extra):
+        return with_params(window=DAY, min_window=6 * HOUR, min_checkpoints=10, **extra)
+
+    def test_requested_share_in_the_window(self):
+        rows = [checkpoints(0, 500, 400), checkpoints(24, 470, 330)]        # 30 timed, 70 requested
+        findings = engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual((findings[0]["severity"], findings[0]["observed_value"]), ("WARNING", 70.0))
+        self.assertEqual(findings[0]["template_values"],
+                         {"requested": 70, "total": 100, "share": 70.0})
+        self.assertEqual(findings[0]["details"]["period_mode"], "WINDOW")
+
+    def test_recent_change_is_seen_although_the_total_is_fine(self):
+        """Since the reset 20 % requested; in the last day 80 %: the window tells what happens now."""
+        rows = [checkpoints(0, 10020, 2080), checkpoints(24, 10000, 2000)]   # total 17 %, last day 80 %
+        self.assertEqual(severities(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)),
+                         ["WARNING"])
+        self.assertEqual(engine.evaluate_checkpoint_pressure(rows[:1], self.params(), self.THRESHOLDS), [])
+        rows = [checkpoints(0, 10020, 2580), checkpoints(24, 10000, 2500)]
+        self.assertEqual(severities(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)),
+                         ["WARNING"])
+
+    def test_healthy_and_too_few(self):
+        rows = [checkpoints(0, 500, 100), checkpoints(24, 400, 90)]          # 10 of 110: 9 %
+        self.assertEqual(engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS), [])
+        rows = [checkpoints(0, 503, 104), checkpoints(24, 500, 100)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_checkpoint_pressure(rows, self.params(), self.THRESHOLDS)
+        self.assertIn("[too_few_checkpoints]", str(raised.exception))
+
+    def test_replica_rows_are_not_used(self):
+        with self.assertRaises(engine.InsufficientEvidence):
+            engine.evaluate_checkpoint_pressure([checkpoints(0, 5, 5, in_recovery=True)], self.params(), [])
+
+
+class CacheHitTests(unittest.TestCase):
+    """PG-PERF-002."""
+
+    THRESHOLDS = [threshold("WARNING", 5, "PERCENT")]
+
+    def params(self):
+        return with_params(window=DAY, min_window=6 * HOUR, min_blocks=1_000_000)
+
+    def test_active_databases_only(self):
+        rows = [dbstats("app", 0, hit=91_000_000, read=10_000_000), dbstats("idle", 0, hit=100, read=900),
+                dbstats("ok", 0, hit=99_000_000, read=1_000_000),
+                dbstats("app", 24, hit=1_000_000, read=0), dbstats("idle", 24), dbstats("ok", 24)]
+        findings = engine.evaluate_cache_hit(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["observed_value"]) for f in findings], [("app", 10.0)])
+        self.assertEqual(findings[0]["template_values"],
+                         {"database_name": "app", "hit": 90.0, "read_blocks": 10_000_000})
+        self.assertEqual(findings[0]["details"]["period_seconds"], DAY)
+
+    def test_unknown_start_is_used_for_a_ratio(self):
+        rows = [dbstats("app", 0, hit=80_000_000, read=20_000_000)]
+        findings = engine.evaluate_cache_hit(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual((findings[0]["details"]["period_mode"], findings[0]["details"]["period_seconds"]),
+                         ("TOTAL", None))
+
+    def test_no_active_database(self):
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_cache_hit([dbstats("app", 0, hit=10, read=10)], self.params(), self.THRESHOLDS)
+        self.assertIn("[too_little_activity]", str(raised.exception))
+
+    def test_dropped_database_is_not_judged(self):
+        rows = [dbstats("app", 0, hit=99_000_000, read=1_000_000),
+                dbstats("gone", 24, hit=1, read=50_000_000), dbstats("app", 24)]
+        self.assertEqual(engine.evaluate_cache_hit(rows, self.params(), self.THRESHOLDS), [])
+
+
+class TempFilesTests(unittest.TestCase):
+    """PG-CAP-005."""
+
+    GB = 1024 ** 3
+    THRESHOLDS = [threshold("WARNING", 10 * 1024 ** 3, "BYTE_PER_DAY"),
+                  threshold("CRITICAL", 100 * 1024 ** 3, "BYTE_PER_DAY")]
+
+    def params(self):
+        return with_params(window=DAY, min_window=6 * HOUR)
+
+    def test_per_day_over_a_day(self):
+        rows = [dbstats("app", 0, temp_files=300, temp_bytes=250 * self.GB),
+                dbstats("ok", 0, temp_bytes=2 * self.GB),
+                dbstats("app", 24, temp_files=100, temp_bytes=100 * self.GB), dbstats("ok", 24)]
+        findings = engine.evaluate_temp_files(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["severity"]) for f in findings], [("app", "CRITICAL")])
+        self.assertEqual(findings[0]["template_values"]["temp_files"], 200)
+        self.assertNotIn("_alt", findings[0]["template_values"])
+
+    def test_short_period_is_a_trend_at_most_warning(self):
+        rows = [dbstats("app", 0, temp_bytes=40 * self.GB), dbstats("app", 6)]   # 160 GB/day pace
+        findings = engine.evaluate_temp_files(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual(severities(findings), ["WARNING"])
+        self.assertTrue(findings[0]["template_values"]["_alt"])
+        self.assertEqual(findings[0]["template_values"]["per_day"], 160 * self.GB)
+
+    def test_since_reset_when_known(self):
+        rows = [dbstats("app", 0, temp_bytes=40 * self.GB, stats_reset=NOW - timedelta(days=2))]
+        findings = engine.evaluate_temp_files(rows, self.params(), self.THRESHOLDS)
+        self.assertEqual((severities(findings), findings[0]["details"]["period_mode"]), (["WARNING"], "SINCE_RESET"))
+
+    def test_rate_needs_a_known_period(self):
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_temp_files([dbstats("app", 0, temp_bytes=40 * self.GB)], self.params(), self.THRESHOLDS)
+        self.assertIn("[period_unknown]", str(raised.exception))
+        self.assertIn('"minimum_hours": 6', str(raised.exception))
+
+
+class CounterReasonTests(unittest.TestCase):
+    """Lab hc120 (2026-11-14): five minutes after a failover the statistics were young, but PG-PERF-002
+    said "too little activity" and PG-CAP-005 "never reset". The reason must be the real one."""
+
+    def test_cache_hit_on_young_statistics(self):
+        reset = NOW - timedelta(minutes=5)
+        rows = [dbstats("app", 0, hit=10, read=10, stats_reset=reset)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_cache_hit(rows, with_params(window=DAY, min_window=6 * HOUR, min_blocks=1_000_000), [])
+        self.assertIn("[statistics_too_young]", str(raised.exception))
+
+    def test_temp_files_on_young_statistics(self):
+        reset = NOW - timedelta(minutes=5)
+        rows = [dbstats("app", 0, temp_bytes=1, stats_reset=reset)]
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_temp_files(rows, with_params(window=DAY, min_window=6 * HOUR), [])
+        self.assertIn("[statistics_too_young]", str(raised.exception))
