@@ -461,6 +461,14 @@ EXPECTED_RULES = {
         "thresholds": {},
         "evidence": {"PG_QUERY_STATS": (True, 3600)},
     },
+    # V066: disks of pg_wal (host script, PG029) and tablespaces (PG_TABLESPACES).
+    "PG-CAP-003": {
+        "assessment": "PG_CAPACITY_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("80"), "PERCENT"), "CRITICAL": (Decimal("90"), "PERCENT")},
+        "evidence": {"PG_HOST_SNAPSHOT": (True, 3600), "PG_CONFIGURATION_SNAPSHOT": (True, 86400),
+                     "PG_TABLESPACES": (True, 86400)},
+    },
 }
 
 EXPECTED_ASSESSMENTS = {rule["assessment"] for rule in EXPECTED_RULES.values()}

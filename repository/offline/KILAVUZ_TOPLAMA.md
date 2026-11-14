@@ -80,6 +80,18 @@ powershell -ExecutionPolicy Bypass -File host_snapshot_windows.ps1 > DBSRV01_hos
 
 Toplayıcı script bunu kendi makinesi için doğrudan, diğer Linux sunucular için SSH kullanıcısı verildiğinde SSH ile kendisi yapar. SSH erişimi yoksa (örneğin sunuculara yalnızca sistem yöneticisi bağlanabiliyorsa) script'ler sunucuda ayrıca çalıştırılır ve çıktı dosyaları arşive eklenir. Ayrıca çalıştırmak isterseniz bu script'ler de yalnızca okur (Linux'ta `/proc`, `df`, `lsblk`; Windows'ta `Get-CimInstance`, `Get-Partition`, `Get-PhysicalDisk`).
 
+**pg_wal'ın konumu.** pg_wal ayrı bir diske taşınmışsa (genellikle veri dizinindeki `pg_wal` bir sembolik link, Windows'ta junction'dır) o diskin doluluğu da kontrol edilir. Script bunun için çalışan PostgreSQL'in veri dizinini (`postgres -D ...`) bulur ve `readlink -f <veri dizini>/pg_wal` ile linkin nereyi gösterdiğini okur. Veri dizinine yalnızca postgres kullanıcısı girebildiği için script postgres ya da root dışındaki bir kullanıcıyla çalışırsa bunu okuyamaz; o zaman rapor "pg_wal'ın konumu okunamadı" der, diğer kontroller etkilenmez. Okunmasını isterseniz üç yol var, hangisi işinize gelirse:
+
+1. **Yalnızca bu komut için sudo kuralı (önerilen).** `visudo -f /etc/sudoers.d/keystone` ile şu satırı ekleyin (veri dizini ve kullanıcı adını kendi ortamınıza göre yazın; `command -v readlink` ile yolu doğrulayın):
+   ```
+   <ssh kullanıcısı> ALL=(postgres) NOPASSWD: /usr/bin/readlink -f /var/lib/pgsql/16/data/pg_wal
+   ```
+   Script bunu `sudo -n` ile dener: kural yoksa şifre sormaz, yalnızca okuyamadığını yazar. Bedeli: sudoers'ta tek satır; kullanıcı başka hiçbir komutu postgres olarak çalıştıramaz.
+2. **Script'i postgres kullanıcısıyla çalıştırmak** (`sudo -u postgres sh host_snapshot.sh` ya da SSH'ı postgres ile yapmak). Her şey okunur; ama postgres hesabına uzaktan giriş açmak birçok güvenlik politikasına aykırıdır.
+3. **SSH kullanıcısını postgres grubuna ekleyip veri dizinini 0750 yapmak** (PostgreSQL 11+). Kullanıcı veri dosyalarını da okuyabilir hale gelir; önerilmez.
+
+Tablespace'lerin yeri veritabanından okunur, bunlardan hiçbiri gerekmez.
+
 Script çalıştırılamıyorsa her sunucu için şu bilgiler yeterlidir: bellek (GB), CPU çekirdek sayısı, veri diskinin boyutu ve doluluğu, disk tipi (SSD/HDD).
 
 ## Gönderim

@@ -758,6 +758,31 @@ def parse_host_snapshot_output(output):
             }
         )
 
+    rows.extend(parse_data_paths(sections, captured_at))
+    return rows
+
+
+DATA_PATH_READ_VIA = ("DIRECT", "SUDO", "DENIED")
+
+
+def parse_data_paths(sections, captured_at):
+    """DATA_PATH rows: data directory, real pg_wal location, how it was read.
+
+    No section (an older host script): no rows. A section without a postmaster: one NOT_FOUND
+    row, so "nothing running seen" differs from "not looked".
+    """
+    if "DATA_PATHS" not in sections:
+        return []
+    rows = []
+    for line in sections["DATA_PATHS"]:
+        parts = line.rstrip("\r").split("\t")
+        if len(parts) != 3 or parts[2] not in DATA_PATH_READ_VIA or not parts[0]:
+            continue
+        rows.append({"record_type": "DATA_PATH", "captured_at": captured_at,
+                     "data_directory": parts[0], "wal_location": parts[1] or None, "read_via": parts[2]})
+    if not rows:
+        rows.append({"record_type": "DATA_PATH", "captured_at": captured_at,
+                     "data_directory": None, "wal_location": None, "read_via": "NOT_FOUND"})
     return rows
 
 
@@ -2169,6 +2194,11 @@ def save_host_snapshot(conn, task, rows):
                 },
             )
 
+    data_paths = [row for row in rows if row["record_type"] == "DATA_PATH"]
+    if data_paths:                                  # PG029; older host scripts send none
+        insert_rows(conn, "data_path_snapshot", task, data_paths,
+                    ("data_directory", "wal_location", "read_via"))
+
 
 
 WAL_STATUS_COLUMNS = ("captured_at", "in_recovery", "archive_mode", "timeline_id",
@@ -2263,6 +2293,13 @@ def save_database_stats_snapshot(conn, task, rows):
                  "temp_files", "temp_bytes", "stats_reset", "in_recovery"))
 
 
+def save_tablespace_snapshot(conn, task, rows):
+    """Persist PG_TABLESPACES: every tablespace of the node with its directory and size."""
+    if not rows:
+        raise RuntimeError("PG_TABLESPACES returned no rows; pg_default always exists.")
+    insert_rows(conn, "tablespace_snapshot", task, rows, ("tablespace_name", "location", "size_bytes"))
+
+
 def insert_rows(conn, table, task, rows, columns, casts=None):
     """Insert collector rows into a postgresql.* table; one captured_at per collection."""
     if len({r["captured_at"] for r in rows}) > 1:
@@ -2352,6 +2389,7 @@ COLLECTOR_HANDLERS = {
     "PG_HBA_RULES": save_hba_rule_snapshot,
     "PG_TABLE_BLOAT": save_table_bloat_snapshot,
     "PG_QUERY_STATS": save_query_stats_snapshot,
+    "PG_TABLESPACES": save_tablespace_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,

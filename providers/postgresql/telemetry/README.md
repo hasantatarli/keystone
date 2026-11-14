@@ -1,12 +1,12 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG028).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG029).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
 | PG_INSTANCE_INVENTORY | NODE | `instance_inventory` (current row per node) | Primary detection, report inventory |
 | PG_CONFIGURATION_SNAPSHOT | NODE | `configuration_snapshot` | PG-CONF-*, PG-BKP-002, PG-SEC-002/003, PG-CONN-002, PG-CAP-001 |
-| PG_HOST_SNAPSHOT (SSH) | NODE | `host_snapshot` (with `virtualization`, PG021), `storage_snapshot` (with `rotational` from lsblk ROTA, PG021) | PG-CAP-001, report inventory, storage type note |
+| PG_HOST_SNAPSHOT (SSH) | NODE | `host_snapshot` (with `virtualization`, PG021), `storage_snapshot` (with `rotational` from lsblk ROTA, PG021), `data_path_snapshot` (PG029: per postmaster `-D` where `pg_wal` really is — DIRECT, SUDO with a narrow sudoers rule, DENIED, NOT_FOUND) | PG-CAP-001, PG-CAP-003, report inventory, storage type note |
 | PG_WAL_STATUS | NODE | `wal_status_snapshot` | PG-BKP-001, PG-HA-001, report inventory |
 | PG_CHECKPOINT_STATS | SYSTEM | `checkpoint_stats_snapshot` | PG-CONF-003 (`max_wal_size`), PG-PERF-003; `pg_stat_bgwriter` before 17, `pg_stat_checkpointer` from 17, chosen through `query_to_xml` |
 | PG_INDEX_USAGE | NODE_DATABASE | `index_usage_snapshot` (with index definitions, PG022) | PG-IDX-001/002/003 |
@@ -26,6 +26,7 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_EXTENSIONS | DATABASE | `extension_snapshot` (PG022): installed and package versions | PG-LIFE-004 |
 | PG_HBA_RULES | NODE | `hba_rule_snapshot` (PG026): `pg_hba_file_rules` through `query_to_xml`; ACCESS row says whether the role could read it (superuser only by default) | PG-SEC-005 |
 | PG_TABLE_BLOAT | DATABASE | `table_bloat_snapshot` (PG027): estimated free space of tables and btree indexes ≥ 100 MB — `pgstattuple_approx` when installed, else `pg_stats` widths; method NULL when neither | PG-MAINT-004 |
+| PG_TABLESPACES | NODE | `tablespace_snapshot` (PG029): every tablespace, its directory (`pg_tablespace_location`, empty for pg_default / pg_global) and size | PG-CAP-003 |
 | PG_QUERY_STATS | SYSTEM | `query_stats_snapshot` (PG028): `pg_stat_statements` through `query_to_xml` — the 10 statements with the most time and the 5 writing most temporary files / reading most from disk; SYSTEM row: loaded, created, readable, `stats_reset` (14+), total time | PG-PERF-001, report sections |
 | PG_TABLE_ACCESS | DATABASE | `table_access_snapshot` (PG025): sequential and index scans, live rows and size per table, the database's stats_reset; DATABASE row per database | PG-IDX-005 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |

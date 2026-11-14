@@ -728,7 +728,43 @@ def load_latest_host_snapshot(conn, target_id):
         ORDER BY h.target_id
         """, (node_target_ids(conn, target_id),)).fetchall()
     storage = [{"record_type": "STORAGE", **r} for r in load_latest_storage_snapshot(conn, target_id)]
-    return hosts + storage
+    return hosts + storage + load_latest_data_paths(conn, target_id)
+
+
+def load_latest_data_paths(conn, target_id):
+    """DATA_PATH rows (PG029) of each node's latest host snapshot; none when that host script was older."""
+    return conn.execute(
+        """
+        SELECT 'DATA_PATH' AS record_type, d.snapshot_id, d.target_id, t.name AS node_name, d.captured_at,
+               d.data_directory, d.wal_location, d.read_via
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.host_snapshot
+            WHERE target_id = t.target_id
+        ) last ON last.captured_at IS NOT NULL
+        JOIN postgresql.data_path_snapshot d
+            ON d.target_id = t.target_id AND d.captured_at = last.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY d.target_id, d.data_directory
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
+def load_latest_tablespaces(conn, target_id):
+    """Latest PG_TABLESPACES per node (PG029)."""
+    return conn.execute(
+        """
+        SELECT s.snapshot_id, s.target_id, t.name AS node_name, s.captured_at,
+               s.tablespace_name, s.location, s.size_bytes
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.tablespace_snapshot
+            WHERE target_id = t.target_id
+        ) last ON last.captured_at IS NOT NULL
+        JOIN postgresql.tablespace_snapshot s
+            ON s.target_id = t.target_id AND s.captured_at = last.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY s.target_id, s.tablespace_name
+        """, (node_target_ids(conn, target_id),)).fetchall()
 
 
 def load_latest_storage_snapshot(conn, target_id):
@@ -1746,6 +1782,94 @@ def evaluate_data_disk_usage(evidence, rule, thresholds):
                 },
             }
         )
+    return findings
+
+
+def wal_location(data_directory, paths):
+    """(where pg_wal of data_directory really is, None) or (None, why it is not known).
+
+    paths: the node's DATA_PATH rows from the host script (PG029).
+    """
+    if not paths:
+        return None, "wal_location_not_collected"         # host script older than PG029
+    wanted = comparable_path(data_directory or "").rstrip("/")
+    match = next((p for p in paths if p["data_directory"]
+                  and comparable_path(p["data_directory"]).rstrip("/") == wanted), None)
+    if match is None:
+        return None, "wal_location_not_found"
+    if match["read_via"] == "DENIED" or not match["wal_location"]:
+        return None, "wal_location_unreadable"
+    return match["wal_location"], None
+
+
+def evaluate_separate_disk_usage(evidence, rule, thresholds):
+    """PG-CAP-003: usage of the filesystems PostgreSQL writes to besides the data directory's,
+    per node: pg_wal moved to its own mount, tablespaces outside the data directory.
+
+    One finding per node and mount, naming what lives there. On the data directory's mount
+    nothing is judged here (PG-CAP-001 does). A pg_wal location that could not be read leaves the
+    node unassessed with the ways to allow it; tablespaces are still judged.
+    """
+    host = evidence["PG_HOST_SNAPSHOT"]
+    data_directories = {r["target_id"]: r["setting_value"]
+                        for r in evidence["PG_CONFIGURATION_SNAPSHOT"]
+                        if r["setting_name"] == "data_directory"}
+    tablespaces = {}
+    for ts in evidence["PG_TABLESPACES"]:
+        if ts["location"]:
+            tablespaces.setdefault(ts["target_id"], []).append(ts)
+    findings, separate = [], False
+    for target_id in sorted(set(data_directories) | set(tablespaces)):
+        node = node_name_of(evidence, target_id)
+        mounts = [m for m in host if m.get("record_type", "STORAGE") == "STORAGE"
+                  and m["target_id"] == target_id and m["total_bytes"]]
+        if not mounts:
+            add_unassessed(rule["unassessed"], target_id, node, "PG_HOST_SNAPSHOT", "no_disk")
+            continue
+        directory = data_directories.get(target_id)
+        data_point = (data_mount(directory, mounts) or {}).get("mount_point")
+        uses = {}                                  # mount point -> (mount, [what lives there])
+
+        def place(path, label):
+            mount = data_mount(path, mounts)
+            if mount is None:
+                add_unassessed(rule["unassessed"], target_id, node, "PG_HOST_SNAPSHOT", "no_disk")
+            elif mount["mount_point"] != data_point:
+                uses.setdefault(mount["mount_point"], (mount, []))[1].append(label)
+
+        if directory:
+            paths = [p for p in host if p.get("record_type") == "DATA_PATH" and p["target_id"] == target_id]
+            wal, problem = wal_location(directory, paths)
+            if problem:
+                add_unassessed(rule["unassessed"], target_id, node, "PG_HOST_SNAPSHOT", problem)
+            else:
+                place(wal, "pg_wal")
+        for ts in tablespaces.get(target_id, []):
+            place(ts["location"], f'tablespace {ts["tablespace_name"]}')
+        for point, (mount, labels) in sorted(uses.items()):
+            separate = True
+            used_percent = round(usage_percent(mount["used_bytes"], mount["available_bytes"],
+                                               mount["total_bytes"]), 1)
+            matched = match_threshold(used_percent, thresholds, "PERCENT")
+            if matched is None:
+                continue
+            findings.append({
+                "severity": matched["severity"],
+                "snapshot_id": mount["snapshot_id"],
+                "template_values": {"node_name": mount["node_name"], "mount_point": point,
+                                    "used_percent": f"{used_percent:g}", "uses": ", ".join(labels)},
+                "observed_value": used_percent,
+                "observed_unit": "PERCENT",
+                "subject_type": "NODE",
+                "subject_identifier": f'{mount["node_name"]}:{point}',
+                "details": {"node": mount["node_name"], "mount_point": point, "uses": labels,
+                            "data_directory": directory, "used_bytes": mount["used_bytes"],
+                            "total_bytes": mount["total_bytes"], "available_bytes": mount["available_bytes"],
+                            "captured_at": iso(mount["captured_at"])},
+            })
+    if not findings and not separate and not rule["unassessed"]:
+        raise NotApplicable("PG_HOST_SNAPSHOT", "nothing_separate",
+                            "pg_wal and every tablespace are on the data directory's filesystem.")
     return findings
 
 
@@ -3114,6 +3238,7 @@ EVIDENCE_LOADERS = {
     "PG_HBA_RULES": load_latest_hba_rules,
     "PG_TABLE_BLOAT": load_latest_table_bloat,
     "PG_QUERY_STATS": load_latest_query_stats,
+    "PG_TABLESPACES": load_latest_tablespaces,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -3220,6 +3345,7 @@ RULE_EVALUATORS = {
     "PG-REP-002": evaluate_replication_slot_wal_unavailable,
     "PG-CONN-001": evaluate_aborted_idle_transaction_connections,
     "PG-CAP-001": evaluate_data_disk_usage,
+    "PG-CAP-003": evaluate_separate_disk_usage,
     "PG-CONF-003": evaluate_configuration_recommendations,
     "PG-CONF-007": evaluate_memory_overcommitment,
     "PG-REP-003": evaluate_replication_lag,

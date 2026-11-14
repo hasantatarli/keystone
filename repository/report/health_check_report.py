@@ -186,6 +186,24 @@ TEXTS = {
         "detail_timeline_started_at": "Primary olma zamanı",
         "unassessed_line": "Değerlendirilemeyen sunucu: {items}",
         "unassessed_reason": {"not_collected": "veri toplanamadı", "no_disk": "veri diski bilgisi yok",
+                              "wal_location_unreadable": ("pg_wal'ın gerçek konumu okunamadı: SSH kullanıcısı veri "
+                                                          "dizinine giremiyor (yalnızca postgres kullanıcısı girebilir), "
+                                                          "bu yüzden pg_wal ayrı bir diskteyse o diskin doluluğu "
+                                                          "değerlendirilemedi; tablespace'ler değerlendirildi. Okunmasını "
+                                                          "isterseniz üç yol var, hangisi işinize gelirse: (1) Yalnızca bu "
+                                                          "komut için sudo kuralı (önerilen): visudo -f /etc/sudoers.d/keystone "
+                                                          "ile <ssh kullanıcısı> ALL=(postgres) NOPASSWD: /usr/bin/readlink -f "
+                                                          "<veri dizini>/pg_wal satırını ekleyin; kullanıcı yalnızca bu tek "
+                                                          "komutu çalıştırabilir. (2) SSH'ı postgres kullanıcısıyla yapmak: "
+                                                          "her şey okunur ama postgres hesabına uzaktan giriş açılır, birçok "
+                                                          "güvenlik politikası buna izin vermez. (3) SSH kullanıcısını "
+                                                          "postgres grubuna ekleyip veri dizinini 0750 yapmak (PostgreSQL 11+): "
+                                                          "kullanıcı veri dosyalarını da okuyabilir hale gelir; önerilmez. "
+                                                          "Offline toplamada betik postgres kullanıcısıyla çalışınca gerekmez."),
+                              "wal_location_not_found": ("sunucuda bu data_directory ile çalışan bir PostgreSQL "
+                                                         "(postgres -D) görülmedi; pg_wal'ın konumu bilinmiyor"),
+                              "wal_location_not_collected": ("sunucu bilgisi pg_wal konumunu okumayan eski bir betikle "
+                                                             "toplanmış; güncel betikle yeniden toplayın"),
                               "no_memory": "bellek bilgisi yok",
                               "not_in_reference": "bu major sürüm Keystone'un sürüm referansında yok",
                               "no_version": "sürüm bilgisi yok",
@@ -199,6 +217,7 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
+                         "nothing_separate": "pg_wal ve bütün tablespace'ler veri diskiyle aynı diskte; o diskin doluluğunu PG-CAP-001 değerlendirir.",
                          "sync_not_configured": "Synchronous replikasyon tanımlı değil (synchronous_standby_names boş).",
                          "archiving_off": "Hiçbir sunucuda WAL arşivleme açık değil; arşivlemenin kendisini PG-BKP-002 değerlendirir.",
                          "setting_missing": "{setting} ayarı primary'de toplanamadı.",
@@ -241,7 +260,7 @@ TEXTS = {
         "col_xid_age": "XID yaşı", "col_mxid_age": "MultiXact yaşı", "col_freeze_max_age": "autovacuum_freeze_max_age",
         "col_share": "Oran", "col_match": "Durum", "col_other_index": "Diğer index",
         "col_foreign_key": "Foreign key", "col_columns": "Kolonlar", "col_referenced": "Referans",
-        "col_table_size": "Tablo boyutu", "col_usage": "Kullanım", "col_extension": "Extension",
+        "col_table_size": "Tablo boyutu", "col_usage": "Kullanım", "col_uses": "Üzerindekiler", "col_free": "Boş alan", "col_extension": "Extension",
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
         "col_os": "İşletim sistemi",
@@ -454,6 +473,23 @@ TEXTS = {
         "detail_timeline_started_at": "Became primary at",
         "unassessed_line": "Server not assessed: {items}",
         "unassessed_reason": {"not_collected": "data not collected", "no_disk": "no data disk information",
+                              "wal_location_unreadable": ("the real location of pg_wal could not be read: the SSH "
+                                                          "user may not enter the data directory (only postgres may), so "
+                                                          "if pg_wal is on its own disk, that disk was not assessed; "
+                                                          "tablespaces were. To have it read, three ways, whichever suits "
+                                                          "you: (1) a sudo rule for this one command (recommended): with "
+                                                          "visudo -f /etc/sudoers.d/keystone add <ssh user> ALL=(postgres) "
+                                                          "NOPASSWD: /usr/bin/readlink -f <data directory>/pg_wal; the user "
+                                                          "can run only that command. (2) SSH as postgres: everything is "
+                                                          "read, but remote login to the postgres account is opened; many "
+                                                          "security policies forbid it. (3) Add the SSH user to the "
+                                                          "postgres group and set the data directory to 0750 (PostgreSQL "
+                                                          "11+): the user can read the data files too; not recommended. "
+                                                          "Offline collection run as postgres needs none of these."),
+                              "wal_location_not_found": ("no PostgreSQL running with this data_directory (postgres -D) "
+                                                         "was seen on the server; where pg_wal is, is unknown"),
+                              "wal_location_not_collected": ("server data was collected with an older script that does "
+                                                             "not read the pg_wal location; collect again with the current one"),
                               "no_memory": "no memory information",
                               "not_in_reference": "this major version is not in Keystone's release reference",
                               "no_version": "no version information",
@@ -467,6 +503,7 @@ TEXTS = {
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
+                         "nothing_separate": "pg_wal and every tablespace are on the data disk; PG-CAP-001 assesses that disk.",
                          "sync_not_configured": "Synchronous replication is not configured (synchronous_standby_names is empty).",
                          "archiving_off": "No server archives WAL; archiving itself is judged by PG-BKP-002.",
                          "setting_missing": "{setting} was not collected on the primary.",
@@ -509,7 +546,7 @@ TEXTS = {
         "col_xid_age": "XID age", "col_mxid_age": "MultiXact age", "col_freeze_max_age": "autovacuum_freeze_max_age",
         "col_share": "Share", "col_match": "Match", "col_other_index": "Other index",
         "col_foreign_key": "Foreign key", "col_columns": "Columns", "col_referenced": "References",
-        "col_table_size": "Table size", "col_usage": "Usage", "col_extension": "Extension",
+        "col_table_size": "Table size", "col_usage": "Usage", "col_uses": "Holds", "col_free": "Free space", "col_extension": "Extension",
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
         "col_os": "Operating system",
@@ -1961,6 +1998,10 @@ def finding_fields(f, t):
             details[key] = f"{details[key]:,}"
     if isinstance(details.get("size_bytes"), (int, float)):
         details["size_bytes"] = fmt_bytes(details["size_bytes"])
+    if isinstance(details.get("uses"), list):     # PG-CAP-003: what lives on the disk
+        details["uses"] = ", ".join(details["uses"])
+        if isinstance(details.get("available_bytes"), (int, float)):
+            details["free"] = fmt_bytes(details["available_bytes"])
     if isinstance(details.get("wasted_bytes"), (int, float)):
         details["wasted_bytes"] = fmt_bytes(details["wasted_bytes"])
     if details.get("kind") in t["object_kind"]:
@@ -2055,6 +2096,8 @@ FINDING_COLUMNS = {
                    ("temp_files", "col_temp_files"), ("observed", "col_per_day"), ("period", "col_period")],
     "PG-LIFE-003": [("node_name", "detail_node"), ("os", "col_os"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
+    "PG-CAP-003": [("node", "detail_node"), ("mount_point", "detail_mount"), ("uses", "col_uses"),
+                   ("observed", "col_usage"), ("free", "col_free")],
     "PG-LIFE-004": [("database_name", "detail_database"), ("extension", "col_extension"),
                     ("installed", "col_installed"), ("available", "col_available")],
     **{key: SETTING_COLUMNS for key in ("PG-CONF-001", "PG-CONF-002", "PG-CONF-004", "PG-CONF-005",
