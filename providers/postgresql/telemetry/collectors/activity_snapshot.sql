@@ -26,8 +26,8 @@ WITH collection_context AS
 lock_wait AS
 (
     SELECT
-        ((xpath('pid/text()', r))[1])::text::integer         AS pid,
-        ((xpath('waitstart/text()', r))[1])::text::timestamptz AS lock_wait_start
+        ((xpath('row/pid/text()', r))[1])::text::integer         AS pid,
+        ((xpath('row/waitstart/text()', r))[1])::text::timestamptz AS lock_wait_start
     FROM unnest(xpath('/table/row', query_to_xml(
         CASE WHEN current_setting('server_version_num')::integer >= 140000
              THEN 'SELECT pid, min(waitstart) AS waitstart FROM pg_catalog.pg_locks '

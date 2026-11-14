@@ -950,7 +950,7 @@ Not a verdict (MEANING): reports reading most of a table rightly scan it.
 A moment: how often locks happen needs frequent collection (ADR-0020 decision 6).
 
 **Verification (V062)**  
-Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed, rarely scanned and dropped tables, no history, reset too recently; a waiting session with an idle-in-transaction blocker, before 14, no waits. Full suite 473 OK. Lab (hc120, hc121, 2026-11-14): a lock test with two psql sessions — PG-LOCK-001 WARNING, session 999 waiting about a minute, blocker 962 · postgres · psql · idle in transaction with its UPDATE; after the rollback healthy, threshold shown as 30 seconds. PG-IDX-005 healthy (no table of 1 GB in the lab).
+Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed, rarely scanned and dropped tables, no history, reset too recently; a waiting session with an idle-in-transaction blocker, before 14, no waits. Full suite 473 OK. Lab (hc120, hc121, 2026-11-14): a lock test with two psql sessions — PG-LOCK-001 WARNING, session 999 waiting about a minute, blocker 962 · postgres · psql · idle in transaction with its UPDATE; after the rollback healthy, threshold shown as 30 seconds. PG-IDX-005 healthy (no table of 1 GB in the lab). Fix (2026-11-14): `lock_wait_start` was always empty — the xpath read the query_to_xml row relative to the fragment and missed the `row` element, so every finding counted from the statement's start and said it was approximate; read as `row/…` now, with a test that runs the collector against a real lock (`tests/test_collector_sql.py`).
 
 ---
 
