@@ -3403,9 +3403,10 @@ def evaluate_rule(conn, rule, target_id, evaluation_time, evidence_cache, uncoll
     if unassessed:
         first = unassessed[0]
         names = ", ".join(u["node"] for u in unassessed)
+        reasons = {u["node"]: u["reason_code"] for u in unassessed}     # why, per node (report)
         return (OUTCOME_INSUFFICIENT_EVIDENCE, [],
                 f'{first["source"]}: [nodes_unassessed] No problem on the other servers; '
-                f'not judged on: {names} {json.dumps({"nodes": names}, ensure_ascii=False)}',
+                f'not judged on: {names} {json.dumps({"nodes": names, "reasons": reasons}, ensure_ascii=False)}',
                 unassessed)
 
     return OUTCOME_HEALTHY, [], None, []

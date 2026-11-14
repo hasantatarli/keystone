@@ -1413,3 +1413,24 @@ class ShortDurationTests(unittest.TestCase):
         self.assertEqual(report.fmt_duration(30, t), "30 saniye")
         self.assertEqual(report.fmt_duration(90, t), "1 dakika")
         self.assertEqual(report.fmt_duration(7200, t), "2 saat")
+
+
+class NodesUnassessedTextTests(unittest.TestCase):
+    """Lab hc124: SEC-005 said "no problem on the other servers" when no server could be read, and
+    did not say why."""
+
+    T = report.TEXTS["tr"]
+
+    def test_every_server_with_the_reason(self):
+        data = {"nodes": [{"name": "pg1"}, {"name": "pg2"}], "collections": []}
+        reason = ('PG_HBA_RULES: [nodes_unassessed] No problem on the other servers; not judged on: pg1, pg2 '
+                  '{"nodes": "pg1, pg2", "reasons": {"pg1": "hba_not_readable", "pg2": "hba_not_readable"}}')
+        text = report.explain_reason(reason, data, self.T)
+        self.assertTrue(text.startswith("Hiçbir sunucu değerlendirilemedi: pg1, pg2 (pg_hba kuralları okunamadı"))
+        self.assertIn("GRANT SELECT ON pg_catalog.pg_hba_file_rules", text)
+
+    def test_some_servers(self):
+        data = {"nodes": [{"name": "pg1"}, {"name": "pg2"}], "collections": []}
+        reason = ('PG_HBA_RULES: [nodes_unassessed] x {"nodes": "pg2", "reasons": {"pg2": "not_collected"}}')
+        self.assertEqual(report.explain_reason(reason, data, self.T),
+                         "Diğer sunucularda sorun bulunmadı; pg2 (veri toplanamadı) değerlendirilemedi.")

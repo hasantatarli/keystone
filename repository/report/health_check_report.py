@@ -195,6 +195,7 @@ TEXTS = {
                                                    "okuyabilir); Keystone rolüne: GRANT SELECT ON pg_catalog.pg_hba_file_rules "
                                                    "TO <rol>; GRANT EXECUTE ON FUNCTION pg_catalog.pg_hba_file_rules() TO <rol>;")},
         "config_host_partial": "Bilgisi eksik sunucu: {nodes}. En küçük sunucu bilinmeden bu ayarlar hesaplanmaz.",
+        "nodes_unassessed_all": "Hiçbir sunucu değerlendirilemedi: {nodes}.",
         "reason_codes": {"nodes_unassessed": "Diğer sunucularda sorun bulunmadı; {nodes} değerlendirilemedi.",
                          "no_primary": "Toplanan sunucular arasında primary yok.",
                          "no_replicas": "Sistemde replica yok.",
@@ -449,6 +450,7 @@ TEXTS = {
                                                    "to Keystone's role: GRANT SELECT ON pg_catalog.pg_hba_file_rules "
                                                    "TO <role>; GRANT EXECUTE ON FUNCTION pg_catalog.pg_hba_file_rules() TO <role>;")},
         "config_host_partial": "Server data missing: {nodes}. Without the smallest server these settings are not calculated.",
+        "nodes_unassessed_all": "No server could be assessed: {nodes}.",
         "reason_codes": {"nodes_unassessed": "No problem on the other servers; {nodes} not assessed.",
                          "no_primary": "There is no primary among the collected servers.",
                          "no_replicas": "The system has no replicas.",
@@ -914,6 +916,21 @@ REASON_PATTERN = re.compile(
 REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
+def nodes_unassessed_text(reasons, data, t):
+    """Servers not assessed with why, grouped by reason; 'no server' when it is every server (hc124:
+    "no problem on the other servers" was said when there were no others)."""
+    by_reason = {}
+    for node, code in reasons.items():
+        by_reason.setdefault(code, []).append(node)
+    items = "; ".join(f'{", ".join(nodes)} ({t["unassessed_reason"].get(code, code)})'
+                      for code, nodes in by_reason.items())
+    known = {n["name"] for n in data.get("nodes") or []}
+    every = not known or known <= set(reasons)
+    if every:
+        return t["nodes_unassessed_all"].format(nodes=items)
+    return t["reason_codes"]["nodes_unassessed"].format(nodes=items)
+
+
 def explain_reason(reason, data, t, short=False):
     """Engine reason in plain words; says when this check failed to collect the source.
 
@@ -923,6 +940,8 @@ def explain_reason(reason, data, t, short=False):
     if coded and coded.group("code") in t["reason_codes"]:
         try:
             values = json.loads(coded.group("values") or "{}")
+            if coded.group("code") == "nodes_unassessed" and values.get("reasons"):
+                return nodes_unassessed_text(values["reasons"], data, t)
             return t["reason_codes"][coded.group("code")].format(**values)
         except (ValueError, KeyError):
             return reason
