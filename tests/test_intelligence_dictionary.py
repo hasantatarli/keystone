@@ -425,6 +425,22 @@ EXPECTED_RULES = {
                        "CRITICAL": (Decimal("107374182400"), "BYTE_PER_DAY")},
         "evidence": {"PG_DATABASE_STATS": (True, 3600)},
         "parameters": {"window": (Decimal("86400"), "SECOND"), "min_window": (Decimal("21600"), "SECOND")},
+    },    # V062: PG_TABLE_ACCESS (PG025) over days; lock waits at a moment.
+    "PG-IDX-005": {
+        "assessment": "PG_INDEX_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("50"), "PERCENT")},
+        "evidence": {"PG_TABLE_ACCESS": (True, 86400)},
+        "parameters": {"window": (Decimal("604800"), "SECOND"), "min_window": (Decimal("86400"), "SECOND"),
+                       "min_table_size": (Decimal("1073741824"), "BYTE"),
+                       "min_seq_scans_per_day": (Decimal("100"), "COUNT"),
+                       "min_rows_share": (Decimal("0.5"), "RATIO")},
+    },
+    "PG-LOCK-001": {
+        "assessment": "PG_TRANSACTION_HEALTH",
+        "default_severity": None,
+        "thresholds": {"WARNING": (Decimal("30"), "SECOND"), "CRITICAL": (Decimal("300"), "SECOND")},
+        "evidence": {"PG_ACTIVITY_SNAPSHOT": (True, 600)},
     },
 }
 

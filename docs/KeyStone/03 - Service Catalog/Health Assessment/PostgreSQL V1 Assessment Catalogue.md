@@ -72,7 +72,7 @@ Sources combined:
 | **PG-TRAN-004** | MultiXact wraparound risk | `mxid_age` relative to limits | Ready: PG-006 | datminmxid | Done |
 | **PG-TRAN-005** | Orphaned prepared transactions | A prepared transaction older than 5 min — WARNING, 1 h — CRITICAL (holds locks and xmin, survives restarts) | Ready: PG_PREPARED_TRANSACTIONS | Orphaned prepare transactions | Done |
 | **PG-TRAN-006** | XID age relative to `autovacuum_freeze_max_age` | Anti-wraparound vacuum overdue or repeatedly not finishing | Ready: PG-006 + PG-002 | Transaction ID TXID | Done |
-| PG-LOCK-001 | Blocking and lock waits | Sessions waiting on locks longer than N seconds; the blocking session named | Gap: PG-009 locking | — | P2 |
+| **PG-LOCK-001** | Blocking and lock waits | A session waiting on a lock ≥ 30 s / 5 min at collection time; the blocking session named (user, application, state, last query) | Done: PG_ACTIVITY_SNAPSHOT with `blocked_by`, `lock_wait_start` (PG025) | — | Done |
 | **PG-TRAN-007** | Long-running query | An active statement running longer than N minutes | Ready: PG-009 (activity) | active sessions monitor | Done |
 
 ## 4. Maintenance — Vacuum, Analyze, Bloat
@@ -92,7 +92,7 @@ Sources combined:
 | **PG-IDX-002** | Invalid index | `indisvalid = false` on the primary, not being built — WARNING, unique — CRITICAL | Ready: PG_INDEX_USAGE | invalid indexes | Done |
 | **PG-IDX-003** | Duplicate / redundant index | Same columns in the same order, or a prefix of another index | Gap: PG-011 | — | Done |
 | **PG-IDX-004** | Foreign key without index | FK columns not leading any index on a table of meaningful size | Gap: PG-022 | — | Done |
-| PG-IDX-005 | Heavy sequential scans | Large table read mostly by sequential scans | Gap: `seq_scan`, `seq_tup_read` (extend PG-005) | Tabel Access Profile | P2 |
+| **PG-IDX-005** | Heavy sequential scans | Table ≥ 1 GB, ≥ 100 sequential scans a day each reading ≥ half of the rows, ≥ 50 % of its scans, over 7 days | Done: PG_TABLE_ACCESS (PG025), counter window (ADR-0020) | Tabel Access Profile | Done |
 
 ## 6. Capacity Engineering
 
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 49 | 0 | 6 | 8 |
-| of which evidence ready | 49 | 0 | 0 | 3 |
+| Checks | 51 | 0 | 4 | 8 |
+| of which evidence ready | 51 | 0 | 0 | 3 |
 
-Status 2026-11-13: P2 group 2b-1 done (V061, PG024, ADR-0020): PG-PERF-003, PG-PERF-002, PG-CAP-005 on counter windows; 2b-2 (PG-IDX-005, PG-LOCK-001) next. Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-13: P2 group 2b done: 2b-1 (V061, PG024, ADR-0020) PG-PERF-003, PG-PERF-002, PG-CAP-005 on counter windows; 2b-2 (V062, PG025) PG-IDX-005 and PG-LOCK-001. Remaining P2: group 2c (PERF-001, SEC-005, MAINT-004, CAP-003). Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).

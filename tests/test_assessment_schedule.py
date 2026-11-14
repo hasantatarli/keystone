@@ -233,7 +233,7 @@ class AssessmentScheduleTests(unittest.TestCase):
         info = [r.getMessage() for r in logs.records if r.levelname == "INFO"]
         self.assertEqual(info, [
             f"Assessment run {run_id} PG_TRANSACTION_HEALTH on target {self.target_id}"
-            " -> SUCCESS: 7 INSUFFICIENT_EVIDENCE"
+            " -> SUCCESS: 8 INSUFFICIENT_EVIDENCE"
         ])
 
     def test_engine_stores_thresholds_used(self):

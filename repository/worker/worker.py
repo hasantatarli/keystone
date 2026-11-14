@@ -1972,7 +1972,10 @@ def save_activity_snapshot(conn, task, rows):
                     query_id,
                     query_text,
 
-                    backend_type
+                    backend_type,
+
+                    blocked_by,
+                    lock_wait_start
                 )
                 VALUES
                 (
@@ -2009,6 +2012,9 @@ def save_activity_snapshot(conn, task, rows):
                     %s,
                     %s,
 
+                    %s,
+
+                    %s,
                     %s
                 )
                 """,
@@ -2047,6 +2053,9 @@ def save_activity_snapshot(conn, task, rows):
                     row["query_text"],
 
                     row["backend_type"],
+
+                    row.get("blocked_by"),          # PG025
+                    row.get("lock_wait_start"),
                 ),
             )
 
@@ -2210,6 +2219,15 @@ def save_checkpoint_stats_snapshot(conn, task, rows):
                 ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
 
 
+def save_table_access_snapshot(conn, task, rows):
+    """Persist PG_TABLE_ACCESS: a DATABASE row per collected database, a TABLE row per table."""
+    if not any(r.get("record_type") == "DATABASE" for r in rows):
+        raise RuntimeError("PG_TABLE_ACCESS returned no DATABASE row.")
+    insert_rows(conn, "table_access_snapshot", task, rows,
+                ("record_type", "database_name", "schema_name", "object_oid", "object_name", "seq_scan",
+                 "seq_tup_read", "idx_scan", "n_live_tup", "table_size_bytes", "stats_reset"))
+
+
 def save_database_stats_snapshot(conn, task, rows):
     """Persist PG_DATABASE_STATS: pg_stat_database counters, one row per database."""
     insert_rows(conn, "database_stats_snapshot", task, rows,
@@ -2302,6 +2320,7 @@ COLLECTOR_HANDLERS = {
     "PG_REPLICATION_SLOTS": save_replication_slot_snapshot,
     "PG_CHECKPOINT_STATS": save_checkpoint_stats_snapshot,
     "PG_DATABASE_STATS": save_database_stats_snapshot,
+    "PG_TABLE_ACCESS": save_table_access_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,

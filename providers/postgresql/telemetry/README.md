@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG024).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG025).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -12,7 +12,7 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_INDEX_USAGE | NODE_DATABASE | `index_usage_snapshot` (with index definitions, PG022) | PG-IDX-001/002/003 |
 | PG_DATABASE_INVENTORY | SYSTEM | `database_snapshot` | Report inventory |
 | PG_DATABASE_STATS | SYSTEM | `database_stats_snapshot` (PG024): `pg_stat_database` counters per database | PG-PERF-002, PG-CAP-005 |
-| PG_ACTIVITY_SNAPSHOT | SYSTEM | `activity_snapshot` | PG-TRAN-001/003/007 |
+| PG_ACTIVITY_SNAPSHOT | SYSTEM | `activity_snapshot` (with `blocked_by` and `lock_wait_start`, PG025; `pg_locks.waitstart` from 14 through `query_to_xml`) | PG-TRAN-001/003/007, PG-LOCK-001 |
 | PG_CONNECTION_ACTIVITY | SYSTEM | `connection_activity_snapshot` | PG-CONN-001/002 |
 | PG_REPLICATION_STATUS | SYSTEM | `replication_status_snapshot`, `replica_status_snapshot` | PG-REP-003/004/006 |
 | PG_REPLICATION_SLOTS | SYSTEM | `replication_slot_status_snapshot`, `replication_slot_snapshot` | PG-REP-001/002/005 |
@@ -24,9 +24,10 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_SCHEMA_PRIVILEGES | DATABASE | `schema_privilege_snapshot` | PG-SEC-004 |
 | PG_TABLE_STRUCTURE | DATABASE | `table_structure_snapshot` (PG022): foreign keys with index coverage, unlogged tables | PG-IDX-004, PG-BKP-003 |
 | PG_EXTENSIONS | DATABASE | `extension_snapshot` (PG022): installed and package versions | PG-LIFE-004 |
+| PG_TABLE_ACCESS | DATABASE | `table_access_snapshot` (PG025): sequential and index scans, live rows and size per table, the database's stats_reset; DATABASE row per database | PG-IDX-005 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |
 
-Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`, `PG_VACUUM_ANALYZE`).
+Scopes (ADR-0009): NODE runs on every server of a cluster, SYSTEM once through the system connection (the primary), DATABASE once per database, NODE_DATABASE once per database on every server. A collector that can legitimately find nothing returns a SYSTEM or DATABASE row anyway, so "none" is evidence (`PG_PREPARED_TRANSACTIONS`, `PG_INDEX_USAGE`, `PG_SCHEMA_PRIVILEGES`, `PG_TABLE_STRUCTURE`, `PG_EXTENSIONS`, `PG_VACUUM_ANALYZE`, `PG_TABLE_ACCESS`).
 
 ## Privileges
 
