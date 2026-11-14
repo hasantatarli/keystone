@@ -1982,3 +1982,35 @@ class HbaRuleTests(unittest.TestCase):
         findings = engine.evaluate_hba_rules(rows, r, [])
         self.assertEqual([f["subject_identifier"] for f in findings], ["pg2:90"])
         self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]], [("pg1", "hba_not_readable")])
+
+
+# V064: estimated bloat.
+def bloat(name, kind, size, wasted, method="STATISTICS"):
+    return {"snapshot_id": 1, "target_id": 1, "captured_at": NOW, "record_type": "OBJECT",
+            "database_name": "app", "object_kind": kind, "schema_name": "public", "object_name": name,
+            "table_name": "orders" if kind == "INDEX" else None, "size_bytes": size, "wasted_bytes": wasted,
+            "pgstattuple_available": None, "method": method}
+
+
+class BloatTests(unittest.TestCase):
+    """PG-MAINT-004."""
+
+    THRESHOLDS = [threshold("WARNING", 30, "PERCENT")]
+
+    def test_share_and_size_both_needed(self):
+        rows = [{"record_type": "DATABASE", "database_name": "app"},
+                bloat("orders", "TABLE", 10 * GB, 5 * GB),
+                bloat("orders_pkey", "INDEX", 4 * GB, int(1.5 * GB), "PGSTATTUPLE"),
+                bloat("small", "TABLE", 2 * GB, int(0.9 * GB)),            # 45 % but under 1 GB
+                bloat("big", "TABLE", 100 * GB, 10 * GB),                  # 10 GB but 10 %
+                bloat("unknown", "TABLE", 5 * GB, None, None)]
+        findings = engine.evaluate_bloat(rows, with_params(min_wasted=GB), self.THRESHOLDS)
+        self.assertEqual([(f["subject_identifier"], f["observed_value"]) for f in findings],
+                         [("app.public.orders", 50.0), ("app.public.orders_pkey", 37.5)])
+        self.assertEqual(findings[1]["details"]["method"], "PGSTATTUPLE")
+
+    def test_nothing_measurable(self):
+        with self.assertRaises(engine.InsufficientEvidence) as raised:
+            engine.evaluate_bloat([bloat("orders", "TABLE", 10 * GB, None, None)],
+                                  with_params(min_wasted=GB), self.THRESHOLDS)
+        self.assertIn("[bloat_not_measurable]", str(raised.exception))

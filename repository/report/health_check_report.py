@@ -206,6 +206,14 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
                          "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
+                         "bloat_not_measurable": ("100 MB'tan büyük {count} tablo/index'in boş alanı ölçülemedi: pgstattuple "
+                                                  "kurulu değil ve Keystone'un rolü tablo istatistiklerini (pg_stats) göremiyor. "
+                                                  "İki yol var, hangisi işinize gelirse: (1) Her veritabanında CREATE EXTENSION "
+                                                  "pgstattuple; (contrib paketiyle gelir; Keystone'un rolü ek yetki olmadan kullanır; "
+                                                  "vacuum görmemiş büyük tablolarda ölçüm sayfaları okuduğu için ağırlaşabilir). "
+                                                  "(2) Rolü tabloları okuyabilir yapmak: GRANT pg_read_all_data TO <rol>; (istatistikler "
+                                                  "görünür olur ama rol bütün tabloların verisini de okuyabilir hale gelir). Offline "
+                                                  "toplamada postgres kullanıcısıyla bu gerekmez."),
                          "statistics_too_young": "Sayaçlar {minimum_hours} saatten daha kısa süredir birikiyor; daha kısa süreyle verilen oran yanıltıcı olur. Birkaç saat sonra ya da Keystone düzenli topladıkça değerlendirilir.",
                          "too_few_checkpoints": "Bu sürede yalnızca {count} checkpoint olmuş; değerlendirmek için en az {minimum} gerekiyor.",
                          "too_little_activity": "Bu sürede hiçbir veritabanı en az {minimum:,} blok okumamış; oran ancak aktif bir veritabanında anlamlı.",
@@ -229,6 +237,8 @@ TEXTS = {
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
         "col_os": "İşletim sistemi",
+        "col_object": "Nesne", "col_kind": "Tür", "col_wasted": "Tahmini boş alan", "col_wasted_share": "Boş alan payı",
+        "col_method": "Yöntem", "object_kind": {"TABLE": "tablo", "INDEX": "index"},
         "col_hba_line": "Satır", "col_conn_type": "Tür", "col_databases": "Veritabanı", "col_users": "Kullanıcı",
         "col_address": "Adres", "col_auth_method": "Yöntem",
         "col_table": "Tablo", "col_table_size": "Boyut", "col_seq_scans": "Sequential scan",
@@ -450,6 +460,14 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
                          "no_index_usage": "Index usage was not collected from any server.",
+                         "bloat_not_measurable": ("The free space of {count} table(s)/index(es) over 100 MB could not be measured: "
+                                                  "pgstattuple is not installed and Keystone's role cannot see the table "
+                                                  "statistics (pg_stats). Two ways, whichever suits you: (1) CREATE EXTENSION "
+                                                  "pgstattuple; in each database (shipped with contrib; Keystone's role uses it "
+                                                  "without further privileges; it can be heavy on large tables that were not "
+                                                  "vacuumed). (2) Let the role read the tables: GRANT pg_read_all_data TO <role>; "
+                                                  "(the statistics become visible, but the role can then read every table's data). "
+                                                  "Offline collection as postgres needs neither."),
                          "statistics_too_young": "The counters have been accumulating for less than {minimum_hours} hours; a ratio over a shorter time would mislead. Judged a few hours later, or as Keystone collects regularly.",
                          "too_few_checkpoints": "Only {count} checkpoint(s) in the period; at least {minimum} are needed.",
                          "too_little_activity": "No database read at least {minimum:,} blocks in the period; the ratio means something only on an active database.",
@@ -473,6 +491,8 @@ TEXTS = {
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
         "col_os": "Operating system",
+        "col_object": "Object", "col_kind": "Kind", "col_wasted": "Estimated free space", "col_wasted_share": "Free share",
+        "col_method": "Method", "object_kind": {"TABLE": "table", "INDEX": "index"},
         "col_hba_line": "Line", "col_conn_type": "Type", "col_databases": "Database", "col_users": "User",
         "col_address": "Address", "col_auth_method": "Method",
         "col_table": "Table", "col_table_size": "Size", "col_seq_scans": "Sequential scans",
@@ -1799,11 +1819,13 @@ COUNT_VALUES = {"dead_rows", "modified_rows", "xid_age", "mxid_age", "connection
 # Durations in seconds read as '2 saat 5 dakika' in the report language.
 DURATION_VALUES = {"age_seconds", "since_seconds", "statistics_seconds", "running_seconds", "period_seconds",
                    "waited_seconds"}
-SIZE_VALUES = {"index_size", "size_bytes", "temp_bytes", "per_day"}
+SIZE_VALUES = {"index_size", "size_bytes", "temp_bytes", "per_day", "wasted_bytes"}
 DATE_VALUES = {"end_of_support"}
 
 
 def template_value_text(key, value, t=None):
+    if key == "kind" and t is not None:
+        return t["object_kind"].get(value, value)
     if key in DATE_VALUES and t is not None and isinstance(value, str):
         try:
             return datetime.fromisoformat(value).strftime(t["date_format"])
@@ -1884,6 +1906,10 @@ def finding_fields(f, t):
             details[key] = f"{details[key]:,}"
     if isinstance(details.get("size_bytes"), (int, float)):
         details["size_bytes"] = fmt_bytes(details["size_bytes"])
+    if isinstance(details.get("wasted_bytes"), (int, float)):
+        details["wasted_bytes"] = fmt_bytes(details["wasted_bytes"])
+    if details.get("kind") in t["object_kind"]:
+        details["kind"] = t["object_kind"][details["kind"]]
     if details.get("blocker_pid") is not None:     # PG-LOCK-001: who blocks, in one cell
         details["blocker"] = " · ".join(str(x) for x in (
             details["blocker_pid"], details.get("blocker_user"), details.get("blocker_application"),
@@ -1953,6 +1979,9 @@ FINDING_COLUMNS = {
                     ("observed", "col_behind"), ("reference", "col_reference")],
     "PG-LIFE-002": [("node_name", "detail_node"), ("version", "col_version"),
                     ("end_of_support", "col_end_of_support"), ("days_left", "col_days_left")],
+    "PG-MAINT-004": [("database_name", "detail_database"), ("object", "col_object"), ("kind", "col_kind"),
+                     ("size_bytes", "col_table_size"), ("wasted_bytes", "col_wasted"),
+                     ("observed", "col_wasted_share"), ("method", "col_method")],
     "PG-SEC-005": [("node", "detail_node"), ("line_number", "col_hba_line"), ("conn_type", "col_conn_type"),
                    ("databases", "col_databases"), ("users", "col_users"), ("address", "col_address"),
                    ("auth_method", "col_auth_method")],

@@ -2219,6 +2219,15 @@ def save_checkpoint_stats_snapshot(conn, task, rows):
                 ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
 
 
+def save_table_bloat_snapshot(conn, task, rows):
+    """Persist PG_TABLE_BLOAT: a DATABASE row per collected database, an OBJECT row per large object."""
+    if not any(r.get("record_type") == "DATABASE" for r in rows):
+        raise RuntimeError("PG_TABLE_BLOAT returned no DATABASE row.")
+    insert_rows(conn, "table_bloat_snapshot", task, rows,
+                ("record_type", "database_name", "object_kind", "schema_name", "object_name", "table_name",
+                 "size_bytes", "wasted_bytes", "pgstattuple_available", "method"))
+
+
 def save_hba_rule_snapshot(conn, task, rows):
     """Persist PG_HBA_RULES: the ACCESS row (readable or not) and a RULE row per pg_hba.conf line."""
     if not any(r.get("record_type") == "ACCESS" for r in rows):
@@ -2331,6 +2340,7 @@ COLLECTOR_HANDLERS = {
     "PG_DATABASE_STATS": save_database_stats_snapshot,
     "PG_TABLE_ACCESS": save_table_access_snapshot,
     "PG_HBA_RULES": save_hba_rule_snapshot,
+    "PG_TABLE_BLOAT": save_table_bloat_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,

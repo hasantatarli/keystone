@@ -82,7 +82,7 @@ Sources combined:
 | **PG-MAINT-001** | Dead tuple pressure | Dead tuples ≥ X % of live **and** ≥ N rows (two parameters; revisits the one-threshold model) | Ready: PG-005 | Vacuum & Statistics | Done |
 | **PG-MAINT-002** | Stale statistics | Many modifications since the last analyze on an active table | Ready: PG-005 | Vacuum & Statistics | Done |
 | **PG-MAINT-003** | Table never vacuumed / analyzed | Active table with no vacuum or analyze since the statistics reset (constraint: a null timestamp alone is not a finding) | Ready: PG-005 | Vacuum & Statistics | Done |
-| PG-MAINT-004 | Table and index bloat | Estimated bloat ≥ X % and ≥ N MB | Gap: PG-014 | Fragmentation (Bloat) | P2 |
+| **PG-MAINT-004** | Table and index bloat | Estimated free space ≥ 30 % and ≥ 1 GB (WARNING only, an estimate); pgstattuple_approx when installed, else pg_stats column widths; neither: not assessed with both ways offered | Done: PG_TABLE_BLOAT (PG027) | Fragmentation (Bloat) | Done |
 
 ## 5. Indexes
 
@@ -139,7 +139,7 @@ WAL archiving settings and archiver statistics are collected (PG_CONFIGURATION_S
 | **PG-SEC-002** | Weak password hashing | `password_encryption = md5` — WARNING (md5 is deprecated); roles still with md5 hashes need superuser | Ready (setting): PG-002 | Users & Roles Info | Done |
 | **PG-SEC-003** | Connections without encryption | `ssl = off` — WARNING | Ready: PG-002 | — | Done |
 | **PG-SEC-004** | Anyone can create in a schema | `CREATE` on a user schema granted to PUBLIC (default for `public` before PostgreSQL 15) — WARNING | Ready: PG_SCHEMA_PRIVILEGES | public Schema | Done |
-| PG-SEC-005 | Trust or password authentication | `trust` or plain `password` rules in `pg_hba` | Gap: PG-017 (`pg_hba_file_rules` needs superuser by default) | — | P2 |
+| **PG-SEC-005** | Trust or password authentication | `trust` over the network CRITICAL, on the local socket WARNING; `password` over the network WARNING; `md5` INFO | Done: PG_HBA_RULES (PG026); without the privilege not assessed with the two GRANTs | — | Done |
 | PG-SEC-006 | Broad default privileges | Default privileges granting write to PUBLIC or wide roles | Gap: PG-016 | Default access privileges, Access privileges | P3 |
 | PG-SEC-007 | No audit logging | `pgaudit` not installed where compliance requires it — INFO | Gap: PG-015 | pgaudit extension | P3 |
 
@@ -187,10 +187,10 @@ A health check shows performance indicators; it does not replace a Performance I
 
 | | Done | P1 | P2 | P3 |
 | --- | --- | --- | --- | --- |
-| Checks | 51 | 0 | 4 | 8 |
-| of which evidence ready | 51 | 0 | 0 | 3 |
+| Checks | 53 | 0 | 2 | 8 |
+| of which evidence ready | 53 | 0 | 0 | 3 |
 
-Status 2026-11-13: P2 group 2b done: 2b-1 (V061, PG024, ADR-0020) PG-PERF-003, PG-PERF-002, PG-CAP-005 on counter windows; 2b-2 (V062, PG025) PG-IDX-005 and PG-LOCK-001. Remaining P2: group 2c (PERF-001, SEC-005, MAINT-004, CAP-003). Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
+Status 2026-11-13: P2 group 2b done: 2b-1 (V061, PG024, ADR-0020) PG-PERF-003, PG-PERF-002, PG-CAP-005 on counter windows; 2b-2 (V062, PG025) PG-IDX-005 and PG-LOCK-001. Group 2c designed 2026-11-14 (three PRs): 2c-1 (V063, V064, PG026, PG027) PG-SEC-005 and PG-MAINT-004 done; 2c-2 PERF-001 (top 10 queries as a report section, not a finding) and 2c-3 CAP-003 (tablespaces; pg_wal when its target can be read, three ways offered) next. Status 2026-11-11: PG-LIFE-001/002 done (V059) on the release reference (ADR-0019); decision 6 revised. PG-LIFE-003 done (V060) on the same reference: end of free security updates, paid extensions not assumed. Status 2026-11-10 (2): P2 group 2a, object structure, done (V057, PG022): duplicate index, foreign key without index, unlogged tables, extension updates; PG-PERF-003 needs no new collector (PG_CHECKPOINT_STATS). Status 2026-11-10: the eight P2 checks with ready evidence are done (V056); PG-LIFE-003 waits for a release reference table like PG-LIFE-001/002. Status 2026-11-09: every P1 check is done, ADR-0017 steps 1–4 and 3b-1/3b-2a merged (PR #27–#32); hardware change detection (3b-2b) moved to the backlog. Status 2026-11-02: 31 checks done (V031–V048); every P1 check is done. PG-CONF-003 (configuration recommendations, decision 2, ADR-0017) and PG-CONF-007 (memory overcommitment) form PG_CONFIGURATION_TUNING; checkpoint evidence, storage type over SSH and hardware change detection follow in ADR-0017 step 3b, the report in step 4. Earlier: Status 2026-10-29: 29 checks done (V031–V044). Remaining P1: PG-CONF-003, the configuration recommendation capability (decision 2, ADR-0017). Collectors for the P1 checks, in the order worked:
 
 1. ~~**Release reference table** — PG-LIFE-001/002.~~ Moved to P3 (decision 6).
 2. ~~**Archiver statistics** (new) — PG-BKP-001.~~ Done: PG_WAL_STATUS (V041).
