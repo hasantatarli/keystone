@@ -2,6 +2,7 @@
 # Imports
 # -----------------------------------------------------------------------------
 import argparse
+import ipaddress
 import json
 import logging
 import os
@@ -624,6 +625,17 @@ def load_checkpoint_stats_history(conn, target_id):
                               WHERE target_id = %s) - make_interval(secs => %s)
         ORDER BY captured_at DESC
         """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
+
+
+def load_latest_query_stats(conn, target_id):
+    """Latest PG_QUERY_STATS of the target (read on the primary): SYSTEM row first."""
+    return conn.execute(
+        """
+        SELECT * FROM postgresql.query_stats_snapshot
+        WHERE target_id = %s
+          AND captured_at = (SELECT max(captured_at) FROM postgresql.query_stats_snapshot WHERE target_id = %s)
+        ORDER BY record_type DESC, total_ms DESC NULLS LAST
+        """, (target_id, target_id)).fetchall()
 
 
 def load_latest_table_bloat(conn, target_id):
@@ -2945,9 +2957,8 @@ def evaluate_hba_rules(rows, rule, thresholds):
             severity = hba_severity(line)
             if severity is None:
                 continue
-            address = line["address"] or ("local" if line["conn_type"] == "local" else "")
-            if line["netmask"]:
-                address += f" / {line['netmask']}"
+            address = hba_address(line["address"], line["netmask"]) or \
+                ("local" if line["conn_type"] == "local" else "")
             findings.append({
                 "severity": severity, "snapshot_id": line["snapshot_id"],
                 "template_values": {"node_name": line["node_name"], "line_number": line["line_number"],
@@ -2961,6 +2972,40 @@ def evaluate_hba_rules(rows, rule, thresholds):
                             "users": line["users"], "address": address, "auth_method": line["auth_method"],
                             "captured_at": iso(line["captured_at"])}})
     return findings
+
+
+def evaluate_query_stats(rows, rule, thresholds):
+    """PG-PERF-001: the most expensive statements are context (a report section), not findings.
+
+    A statement taking most of the time can be the system's main work (Hasan, 2026-11-14). The rule
+    says whether pg_stat_statements can be read and, if not, how to set it up; the customer acts.
+    """
+    system = next(r for r in rows if r["record_type"] == "SYSTEM")
+    if not system["preloaded"]:
+        raise NotApplicable("PG_QUERY_STATS", "pg_stat_statements_not_loaded",
+                            "pg_stat_statements is not in shared_preload_libraries.")
+    if not system["extension_created"]:
+        raise NotApplicable("PG_QUERY_STATS", "pg_stat_statements_not_created",
+                            "pg_stat_statements is loaded but not created in the database read.",
+                            database=system["database_name"])
+    if not system["available"]:
+        raise InsufficientEvidence("PG_QUERY_STATS", "pg_stat_statements_no_access",
+                                   "The monitoring role may not read pg_stat_statements.")
+    return []
+
+
+HBA_ADDRESS = re.compile(r"^[0-9a-fA-F:.]+$")
+
+
+def hba_address(address, netmask):
+    """'192.168.1.0', '255.255.255.0' -> '192.168.1.0/24'; names and keywords stay as written."""
+    if address and netmask and HBA_ADDRESS.match(address):
+        try:                                     # a mask's bit count is the prefix (IPv4 and IPv6)
+            prefix = bin(int(ipaddress.ip_address(netmask))).count("1")
+            return str(ipaddress.ip_network(f"{address}/{prefix}", strict=False))
+        except ValueError:
+            pass
+    return f"{address} / {netmask}" if address and netmask else address
 
 
 def evaluate_bloat(rows, rule, thresholds):
@@ -3068,6 +3113,7 @@ EVIDENCE_LOADERS = {
     "PG_TABLE_ACCESS": load_table_access_history,
     "PG_HBA_RULES": load_latest_hba_rules,
     "PG_TABLE_BLOAT": load_latest_table_bloat,
+    "PG_QUERY_STATS": load_latest_query_stats,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -3220,6 +3266,7 @@ RULE_EVALUATORS = {
     "PG-LOCK-001": evaluate_lock_waits,
     "PG-SEC-005": evaluate_hba_rules,
     "PG-MAINT-004": evaluate_bloat,
+    "PG-PERF-001": evaluate_query_stats,
 }
 
 

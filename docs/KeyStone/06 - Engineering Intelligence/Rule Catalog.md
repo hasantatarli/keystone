@@ -980,6 +980,24 @@ Unit tests: severity per method and connection type, an unreadable node; share a
 
 ---
 
+# Batch of 2026-11-14 (2) — most expensive queries (V065, PG028)
+
+## PG-PERF-001 — Most Expensive Queries (PG_PERFORMANCE_HEALTH, topic PERFORMANCE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_QUERY_STATS` (PG028: `pg_stat_statements` in the database Keystone connects to, through `query_to_xml`; `total_exec_time` from 13, `total_time` before; `stats_reset` from `pg_stat_statements_info`, 14+), required, 3 600 s |
+| Outcome | context, not findings: HEALTHY when readable; not in `shared_preload_libraries` → NOT_APPLICABLE (`pg_stat_statements_not_loaded`, with the three setup steps and the restart); loaded but not created → NOT_APPLICABLE (`pg_stat_statements_not_created`, the database named); not readable → INSUFFICIENT_EVIDENCE (`pg_stat_statements_no_access`, `GRANT pg_read_all_stats`) |
+| Report | section "En pahalı sorgular": the 10 statements with the most time (calls, total and mean time, share of all time, rows, read from disk, temporary files, normalized text); under PG-CAP-005 and PG-PERF-002 findings, the 3 statements of that database writing most temporary files / reading most from disk |
+| Period | since pg_stat_statements was reset; windows per statement are later work |
+
+Also in this batch: PG-SEC-005 addresses as CIDR (`192.168.1.0/24`, IPv6 too) instead of address / netmask (Hasan).
+
+**Verification (V065)**  
+Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kept; the report section (order, share, period, ms under a second) and related queries of the finding's database only. Real-server tests: a server with `shared_preload_libraries = 'pg_stat_statements'` before and after CREATE EXTENSION (a sort with work_mem 64 kB seen with 3 calls and temporary blocks), and a server without it. Full suite 492 OK. Lab: pending.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.

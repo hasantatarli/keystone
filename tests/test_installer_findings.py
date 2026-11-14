@@ -167,7 +167,8 @@ class DisposablePostgres:
 
         return result
 
-    def start(self):
+    def start(self, extra_config=""):
+        """extra_config: more postgresql.conf lines (shared_preload_libraries, say)."""
         self.temp = tempfile.TemporaryDirectory(prefix="keystone-installer-tests-")
         self.root = Path(self.temp.name).resolve()
         self.data = self.root / "data"
@@ -184,7 +185,7 @@ class DisposablePostgres:
             with (self.data / "postgresql.conf").open("a", encoding="utf-8") as config:
                 config.write(
                     f"\nlisten_addresses = '127.0.0.1'\nport = {self.port}\n"
-                    "unix_socket_directories = ''\n"
+                    "unix_socket_directories = ''\n" + extra_config
                 )
             self.may_be_running = True
             self.command([

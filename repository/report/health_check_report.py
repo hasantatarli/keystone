@@ -207,6 +207,13 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index erişilebilen sunucularda hiç kullanılmamış görünüyor, ama {nodes} sunucusundan index kullanımı toplanamadığı için kesin değil.",
                          "statistics_too_recent": "Index kullanım istatistikleri yeni sıfırlanmış ({databases}); değerlendirmek için en az {minimum_days} günlük veri gerekiyor.",
                          "no_index_usage": "Hiçbir sunucudan index kullanımı toplanamadı.",
+                         "pg_stat_statements_not_loaded": ("pg_stat_statements yüklü değil; en pahalı sorgular "
+                                                           "gösterilemiyor. " + "Kurmak için (aksiyonu siz alırsınız): 1) shared_preload_libraries = 'pg_stat_statements' (postgresql.conf'ta; Patroni'de parameters altında; mevcut değer varsa virgülle ekleyin), 2) restart, 3) Keystone'un bağlandığı veritabanında CREATE EXTENSION pg_stat_statements;. Bedeli: tek seferlik restart, ek yük çok küçük."),
+                         "pg_stat_statements_not_created": ("pg_stat_statements yüklü ama {database} veritabanında "
+                                                            "oluşturulmamış: CREATE EXTENSION pg_stat_statements; "
+                                                            "(restart gerekmez)."),
+                         "pg_stat_statements_no_access": ("Keystone'un rolü pg_stat_statements'ı okuyamıyor: "
+                                                          "GRANT pg_read_all_stats TO <rol>;"),
                          "bloat_not_measurable": ("100 MB'tan büyük {count} tablo/index'in boş alanı ölçülemedi: pgstattuple "
                                                   "kurulu değil ve Keystone'un rolü tablo istatistiklerini (pg_stats) göremiyor. "
                                                   "İki yol var, hangisi işinize gelirse: (1) Her veritabanında CREATE EXTENSION "
@@ -238,6 +245,12 @@ TEXTS = {
         "col_version": "Sürüm", "col_latest": "En son sürüm", "col_behind": "Geride",
         "col_reference": "Sürüm referansı", "col_end_of_support": "Destek sonu", "col_days_left": "Kalan gün",
         "col_os": "İşletim sistemi",
+        "queries_title": "En pahalı sorgular", "queries_note": "pg_stat_statements, {since} · {db} veritabanından okundu",
+        "queries_since_reset": "{date} sıfırlamasından beri", "queries_since_unknown": "başlangıcı bilinmiyor",
+        "queries_cols": ["#", "Veritabanı", "Kullanıcı", "Çağrı", "Toplam süre", "Ortalama", "Süre payı",
+                         "Satır", "Diskten okunan", "Geçici dosya", "Sorgu"],
+        "related_queries_temp": "Bu veritabanında en çok geçici dosya yazan sorgular (pg_stat_statements, {since})",
+        "related_queries_read": "Bu veritabanında diskten en çok okuyan sorgular (pg_stat_statements, {since})",
         "col_object": "Nesne", "col_kind": "Tür", "col_wasted": "Tahmini boş alan", "col_wasted_share": "Boş alan payı",
         "col_method": "Yöntem", "object_kind": {"TABLE": "tablo", "INDEX": "index"},
         "col_hba_line": "Satır", "col_conn_type": "Tür", "col_databases": "Veritabanı", "col_users": "Kullanıcı",
@@ -462,6 +475,13 @@ TEXTS = {
                          "index_usage_incomplete": "{count} index(es) look unused on the reachable servers, but index usage could not be collected from {nodes}, so this is not certain.",
                          "statistics_too_recent": "Index usage statistics were reset recently ({databases}); at least {minimum_days} days of data are needed.",
                          "no_index_usage": "Index usage was not collected from any server.",
+                         "pg_stat_statements_not_loaded": ("pg_stat_statements is not loaded; the most expensive "
+                                                           "queries cannot be shown. " + "To set it up (your action): 1) shared_preload_libraries = 'pg_stat_statements' (postgresql.conf; under parameters in Patroni; append with a comma to an existing value), 2) restart, 3) CREATE EXTENSION pg_stat_statements; in the database Keystone connects to. Cost: one restart, very small overhead."),
+                         "pg_stat_statements_not_created": ("pg_stat_statements is loaded but not created in "
+                                                            "database {database}: CREATE EXTENSION pg_stat_statements; "
+                                                            "(no restart)."),
+                         "pg_stat_statements_no_access": ("Keystone's role may not read pg_stat_statements: "
+                                                          "GRANT pg_read_all_stats TO <role>;"),
                          "bloat_not_measurable": ("The free space of {count} table(s)/index(es) over 100 MB could not be measured: "
                                                   "pgstattuple is not installed and Keystone's role cannot see the table "
                                                   "statistics (pg_stats). Two ways, whichever suits you: (1) CREATE EXTENSION "
@@ -493,6 +513,12 @@ TEXTS = {
         "col_version": "Version", "col_latest": "Latest release", "col_behind": "Behind",
         "col_reference": "Release reference", "col_end_of_support": "End of support", "col_days_left": "Days left",
         "col_os": "Operating system",
+        "queries_title": "Most expensive queries", "queries_note": "pg_stat_statements, {since} · read from database {db}",
+        "queries_since_reset": "since the reset of {date}", "queries_since_unknown": "start unknown",
+        "queries_cols": ["#", "Database", "User", "Calls", "Total time", "Mean", "Share of time",
+                         "Rows", "Read from disk", "Temporary files", "Query"],
+        "related_queries_temp": "Statements of this database writing most temporary files (pg_stat_statements, {since})",
+        "related_queries_read": "Statements of this database reading most from disk (pg_stat_statements, {since})",
         "col_object": "Object", "col_kind": "Kind", "col_wasted": "Estimated free space", "col_wasted_share": "Free share",
         "col_method": "Method", "object_kind": {"TABLE": "table", "INDEX": "index"},
         "col_hba_line": "Line", "col_conn_type": "Type", "col_databases": "Database", "col_users": "User",
@@ -772,6 +798,14 @@ def load_report_data(conn, health_check_id):
         SELECT i.identity FROM keystone.target_identity i JOIN keystone.target t USING (target_id)
         WHERE t.target_id = %s OR t.parent_target_id = %s
         """, (check["target_id"], check["target_id"]))}
+    query_stats = conn.execute(
+        """
+        SELECT * FROM postgresql.query_stats_snapshot
+        WHERE target_id = %s
+          AND captured_at = (SELECT max(captured_at) FROM postgresql.query_stats_snapshot
+                             WHERE target_id = %s AND captured_at BETWEEN %s AND %s)
+        ORDER BY record_type DESC, total_ms DESC NULLS LAST
+        """, (check["target_id"], check["target_id"], since, as_of)).fetchall()
     config_reasons = {}
     for r in conn.execute("SELECT setting_key, language_code, text FROM keystone.config_setting_text "
                           "WHERE provider = %s AND text_type = 'REASON'", (check["provider"],)):
@@ -785,6 +819,8 @@ def load_report_data(conn, health_check_id):
     if (check["target_id"], "PG_DATABASE_INVENTORY") not in collected:
         databases = []
     wal_status = [w for w in wal_status if (w["target_id"], "PG_WAL_STATUS") in collected]
+    if (check["target_id"], "PG_QUERY_STATS") not in collected:
+        query_stats = []
     known = identities | {str(n.get("server_address") or "").split("/")[0] for n in nodes} - {""}
     unknown_replicas = [r for r in replicas_seen if (r["target_id"], "PG_REPLICATION_STATUS") in collected
                         and r["client_addr"] and r["client_addr"] not in known]
@@ -793,7 +829,7 @@ def load_report_data(conn, health_check_id):
             "collections": collections, "nodes": nodes, "storage": storage,
             "databases": databases, "wal_status": wal_status, "as_of": finished,
             "config": config, "config_reasons": config_reasons, "patroni_seen": patroni_seen,
-            "unknown_replicas": unknown_replicas,
+            "unknown_replicas": unknown_replicas, "query_stats": query_stats,
             "cluster_name": cluster_name["setting_value"] if cluster_name else None, **dictionary}
 
 
@@ -2150,7 +2186,8 @@ def render_findings_detail(data, lang, t):
             + "".join(f'<div class="facts">{e(x)}</div>' for x in facts)
             + "<dl>"
             + problem_rows(data, rid, lang, t, findings, short=False)
-            + "</dl>" + findings_table(result, findings, data, lang, t) + "</details>")
+            + "</dl>" + findings_table(result, findings, data, lang, t)
+            + related_queries(result, findings, data, t) + "</details>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
 
@@ -2494,11 +2531,80 @@ def render_config(data, lang, t):
     return "".join(parts) + "</details>"
 
 
+BLOCK_BYTES = 8192
+
+
+def query_cells(q, total_ms, t, number=None):
+    """One statement as table cells; the query text in full on hover."""
+    text = " ".join((q["query_text"] or "").split())
+    calls = q["calls"] or 0
+    mean = float(q["total_ms"]) / calls if calls else 0
+    share = t["percent"].format(n=f"{100 * float(q['total_ms']) / float(total_ms):.1f}") if total_ms else ""
+    cells = [e(q["database_name"] or ""), e(q["user_name"] or ""), f"{calls:,}",
+             e(fmt_ms(float(q["total_ms"]), t)), f"{mean:,.1f} ms", e(share),
+             f"{q['rows'] or 0:,}", e(fmt_bytes((q["shared_blks_read"] or 0) * BLOCK_BYTES)),
+             e(fmt_bytes((q["temp_blks_written"] or 0) * BLOCK_BYTES)),
+             f'<code title="{e(text)}">{e(text[:160] + ("…" if len(text) > 160 else ""))}</code>']
+    return ([str(number)] if number is not None else []) + cells
+
+
+def fmt_ms(ms, t):
+    """Total time of a statement: '850 ms' under a minute's second, else a rough duration."""
+    return f"{ms:,.0f} ms" if ms < 1000 else fmt_duration(ms / 1000, t)
+
+
+def query_since(system, t):
+    if system and system.get("stats_reset"):
+        return t["queries_since_reset"].format(date=system["stats_reset"].strftime(t["date_format"]))
+    return t["queries_since_unknown"]
+
+
+def render_query_stats(data, t):
+    """PG-PERF-001: the 10 statements with the most time; context, not findings (V065)."""
+    rows = data.get("query_stats") or []
+    system = next((r for r in rows if r["record_type"] == "SYSTEM"), None)
+    queries = [r for r in rows if r["record_type"] == "QUERY"]
+    if not system or not system["available"] or not queries:
+        return ""
+    top = sorted(queries, key=lambda q: -float(q["total_ms"] or 0))[:10]
+    note = t["queries_note"].format(since=query_since(system, t), db=system["database_name"])
+    return (f'<details class="section"><summary><h2>{e(t["queries_title"])}'
+            f'<span class="note">{e(note)}</span></h2></summary>'
+            + table(t["queries_cols"], [query_cells(q, system["all_total_ms"], t, i + 1) for i, q in enumerate(top)],
+                    numeric=(3, 4, 5, 6, 7, 8, 9))
+            + "</details>")
+
+
+RELATED_QUERIES = {"PG-CAP-005": ("temp_blks_written", "related_queries_temp"),
+                   "PG-PERF-002": ("shared_blks_read", "related_queries_read")}
+
+
+def related_queries(result, findings, data, t):
+    """Under a temporary file or disk read finding: that database's statements doing most of it."""
+    if result["rule_key"] not in RELATED_QUERIES:
+        return ""
+    rows = data.get("query_stats") or []
+    system = next((r for r in rows if r["record_type"] == "SYSTEM"), None)
+    if not system or not system["available"]:
+        return ""
+    column, label = RELATED_QUERIES[result["rule_key"]]
+    parts = []
+    for name in sorted({(f["details"] or {}).get("database_name") for f in findings} - {None}):
+        mine = sorted((q for q in rows if q["record_type"] == "QUERY" and q["database_name"] == name
+                       and (q[column] or 0) > 0), key=lambda q: -(q[column] or 0))[:3]
+        if mine:
+            parts.append(f'<div class="facts">{e(name)} — {e(t[label].format(since=query_since(system, t)))}</div>'
+                         + table(t["queries_cols"][1:], [query_cells(q, system["all_total_ms"], t) for q in mine],
+                                 numeric=(2, 3, 4, 5, 6, 7, 8)))
+    return "".join(parts)
+
+
 def render_technical(data, lang, t):
     offline = data["check"].get("source") == "OFFLINE"
     return (f'<div class="part part-tech">{e(t["part_tech"])}</div>'
             + render_system(data, t) + render_findings_detail(data, lang, t)
-            + render_config(data, lang, t) + render_results(data, lang, t) + render_collections(data, t)
+            + render_config(data, lang, t) + render_query_stats(data, t)
+            + render_results(data, lang, t) + render_collections(data, t)
             + f"<h2>{e(t['method'])}</h2><p>{e(t['method_text_offline' if offline else 'method_text'])}</p>")
 
 

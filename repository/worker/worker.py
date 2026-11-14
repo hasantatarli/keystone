@@ -2219,6 +2219,16 @@ def save_checkpoint_stats_snapshot(conn, task, rows):
                 ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
 
 
+def save_query_stats_snapshot(conn, task, rows):
+    """Persist PG_QUERY_STATS: the SYSTEM row and the most expensive statements."""
+    if not any(r.get("record_type") == "SYSTEM" for r in rows):
+        raise RuntimeError("PG_QUERY_STATS returned no SYSTEM row.")
+    insert_rows(conn, "query_stats_snapshot", task, rows,
+                ("record_type", "preloaded", "extension_created", "available", "stats_reset", "all_total_ms",
+                 "queryid", "database_name", "user_name", "calls", "total_ms", "rows", "shared_blks_hit",
+                 "shared_blks_read", "temp_blks_written", "query_text"))
+
+
 def save_table_bloat_snapshot(conn, task, rows):
     """Persist PG_TABLE_BLOAT: a DATABASE row per collected database, an OBJECT row per large object."""
     if not any(r.get("record_type") == "DATABASE" for r in rows):
@@ -2341,6 +2351,7 @@ COLLECTOR_HANDLERS = {
     "PG_TABLE_ACCESS": save_table_access_snapshot,
     "PG_HBA_RULES": save_hba_rule_snapshot,
     "PG_TABLE_BLOAT": save_table_bloat_snapshot,
+    "PG_QUERY_STATS": save_query_stats_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,
