@@ -68,6 +68,32 @@ class HostSnapshotParseTests(unittest.TestCase):
         self.assertEqual(rotation, {"/": None, "/var/lib/postgresql/data": True, "/etc/hosts": True})
 
 
+class DataPathParseTests(unittest.TestCase):
+    """DATA_PATHS (PG029): where pg_wal of each running data directory is, or why it is not known."""
+
+    def paths(self, section):
+        return [(r["data_directory"], r["wal_location"], r["read_via"])
+                for r in worker.parse_host_snapshot_output(OUTPUT + section) if r["record_type"] == "DATA_PATH"]
+
+    def test_older_script_without_the_section_sends_nothing(self):
+        self.assertEqual(self.paths(""), [])
+
+    def test_link_read_directly_by_sudo_or_denied(self):
+        section = ("===DATA_PATHS===\n/data/pg\t/wal/pg_wal\tDIRECT\n/data/other\t/data/other/pg_wal\tSUDO\n"
+                   "/data/closed\t\tDENIED\nnot a path line\n")
+        self.assertEqual(self.paths(section), [("/data/pg", "/wal/pg_wal", "DIRECT"),
+                                               ("/data/other", "/data/other/pg_wal", "SUDO"),
+                                               ("/data/closed", None, "DENIED")])
+
+    def test_no_postmaster_seen_is_said(self):
+        self.assertEqual(self.paths("===DATA_PATHS===\n===VIRTUALIZATION===\nnone\n"),
+                         [(None, None, "NOT_FOUND")])
+
+    def test_windows_line_endings(self):
+        self.assertEqual(self.paths("===DATA_PATHS===\r\nC:\\pg\\data\tD:\\wal\tDIRECT\r\n"),
+                         [("C:\\pg\\data", "D:\\wal", "DIRECT")])
+
+
 class DiskTypeNoteTests(unittest.TestCase):
     """The report's note when the data disk reports another type than the profile."""
 

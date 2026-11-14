@@ -998,6 +998,27 @@ Unit tests: the three codes, readable healthy; CIDR for IPv4 and IPv6, names kep
 
 ---
 
+# Batch of 2026-11-14 (3) — WAL and tablespace disks (V066, PG029)
+
+## PG-CAP-003 — WAL and Tablespace Disk Usage (PG_CAPACITY_HEALTH, topic STORAGE)
+
+| | |
+| --- | --- |
+| Evidence | `PG_HOST_SNAPSHOT` (mounts, and the new DATA_PATHS section: per postmaster `-D` the real location of `pg_wal`), required, 3 600 s; `PG_CONFIGURATION_SNAPSHOT` (`data_directory`), required, 86 400 s; `PG_TABLESPACES` (PG029: `pg_tablespace_location`, size), required, 86 400 s |
+| Thresholds | WARNING ≥ 80 %, CRITICAL ≥ 90 % (as PG-CAP-001, `df` use) |
+| Finding | one per server and mount that is not the data directory's, naming what lives there (`pg_wal`, `tablespace <name>`); the data directory's mount is left to PG-CAP-001 |
+| pg_wal | read by the host script with `readlink -f <data>/pg_wal` (Windows: junction or link target): DIRECT when the SSH user may enter the data directory, else `sudo -n -u <postmaster user>` only if a sudoers rule allows exactly that command (SUDO), else DENIED; never a password, nothing changed |
+| Not assessed | `wal_location_unreadable`: the three ways with their risks (sudoers rule for that one readlink — recommended; SSH as postgres — policy; postgres group and 0750 — the user reads data files, not recommended); tablespaces are still judged. `wal_location_not_found` (no postmaster with this data_directory seen), `wal_location_not_collected` (older host script), `no_disk` |
+| Not applicable | `nothing_separate`: pg_wal and every tablespace on the data disk |
+| Subject | NODE (`node:mount`) |
+
+Design (Hasan 2026-11-14): what cannot be read is said, not guessed around; the customer picks a way and the next report reads it.
+
+**Verification (V066)**  
+Unit tests: separate pg_wal disk full, the data disk left to PG-CAP-001 (NOT_APPLICABLE), one finding per disk naming pg_wal and two tablespaces, unreadable pg_wal with tablespaces still judged, every reason code, a Windows junction to another drive, a server without disk data; DATA_PATHS parsing (older script, three ways, no postmaster, Windows line ends). Real-server tests: PG_TABLESPACES as postgres and pg_monitor (directory and size), the host script finding the test server's data directory and pg_wal (DIRECT). By hand: the same script as an unprivileged user gives DENIED, with the documented sudoers line SUDO.
+
+---
+
 # Candidate Rules
 
 Not implemented; recorded so they are not lost.
@@ -1005,4 +1026,3 @@ Not implemented; recorded so they are not lost.
 | Candidate | Source | Evidence available |
 | --- | --- | --- |
 | Long Resource-Retaining Aborted Transaction | Savepoint limitation above | Yes (`PG_ACTIVITY_SNAPSHOT`) |
-| Filesystem capacity of tablespaces and a separate `pg_wal` | PG-CAP-001 limitation | Partly (needs tablespace paths) |

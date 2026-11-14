@@ -528,6 +528,7 @@ class DataDiskUsageTests(unittest.TestCase):
 
     def test_usage_without_available_falls_back_to_total(self):
         self.assertEqual(engine.usage_percent(30, None, 100), 30)
+
         self.assertEqual(engine.usage_percent(8, 2, 11), 80)
         self.assertIsNone(engine.usage_percent(0, None, 0))
 
@@ -542,6 +543,79 @@ class DataDiskUsageTests(unittest.TestCase):
                 "(data_directory {data_directory}).").format(**finding["template_values"])
         self.assertEqual(text, "The data disk / on node-1 is 91.5% full "
                                "(data_directory /var/lib/pg/17/main).")
+
+
+class SeparateDiskUsageTests(unittest.TestCase):
+    """PG-CAP-003: disks holding pg_wal or tablespaces besides the data directory's."""
+
+    def evidence(self, mounts, wal=("/pg/data", "/pg/data/pg_wal", "DIRECT"), tablespaces=(),
+                 directory="/pg/data", target_id=1):
+        host = [{"record_type": "STORAGE", "snapshot_id": i, "target_id": target_id, "node_name": "pg1",
+                 "captured_at": NOW, "mount_point": m, "used_bytes": used * GB, "total_bytes": 100 * GB,
+                 "available_bytes": (100 - used) * GB} for i, (m, used) in enumerate(mounts)]
+        if wal:
+            host.append({"record_type": "DATA_PATH", "target_id": target_id, "node_name": "pg1",
+                         "captured_at": NOW, "data_directory": wal[0], "wal_location": wal[1],
+                         "read_via": wal[2]})
+        return {"PG_HOST_SNAPSHOT": host,
+                "PG_CONFIGURATION_SNAPSHOT": [{"target_id": target_id, "node_name": "pg1",
+                                               "setting_name": "data_directory", "setting_value": directory}],
+                "PG_TABLESPACES": [{"target_id": target_id, "node_name": "pg1", "tablespace_name": name,
+                                    "location": location} for name, location in tablespaces]}
+
+    def evaluate(self, *args, **kwargs):
+        r = rule()
+        return engine.evaluate_separate_disk_usage(self.evidence(*args, **kwargs), r, DATA_DISK_THRESHOLDS), r
+
+    def test_wal_on_its_own_full_disk(self):
+        findings, r = self.evaluate([("/", 10), ("/pg", 50), ("/wal", 91)], wal=("/pg/data/", "/wal/pg_wal", "SUDO"))
+        self.assertEqual(severities(findings), ["CRITICAL"])
+        self.assertEqual(findings[0]["template_values"]["uses"], "pg_wal")
+        self.assertEqual(findings[0]["subject_identifier"], "pg1:/wal")
+        self.assertEqual(r["unassessed"], [])
+
+    def test_the_data_disk_is_left_to_cap_001(self):
+        # pg_wal and a tablespace on the full data disk: nothing separate, PG-CAP-001 says it.
+        with self.assertRaises(engine.NotApplicable) as raised:
+            self.evaluate([("/", 95)], tablespaces=[("ts", "/pg/ts")])
+        self.assertIn("[nothing_separate]", str(raised.exception))
+
+    def test_separate_disks_with_room_are_healthy(self):
+        findings, r = self.evaluate([("/", 95), ("/wal", 10), ("/ts", 79)], wal=("/pg/data", "/wal", "DIRECT"),
+                                    tablespaces=[("ts", "/ts/one")])
+        self.assertEqual((findings, r["unassessed"]), ([], []))
+
+    def test_one_finding_per_disk_naming_everything_on_it(self):
+        findings, _ = self.evaluate([("/", 10), ("/big", 85)], wal=("/pg/data", "/big/wal", "DIRECT"),
+                                    tablespaces=[("ts_a", "/big/a"), ("ts_b", "/big/b")])
+        self.assertEqual([(f["severity"], f["template_values"]["uses"]) for f in findings],
+                         [("WARNING", "pg_wal, tablespace ts_a, tablespace ts_b")])
+        self.assertEqual(findings[0]["details"]["uses"], ["pg_wal", "tablespace ts_a", "tablespace ts_b"])
+
+    def test_unreadable_wal_leaves_the_node_unassessed_but_tablespaces_judged(self):
+        findings, r = self.evaluate([("/", 10), ("/ts", 92)], wal=("/pg/data", None, "DENIED"),
+                                    tablespaces=[("ts", "/ts/x")])
+        self.assertEqual(severities(findings), ["CRITICAL"])
+        self.assertEqual([u["reason_code"] for u in r["unassessed"]], ["wal_location_unreadable"])
+
+    def test_why_the_wal_location_is_unknown(self):
+        cases = {None: "wal_location_not_collected",
+                 ("/other/data", "/wal", "DIRECT"): "wal_location_not_found",
+                 (None, None, "NOT_FOUND"): "wal_location_not_found",
+                 ("/pg/data", None, "DENIED"): "wal_location_unreadable"}
+        for wal, code in cases.items():
+            with self.subTest(wal=wal):
+                findings, r = self.evaluate([("/", 10)], wal=wal)
+                self.assertEqual((findings, [u["reason_code"] for u in r["unassessed"]]), ([], [code]))
+
+    def test_windows_junction_to_another_drive(self):
+        findings, _ = self.evaluate([("C:\\", 10), ("D:\\", 90)], directory="C:\\Program Files\\PostgreSQL\\16\\data",
+                                    wal=("C:\\Program Files\\PostgreSQL\\16\\data", "D:\\pg_wal", "DIRECT"))
+        self.assertEqual([(f["severity"], f["details"]["mount_point"]) for f in findings], [("CRITICAL", "D:\\")])
+
+    def test_node_without_disk_data(self):
+        findings, r = self.evaluate([], tablespaces=[("ts", "/ts")])
+        self.assertEqual((findings, [u["reason_code"] for u in r["unassessed"]]), ([], ["no_disk"]))
 
 
 REPLICATION_LAG_THRESHOLDS = [

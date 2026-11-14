@@ -166,3 +166,47 @@ class QueryStatsNotLoadedTests(unittest.TestCase):
             rows = conn.execute((COLLECTORS / "query_stats_snapshot.sql").read_text(encoding="utf-8")).fetchall()
         self.assertEqual([(r["record_type"], r["preloaded"], r["available"]) for r in rows],
                          [("SYSTEM", False, False)])
+
+
+class WalAndTablespaceLocationTests(unittest.TestCase):
+    """PG_TABLESPACES and the host script's DATA_PATHS (PG029) against a running server."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = DisposablePostgres()
+        cls.server.start()
+        cls.addClassCleanup(cls.server.close)
+        cls.space = cls.server.root / "space"
+        cls.space.mkdir()
+        with cls.server.connect(autocommit=True) as conn:
+            conn.execute(f"CREATE TABLESPACE ks_space LOCATION '{cls.space}'")
+            conn.execute("CREATE TABLE in_space (id int) TABLESPACE ks_space")
+            conn.execute("INSERT INTO in_space SELECT generate_series(1, 10000)")
+            conn.execute("CREATE ROLE monitor LOGIN IN ROLE pg_monitor")
+
+    def collect(self, role=None):
+        with self.server.connect(autocommit=True, row_factory=dict_row) as conn:
+            if role:
+                conn.execute(f"SET ROLE {role}")
+            rows = conn.execute((COLLECTORS / "tablespaces_snapshot.sql").read_text(encoding="utf-8")).fetchall()
+        return {r["tablespace_name"]: r for r in rows}
+
+    def test_every_tablespace_with_its_directory_and_size(self):
+        for role in (None, "monitor"):
+            with self.subTest(role=role):
+                rows = self.collect(role)
+                self.assertEqual(set(rows), {"pg_default", "pg_global", "ks_space"})
+                self.assertEqual((rows["pg_default"]["location"], rows["ks_space"]["location"]),
+                                 (None, str(self.space)))
+                self.assertGreater(rows["ks_space"]["size_bytes"], 0)
+
+    def test_host_script_finds_the_data_directory_and_pg_wal(self):
+        import subprocess
+        from repository.worker import worker
+        output = subprocess.run(["sh", str(COLLECTORS / "host_snapshot.sh")], capture_output=True,
+                                text=True, check=True).stdout
+        paths = {r["data_directory"]: r for r in worker.parse_host_snapshot_output(output)
+                 if r["record_type"] == "DATA_PATH"}
+        data = str(self.server.data.resolve())
+        self.assertIn(data, paths)
+        self.assertEqual((paths[data]["wal_location"], paths[data]["read_via"]), (f"{data}/pg_wal", "DIRECT"))

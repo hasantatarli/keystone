@@ -63,6 +63,22 @@ try {
     }
 } catch { }
 
+# Like the Linux DATA_PATHS: per PostgreSQL service (-D in pg_ctl's command line)
+# the data directory, where its pg_wal really is (junction or symbolic link
+# target, else pg_wal itself) and DIRECT or DENIED. Reads only.
+"===DATA_PATHS==="
+Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
+    Where-Object { $_.PathName -match 'pg_ctl' } |
+    ForEach-Object {
+        if ($_.PathName -notmatch '-D\s+(?:"([^"]+)"|(\S+))') { return }
+        $data = (@($Matches[1], $Matches[2]) | Where-Object { $_ } | Select-Object -First 1).TrimEnd('\')
+        try {
+            $item = Get-Item -LiteralPath (Join-Path $data "pg_wal") -ErrorAction Stop
+            $wal = if ($item.LinkType -and $item.Target) { @($item.Target)[0] } else { $item.FullName }
+            "$data`t$wal`tDIRECT"
+        } catch { "$data`t`tDENIED" }
+    }
+
 # Like systemd-detect-virt --vm: the hypervisor, or none.
 "===VIRTUALIZATION==="
 $model = "$($cs.Manufacturer) $($cs.Model)"
