@@ -2219,6 +2219,15 @@ def save_checkpoint_stats_snapshot(conn, task, rows):
                 ("in_recovery", "checkpoints_timed", "checkpoints_requested", "stats_reset"))
 
 
+def save_hba_rule_snapshot(conn, task, rows):
+    """Persist PG_HBA_RULES: the ACCESS row (readable or not) and a RULE row per pg_hba.conf line."""
+    if not any(r.get("record_type") == "ACCESS" for r in rows):
+        raise RuntimeError("PG_HBA_RULES returned no ACCESS row.")
+    insert_rows(conn, "hba_rule_snapshot", task, rows,
+                ("record_type", "readable", "line_number", "conn_type", "databases", "users", "address",
+                 "netmask", "auth_method", "error"))
+
+
 def save_table_access_snapshot(conn, task, rows):
     """Persist PG_TABLE_ACCESS: a DATABASE row per collected database, a TABLE row per table."""
     if not any(r.get("record_type") == "DATABASE" for r in rows):
@@ -2321,6 +2330,7 @@ COLLECTOR_HANDLERS = {
     "PG_CHECKPOINT_STATS": save_checkpoint_stats_snapshot,
     "PG_DATABASE_STATS": save_database_stats_snapshot,
     "PG_TABLE_ACCESS": save_table_access_snapshot,
+    "PG_HBA_RULES": save_hba_rule_snapshot,
     "PG_CONNECTION_ACTIVITY": save_connection_activity_snapshot,
     "PG_HOST_SNAPSHOT": save_host_snapshot,
     "PG_ACTIVITY_SNAPSHOT": save_activity_snapshot,

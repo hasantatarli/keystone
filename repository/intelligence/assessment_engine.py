@@ -626,6 +626,25 @@ def load_checkpoint_stats_history(conn, target_id):
         """, (target_id, target_id, COUNTER_HISTORY_SECONDS)).fetchall()
 
 
+def load_latest_hba_rules(conn, target_id):
+    """Latest PG_HBA_RULES per node: its ACCESS row and the rules captured with it."""
+    return conn.execute(
+        """
+        SELECT h.snapshot_id, h.target_id, t.name AS node_name, h.captured_at, h.record_type, h.readable,
+               h.line_number, h.conn_type, h.databases, h.users, h.address, h.netmask, h.auth_method,
+               h.error
+        FROM keystone.target t
+        JOIN LATERAL (
+            SELECT max(captured_at) AS captured_at FROM postgresql.hba_rule_snapshot s
+            WHERE s.target_id = t.target_id
+        ) latest ON latest.captured_at IS NOT NULL
+        JOIN postgresql.hba_rule_snapshot h
+            ON h.target_id = t.target_id AND h.captured_at = latest.captured_at
+        WHERE t.target_id = ANY(%s)
+        ORDER BY h.target_id, h.record_type, h.line_number
+        """, (node_target_ids(conn, target_id),)).fetchall()
+
+
 def load_table_access_history(conn, target_id):
     """PG_TABLE_ACCESS: the latest snapshot of every database, and one earlier snapshot of each table
     per day over COUNTER_HISTORY_SECONDS (the first of the day), newest first.
@@ -2881,6 +2900,61 @@ def evaluate_heavy_seq_scans(rows, rule, thresholds):
     return findings
 
 
+HBA_NETWORK_TYPES = {"host", "hostssl", "hostnossl", "hostgssenc", "hostnogssenc"}
+
+
+def hba_severity(rule_row):
+    """The risk of one pg_hba.conf line, or None.
+
+    trust over the network: anyone reaching the port logs in without a password (CRITICAL);
+    trust on the local socket: any operating system user, as any database user (WARNING);
+    password over the network: the password travels in clear text (WARNING);
+    md5: deprecated (PostgreSQL 18), weaker than scram-sha-256 (INFO).
+    """
+    method, network = rule_row["auth_method"], rule_row["conn_type"] in HBA_NETWORK_TYPES
+    if method == "trust":
+        return "CRITICAL" if network else "WARNING"
+    if method == "password" and network:
+        return "WARNING"
+    if method == "md5":
+        return "INFO"
+    return None
+
+
+def evaluate_hba_rules(rows, rule, thresholds):
+    """PG-SEC-005: pg_hba.conf lines with trust, clear-text password or md5, per node.
+
+    pg_hba_file_rules is superuser only by default: a node whose rules could not be read is
+    listed as not assessed with the privilege to grant.
+    """
+    findings = []
+    for access in (r for r in rows if r["record_type"] == "ACCESS"):
+        if not access["readable"]:
+            add_unassessed(rule["unassessed"], access["target_id"], access["node_name"],
+                           "PG_HBA_RULES", "hba_not_readable")
+            continue
+        for line in (r for r in rows if r["record_type"] == "RULE" and r["target_id"] == access["target_id"]):
+            severity = hba_severity(line)
+            if severity is None:
+                continue
+            address = line["address"] or ("local" if line["conn_type"] == "local" else "")
+            if line["netmask"]:
+                address += f" / {line['netmask']}"
+            findings.append({
+                "severity": severity, "snapshot_id": line["snapshot_id"],
+                "template_values": {"node_name": line["node_name"], "line_number": line["line_number"],
+                                    "conn_type": line["conn_type"], "databases": line["databases"],
+                                    "users": line["users"], "address": address,
+                                    "auth_method": line["auth_method"]},
+                "observed_value": None, "observed_unit": None,
+                "subject_type": "HBA_RULE", "subject_identifier": f"{line['node_name']}:{line['line_number']}",
+                "details": {"node": line["node_name"], "line_number": line["line_number"],
+                            "conn_type": line["conn_type"], "databases": line["databases"],
+                            "users": line["users"], "address": address, "auth_method": line["auth_method"],
+                            "captured_at": iso(line["captured_at"])}})
+    return findings
+
+
 def evaluate_lock_waits(rows, rule, thresholds):
     """PG-LOCK-001: sessions waiting on a lock, and who blocks them, at the moment of collection.
 
@@ -2946,6 +3020,7 @@ EVIDENCE_LOADERS = {
     "PG_CHECKPOINT_STATS": load_checkpoint_stats_history,
     "PG_DATABASE_STATS": load_database_stats_history,
     "PG_TABLE_ACCESS": load_table_access_history,
+    "PG_HBA_RULES": load_latest_hba_rules,
     "PG_TABLE_STRUCTURE": load_latest_table_structure,
     "PG_EXTENSIONS": load_latest_extensions,
 }
@@ -3096,6 +3171,7 @@ RULE_EVALUATORS = {
     "PG-CAP-005": evaluate_temp_files,
     "PG-IDX-005": evaluate_heavy_seq_scans,
     "PG-LOCK-001": evaluate_lock_waits,
+    "PG-SEC-005": evaluate_hba_rules,
 }
 
 

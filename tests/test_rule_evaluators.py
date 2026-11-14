@@ -1943,3 +1943,42 @@ class CounterReasonTests(unittest.TestCase):
         with self.assertRaises(engine.InsufficientEvidence) as raised:
             engine.evaluate_temp_files(rows, with_params(window=DAY, min_window=6 * HOUR), [])
         self.assertIn("[statistics_too_young]", str(raised.exception))
+
+
+# V063: pg_hba rules.
+def hba_access(target_id, node, readable=True):
+    return {"snapshot_id": 1, "target_id": target_id, "node_name": node, "captured_at": NOW,
+            "record_type": "ACCESS", "readable": readable}
+
+
+def hba(target_id, node, line, conn_type, method, address=None, netmask=None):
+    return {"snapshot_id": line, "target_id": target_id, "node_name": node, "captured_at": NOW,
+            "record_type": "RULE", "readable": None, "line_number": line, "conn_type": conn_type,
+            "databases": "all", "users": "all", "address": address, "netmask": netmask,
+            "auth_method": method, "error": None}
+
+
+class HbaRuleTests(unittest.TestCase):
+    """PG-SEC-005."""
+
+    def test_severity_by_method_and_connection(self):
+        rows = [hba_access(1, "pg1"),
+                hba(1, "pg1", 90, "local", "trust"),
+                hba(1, "pg1", 92, "host", "trust", "0.0.0.0", "0.0.0.0"),
+                hba(1, "pg1", 93, "hostssl", "password", "10.0.0.0/24"),
+                hba(1, "pg1", 94, "host", "md5", "10.0.1.0/24"),
+                hba(1, "pg1", 95, "local", "peer"),
+                hba(1, "pg1", 96, "host", "scram-sha-256", "10.0.2.0/24"),
+                hba(1, "pg1", 97, "local", "password")]
+        findings = engine.evaluate_hba_rules(rows, rule(), [])
+        self.assertEqual([(f["details"]["line_number"], f["severity"]) for f in findings],
+                         [(90, "WARNING"), (92, "CRITICAL"), (93, "WARNING"), (94, "INFO")])
+        self.assertEqual(findings[1]["template_values"]["address"], "0.0.0.0 / 0.0.0.0")
+        self.assertEqual(findings[0]["template_values"]["address"], "local")
+
+    def test_unreadable_node_is_not_assessed(self):
+        r = rule()
+        rows = [hba_access(1, "pg1", readable=False), hba_access(2, "pg2"), hba(2, "pg2", 90, "local", "trust")]
+        findings = engine.evaluate_hba_rules(rows, r, [])
+        self.assertEqual([f["subject_identifier"] for f in findings], ["pg2:90"])
+        self.assertEqual([(u["node"], u["reason_code"]) for u in r["unassessed"]], [("pg1", "hba_not_readable")])
