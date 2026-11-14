@@ -454,6 +454,12 @@ EXPECTED_RULES = {
         "thresholds": {"WARNING": (Decimal("30"), "PERCENT")},
         "evidence": {"PG_TABLE_BLOAT": (True, 86400)},
         "parameters": {"min_wasted": (Decimal("1073741824"), "BYTE")},
+    },    # V065: pg_stat_statements as context (PG028).
+    "PG-PERF-001": {
+        "assessment": "PG_PERFORMANCE_HEALTH",
+        "default_severity": None,
+        "thresholds": {},
+        "evidence": {"PG_QUERY_STATS": (True, 3600)},
     },
 }
 

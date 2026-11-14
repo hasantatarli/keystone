@@ -1,6 +1,6 @@
 # PostgreSQL Telemetry
 
-Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG027).
+Collectors read PostgreSQL system catalogs and statistics views with a read-only role (`pg_monitor` is enough) and create nothing on the target. The installer registers every file in `collectors/` from its header (Key, Execution Scope, Execution Type); the worker stores the rows through the handler of the same key (`repository/worker/worker.py`, `COLLECTOR_HANDLERS`). Repository tables are created by the migrations in `repository/migrations/` (PG001–PG028).
 
 | Key | Scope | Repository table(s) | Used by |
 | --- | --- | --- | --- |
@@ -26,6 +26,7 @@ Collectors read PostgreSQL system catalogs and statistics views with a read-only
 | PG_EXTENSIONS | DATABASE | `extension_snapshot` (PG022): installed and package versions | PG-LIFE-004 |
 | PG_HBA_RULES | NODE | `hba_rule_snapshot` (PG026): `pg_hba_file_rules` through `query_to_xml`; ACCESS row says whether the role could read it (superuser only by default) | PG-SEC-005 |
 | PG_TABLE_BLOAT | DATABASE | `table_bloat_snapshot` (PG027): estimated free space of tables and btree indexes ≥ 100 MB — `pgstattuple_approx` when installed, else `pg_stats` widths; method NULL when neither | PG-MAINT-004 |
+| PG_QUERY_STATS | SYSTEM | `query_stats_snapshot` (PG028): `pg_stat_statements` through `query_to_xml` — the 10 statements with the most time and the 5 writing most temporary files / reading most from disk; SYSTEM row: loaded, created, readable, `stats_reset` (14+), total time | PG-PERF-001, report sections |
 | PG_TABLE_ACCESS | DATABASE | `table_access_snapshot` (PG025): sequential and index scans, live rows and size per table, the database's stats_reset; DATABASE row per database | PG-IDX-005 |
 | PG_TABLE_CAPACITY | DATABASE | `table_capacity_snapshot` | Context (not yet used by a rule) |
 
@@ -42,7 +43,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON SEQUENCES TO keystone;   
 
 `pg_read_all_data` (PostgreSQL 14+) also works but grants reading all table data.
 
-Files ending in `.aql` (`query_stats_snapshot`, `replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
+Files ending in `.aql` (`replication_snapshot`) are drafts; the installer registers only `.sql` and `.sh`.
 
 Rules and their evidence: `docs/KeyStone/06 - Engineering Intelligence/Rule Catalog.md`. Planned collectors: `docs/KeyStone/02 - Roadmap/Roadmap.md`.
 

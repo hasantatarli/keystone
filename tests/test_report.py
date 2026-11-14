@@ -157,7 +157,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 27 / 35 başarılı", executive)  # + nodes without connections
+        self.assertIn("Veri toplama: 28 / 36 başarılı", executive)  # + nodes without connections
         self.assertIn("connection refused", executive)
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):
@@ -1434,3 +1434,38 @@ class NodesUnassessedTextTests(unittest.TestCase):
         reason = ('PG_HBA_RULES: [nodes_unassessed] x {"nodes": "pg2", "reasons": {"pg2": "not_collected"}}')
         self.assertEqual(report.explain_reason(reason, data, self.T),
                          "Diğer sunucularda sorun bulunmadı; pg2 (veri toplanamadı) değerlendirilemedi.")
+
+
+class QueryStatsSectionTests(unittest.TestCase):
+    """V065: the most expensive statements as a report section, and under temp/disk findings."""
+
+    T = report.TEXTS["tr"]
+
+    def data(self):
+        system = {"record_type": "SYSTEM", "available": True, "database_name": "postgres",
+                  "stats_reset": datetime(2026, 11, 1, tzinfo=timezone.utc), "all_total_ms": 100000}
+        def q(i, db, total, temp=0, read=0):
+            return {"record_type": "QUERY", "database_name": db, "user_name": "app", "calls": 10,
+                    "total_ms": total, "rows": 5, "shared_blks_read": read, "temp_blks_written": temp,
+                    "query_text": f"SELECT {i} FROM t WHERE x = $1"}
+        return {"query_stats": [system, q(1, "app", 60000, temp=1000), q(2, "app", 30000, read=5000),
+                                q(3, "other", 400, temp=9000)]}
+
+    def test_section(self):
+        html = report.render_query_stats(self.data(), self.T)
+        self.assertIn("En pahalı sorgular", html)
+        self.assertIn("01.11.2026 sıfırlamasından beri", html)
+        self.assertIn("%60.0", html)
+        self.assertIn("400 ms", html)
+        self.assertLess(html.index("SELECT 1 FROM"), html.index("SELECT 2 FROM"))
+
+    def test_related_queries_of_the_finding_database_only(self):
+        result = {"rule_key": "PG-CAP-005"}
+        html = report.related_queries(result, [{"details": {"database_name": "app"}}], self.data(), self.T)
+        self.assertIn("SELECT 1 FROM", html)
+        self.assertNotIn("SELECT 3 FROM", html)               # another database
+        self.assertNotIn("SELECT 2 FROM", html)               # wrote no temporary files
+
+    def test_nothing_without_pg_stat_statements(self):
+        self.assertEqual(report.render_query_stats({"query_stats": [{"record_type": "SYSTEM", "available": False}]},
+                                                   self.T), "")

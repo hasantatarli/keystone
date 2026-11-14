@@ -120,3 +120,49 @@ class HbaAndBloatCollectorTests(unittest.TestCase):
         finally:
             with self.server.connect(autocommit=True) as conn:
                 conn.execute("DROP EXTENSION pgstattuple")
+
+
+class QueryStatsCollectorTests(unittest.TestCase):
+    """PG_QUERY_STATS (PG028): pg_stat_statements loaded, created and read; or said why not."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = DisposablePostgres()
+        cls.server.start("shared_preload_libraries = 'pg_stat_statements'\n")
+        cls.addClassCleanup(cls.server.close)
+
+    def collect(self):
+        with self.server.connect(autocommit=True, row_factory=dict_row) as conn:
+            return conn.execute((COLLECTORS / "query_stats_snapshot.sql").read_text(encoding="utf-8")).fetchall()
+
+    def test_loaded_but_not_created_then_read(self):
+        system = self.collect()[0]
+        self.assertEqual((system["record_type"], system["preloaded"], system["extension_created"],
+                          system["available"]), ("SYSTEM", True, False, False))
+        with self.server.connect(autocommit=True) as conn:
+            conn.execute("CREATE EXTENSION pg_stat_statements")
+            conn.execute("SET work_mem = '64kB'")
+            for _ in range(3):
+                conn.execute("SELECT count(*) FROM (SELECT g FROM generate_series(1, 200000) g ORDER BY g DESC) s")
+        rows = self.collect()
+        system, queries = rows[0], [r for r in rows if r["record_type"] == "QUERY"]
+        self.assertTrue(system["available"])
+        self.assertIsNotNone(system["stats_reset"])
+        sort = next(q for q in queries if "generate_series" in (q["query_text"] or ""))
+        self.assertEqual(sort["calls"], 3)
+        self.assertGreater(sort["temp_blks_written"], 0)
+        self.assertGreater(sort["total_ms"], 0)
+        self.assertGreaterEqual(system["all_total_ms"], sort["total_ms"])
+        self.assertLessEqual(len(queries), 20)
+
+
+class QueryStatsNotLoadedTests(unittest.TestCase):
+
+    def test_not_loaded(self):
+        server = DisposablePostgres()
+        server.start()
+        self.addCleanup(server.close)
+        with server.connect(autocommit=True, row_factory=dict_row) as conn:
+            rows = conn.execute((COLLECTORS / "query_stats_snapshot.sql").read_text(encoding="utf-8")).fetchall()
+        self.assertEqual([(r["record_type"], r["preloaded"], r["available"]) for r in rows],
+                         [("SYSTEM", False, False)])

@@ -1973,7 +1973,7 @@ class HbaRuleTests(unittest.TestCase):
         findings = engine.evaluate_hba_rules(rows, rule(), [])
         self.assertEqual([(f["details"]["line_number"], f["severity"]) for f in findings],
                          [(90, "WARNING"), (92, "CRITICAL"), (93, "WARNING"), (94, "INFO")])
-        self.assertEqual(findings[1]["template_values"]["address"], "0.0.0.0 / 0.0.0.0")
+        self.assertEqual(findings[1]["template_values"]["address"], "0.0.0.0/0")
         self.assertEqual(findings[0]["template_values"]["address"], "local")
 
     def test_unreadable_node_is_not_assessed(self):
@@ -2014,3 +2014,35 @@ class BloatTests(unittest.TestCase):
             engine.evaluate_bloat([bloat("orders", "TABLE", 10 * GB, None, None)],
                                   with_params(min_wasted=GB), self.THRESHOLDS)
         self.assertIn("[bloat_not_measurable]", str(raised.exception))
+
+
+class HbaAddressTests(unittest.TestCase):
+
+    def test_cidr(self):
+        self.assertEqual(engine.hba_address("192.168.1.0", "255.255.255.0"), "192.168.1.0/24")
+        self.assertEqual(engine.hba_address("192.168.1.101", "255.255.255.255"), "192.168.1.101/32")
+        self.assertEqual(engine.hba_address("fe80::", "ffff:ffff:ffff:ffff::"), "fe80::/64")
+        self.assertEqual(engine.hba_address("samenet", None), "samenet")
+        self.assertIsNone(engine.hba_address(None, None))
+
+
+def query_system(**flags):
+    row = {"record_type": "SYSTEM", "preloaded": True, "extension_created": True, "available": True,
+           "database_name": "postgres"}
+    row.update(flags)
+    return row
+
+
+class QueryStatsRuleTests(unittest.TestCase):
+    """PG-PERF-001: context, not findings; says how to set pg_stat_statements up."""
+
+    def test_codes(self):
+        for flags, kind, code in ((dict(preloaded=False), engine.NotApplicable, "pg_stat_statements_not_loaded"),
+                                  (dict(extension_created=False), engine.NotApplicable, "pg_stat_statements_not_created"),
+                                  (dict(available=False), engine.InsufficientEvidence, "pg_stat_statements_no_access")):
+            with self.assertRaises(kind) as raised:
+                engine.evaluate_query_stats([query_system(**flags)], rule(), [])
+            self.assertIn(f"[{code}]", str(raised.exception))
+
+    def test_readable_is_healthy(self):
+        self.assertEqual(engine.evaluate_query_stats([query_system()], rule(), []), [])
