@@ -13,8 +13,8 @@ They agree on: write each finding once in full and let summaries point to it; no
 
 | # | Topic | Decision |
 | --- | --- | --- |
-| 1 | One report, three sections | One report; sections answer questions, not job titles (a small company's IT manager reads all three): **1. Executive Summary** — where do we stand; **2. Engineering View** — where, and in which order; **3. Findings and Evidence** — what to do and how to verify. |
-| 2 | Format | One page with the three sections and a navigation bar, no tabs: the report goes to customers as PDF and tabs print only the open one. Each section starts on a new PDF page; folded parts open in print (as today). |
+| 1 | One report, three tabs | One report; sections answer questions, not job titles (a small company's IT manager reads all three): **1. Executive Summary** — where do we stand; **2. Engineering View** — where, and in which order; **3. Findings and Evidence** — what to do and how to verify. |
+| 2 | Format | Three tabs on screen, as the two tabs today (Hasan): Executive Summary, Engineering View, Findings and Evidence. Printed or saved as PDF, all three come one after another, each on a new page, folded parts open — as the current report already does with its two tabs. |
 | 3 | Write once | A finding's full text (meaning, causes, impact, recommendation, evidence) appears only in section 3. Sections 1 and 2 give one line and a link. The same holds for "not assessed" texts: one short line in the summary, the full way to allow it in section 3. |
 | 4 | No score | No composite health or risk score: its weights would be our invention and could not be defended ("by what, for whom"). The summary shows counts by severity, coverage and the affected areas. |
 | 5 | Two measures | Collection success (collector runs) and assessment coverage (checks that could be judged, of those applicable) are shown separately with their own names. |
