@@ -208,6 +208,23 @@ Positioning: one tool for DBAs and consultancies managing many customers: compan
 
 How that SQL Server tool was used (Hasan, 2026-11-13): a monitoring team's alerts reached the DBAs at once; the DBAs then opened the tool to investigate and act. Its graphs showed what was happening at that moment, or at the time of the incident; it had no alerting of its own. Keystone takes the same place (ADR-0005, ADR-0013): crisis alerting stays with the customer's monitoring; Keystone explains what happened, why, and what to do, and notifies on findings, not on raw metrics. Example: a disk filled by temporary files is CAP-001's finding (data disk usage, evaluated often); CAP-005 (temporary file use over a window) shows whether it is a habit or one query, and how to prevent it. Collection frequency, evaluation frequency (assessment schedule) and a rule's window are separate settings. Graph candidates named so far: checkpoint ratio and lock waits over time.
 
+### Time-window investigation (Hasan, 2026-11-17)
+
+The questions a consultant must answer: "CPU rose on the database servers last night, why?", "an application had a problem last weekend, did anything happen in the database in that window?". Not designed yet; recorded so that performance is not taken as done with the top queries (PG-PERF-001).
+
+Decisions:
+
+1. Keystone is an engineering tool, not a health check application: continuous engineering needs this data, so it is collected continuously, per collector, for permanent customers. Offline and one-off work cannot answer such questions and is not expected to.
+2. Host CPU, IO and memory are not collected as graphs: the system or application team states "CPU was 100 %". Keystone must answer what PostgreSQL did with it: the statements running at that time and their share, e.g. "query A 30 %, query B 5 % of PostgreSQL's CPU" (SQL Server has this). Connectors to Zabbix or Prometheus may come later; not needed now.
+3. Reading PostgreSQL logs is a parameter per customer: off by default, on when the customer allows it (logs may contain statement text and so data).
+
+Technical notes for the design:
+
+- PostgreSQL keeps no CPU time per statement. Two ways: sampling `pg_stat_activity` every few seconds (an active session with no wait event is on CPU; `query_id` from PostgreSQL 14 groups them) gives each statement's share of the CPU samples; or the `pg_stat_kcache` extension (CPU per statement from the operating system; needs preloading). `pg_stat_statements` deltas per interval add which statements grew.
+- Logs can be read from SQL (`pg_current_logfile()`, `pg_read_file()`, with `pg_read_server_files`) or over SSH. Structured formats (`csvlog`, `jsonlog` from PostgreSQL 15) are parsed reliably; errors, lock waits, slow statements, checkpoints, autovacuum and restarts come out of them.
+- Logs sent to syslog only are mixed with everything else on the server and hard to use; `logging_collector = on` with its own files (csv or json) should become a configuration recommendation, next to PG-CONF-005's diagnostic settings.
+- Output: a report for a time window, compared with normal days: statements that grew, waits, locks, checkpoints, autovacuum, errors, restarts or failovers in the window.
+
 ### AI assistant
 
 ADR-0012 already defines it. The intended interaction: a metric is high on a screen; the user asks "how was this at the same time last month?" and gets an answer built from Keystone's own history and findings, with the evidence it used. This depends on layers 1-3 above: the assistant explains derived evidence and history; it does not invent numbers.
