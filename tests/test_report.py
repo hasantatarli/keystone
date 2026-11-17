@@ -253,11 +253,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = page[:page.index(TECH_PANEL)]
         self.assertIn("Sistem envanteri", executive)
         self.assertIn("1 primary, 2 replica", executive)
-        self.assertIn("4 çekirdek", executive)
-        self.assertIn("16.0 GB", executive)
-        self.assertIn("1 / 3 sunucu için", executive)      # host data only for one server
-        self.assertIn("30.0 / 100.0 GB", executive)
-        self.assertIn("%30 dolu", executive)
+        # Hardware per server, never added up (hc128: "3 cores" for three 1-core servers).
+        self.assertIn('<span class="l">CPU</span>4 çekirdek', executive)
+        self.assertIn('<span class="l">Bellek</span>16.0 GB', executive)
+        self.assertEqual(executive.count('<div class="srv">'), 3)
+        # No data_directory: which mount holds the data is unknown, so no data disk is claimed.
         self.assertIn("1 veritabanı", executive)
 
     def add_host(self, node, cpu, memory_gb, mounts, data_directory=None, available_gb=None):
@@ -288,12 +288,12 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
 
-        self.assertIn("<th>Veri diski</th>", executive)            # a row per server
+        self.assertIn('<span class="l">Veri diski</span>', executive)    # a card per server
         self.assertIn("46.0 / 50.0 GB · %92", executive)           # data mount, not /
         self.assertIn("41.0 / 50.0 GB · %82", executive)           # data dir on /
         self.assertIn('class="m-crit"', executive)                 # colours from the rule limits
         self.assertIn('class="m-warn"', executive)
-        self.assertIn("87.0 / 100.0 GB", executive)                # tile: data disks only
+        self.assertNotIn("87.0 / 100.0 GB", executive)             # disks of servers are not one pool
         self.assertIn("Bilinmiyor", executive)                     # node-3: no host data
         self.assertNotIn("Dikkat çeken noktalar", executive)       # judgements are rules
         technical = page[page.index(TECH_PANEL):]
@@ -403,8 +403,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.conn.commit()
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("<th>İşletim sistemi</th>", executive)
-        self.assertIn("Ubuntu 24.04.4 LTS", executive)
+        self.assertIn('<span class="l">İşletim sistemi</span>Ubuntu 24.04.4 LTS', executive)
         technical = page[page.index(TECH_PANEL):]
         self.assertIn('<span title="17.10 (Ubuntu 17.10-1.pgdg24.04+1)">17.10</span>', technical)
         self.assertNotIn(">17.10 (Ubuntu", page)                     # never as visible text
@@ -1194,8 +1193,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
         self.assertIn("Son timeline değişimi", executive)        # review 2026-11-11: not always a failover
-        self.assertIn("3 saat 5 dakika önce", executive)
-        self.assertIn("timeline 126", executive)
+        # Hasan (hc128): the time it happened is the value; a rough age below, no arithmetic for the reader.
+        self.assertRegex(executive, r'<div class="v">\d{4}-\d{2}-\d{2} \d{2}:\d{2}</div>'
+                                    r'<div class="s">yaklaşık 3 saat önce · timeline 126</div>')
         self.assertIn("bekleme süresi: 2 saat 5 dakika.", page)
         self.assertIn("for 2 hours 5 minutes.", self.render(check_id, "en"))
 
@@ -1273,8 +1273,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         html = report.render_inventory({"nodes": nodes, "storage": storage, "databases": []}, t)
         self.assertNotIn("<table>", html)
         self.assertIn("10 primary, 20 replica", html)
-        self.assertIn("240 çekirdek", html)
-        self.assertIn("%40 dolu", html)                           # data disks only
+        self.assertIn('<div class="v">8 çekirdek</div><div class="s">sunucu başına</div>', html)
+        self.assertIn('<div class="l">En dolu veri diski</div><div class="v">%40</div>', html)
+        self.assertNotIn("240", html)                             # never added up
         self.assertIn("Bulgular ve Kanıt sekmesinde (Sistem Bilgisi)", html)
 
     def test_healthy_text_states_the_limit_used(self):

@@ -61,7 +61,7 @@ TEXTS = {
         "missing_title": "Eksik kanıt",
         "reason_short": {"wal_location_unreadable": "pg_wal'ın konumu okunamadı",
                          "hba_not_readable": "pg_hba kuralları okunamadı (yetki gerekli)"},
-        "how_in_eng": "Nasıl açılacağı Mühendislik Görünümü'nde (Eksik kanıt).",
+        "how_in_eng": "Ayrıntısı Mühendislik Görünümü'nde (Eksik kanıt).",
         "results_by_area": "Alanlara göre kontroller",
         "verdict_critical": "Acil müdahale gerektiren sorunlar var.",
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
@@ -91,7 +91,7 @@ TEXTS = {
         "unknown_replica_action": "Bu sunucuları da toplayın (offline script'i onlarda da çalıştırın ya da bağlantılarını tanımlayın); ayarları, diski ve sürümü ancak o zaman değerlendirilir.",
         "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
         "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
-        "inv_data_disk": "Veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
+        "inv_data_disk": "Veri diski", "inv_per_server": "sunucu başına", "inv_fullest_disk": "En dolu veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
         "inv_large_note": "Sunucu bazlı ayrıntı Bulgular ve Kanıt sekmesinde (Sistem Bilgisi).",
         "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
@@ -366,7 +366,7 @@ TEXTS = {
         "missing_title": "Missing evidence",
         "reason_short": {"wal_location_unreadable": "pg_wal location not readable",
                          "hba_not_readable": "pg_hba rules not readable (privilege needed)"},
-        "how_in_eng": "How to allow it: Engineering View (missing evidence).",
+        "how_in_eng": "Details in the Engineering View (missing evidence).",
         "results_by_area": "Checks by area",
         "verdict_critical": "There are problems that need immediate action.",
         "verdict_warning": "There are problems that need attention.",
@@ -396,7 +396,7 @@ TEXTS = {
         "unknown_replica_action": "Collect these servers too (run the offline script on them or define their connections); only then are their settings, disk and version assessed.",
         "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
         "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
-        "inv_data_disk": "Data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
+        "inv_data_disk": "Data disk", "inv_per_server": "per server", "inv_fullest_disk": "Fullest data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
         "inv_large_note": "Per-server details are in Findings and Evidence (system information).",
         "data_mount": "data",
         "impact_title": "Affected areas",
@@ -1044,6 +1044,24 @@ def nodes_unassessed_text(reasons, data, t, short=False):
     return t["reason_codes"]["nodes_unassessed"].format(nodes=items)
 
 
+def reason_detail(reason, data, t):
+    """The full way to allow a check, when its short form leaves it out (Engineering View only).
+
+    Servers not assessed: the full text of each reason once, not the sentence with the servers again.
+    """
+    coded = REASON_CODE_PATTERN.match(reason or "")
+    if coded and coded.group("code") == "nodes_unassessed":
+        try:
+            codes = dict.fromkeys(json.loads(coded.group("values") or "{}").get("reasons", {}).values())
+        except ValueError:
+            return ""
+        return " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
+    if coded:
+        full = explain_reason(reason, data, t)
+        return full if full != explain_reason(reason, data, t, short=True) else ""
+    return ""
+
+
 def explain_reason(reason, data, t, short=False):
     """Engine reason in plain words; says when this check failed to collect the source.
 
@@ -1261,7 +1279,14 @@ h3{font-size:15px;margin:20px 0 8px}
 .tile .n{font-size:24px;font-weight:700;line-height:1.2}
 .tile .l{color:var(--muted);font-size:13px}
 .note{color:var(--muted);font-size:14px}
-.inv{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0}
+.inv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0}
+.measures{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:14px;color:var(--muted)}
+.measures>div{padding:2px 0}
+.servers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0}
+.srv{border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.srv .h{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px}
+.srv .f{display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13.5px;padding:3px 0}
+.srv .f .l{color:var(--muted)}
 .inv>div{background:var(--soft);border-radius:8px;padding:10px 14px}
 .inv .l{color:var(--muted);font-size:13px}
 .inv .v{font-size:19px;font-weight:700;line-height:1.3}
@@ -1273,6 +1298,8 @@ h3{font-size:15px;margin:20px 0 8px}
 .impact .name{font-weight:600}
 .impact .val{font-size:14px;display:flex;flex-wrap:wrap;gap:6px 16px}
 .problem .badge{margin-right:6px}
+.detail{margin:4px 0;font-size:13.5px}
+.nowrap{white-space:nowrap}
 .lines{list-style:none;margin:0;padding:0}.lines li{padding:8px 0;border-bottom:1px solid var(--line)}
 .lines .badge{margin-right:8px}.lines .rule{margin-left:8px}
 details.area{border-bottom:1px solid var(--line);padding:6px 0}
@@ -1342,7 +1369,7 @@ box-shadow:inset 0 3px 0 var(--accent)}
 #tab-exec:checked~.panel-exec,#tab-eng:checked~.panel-eng,#tab-tech:checked~.panel-tech{display:block}
 .tabs .part{display:none}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
-@media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
+@media (max-width:640px){main{padding:24px 16px 48px}.inv{grid-template-columns:repeat(2,1fr)}h1{font-size:22px}
 table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .rules{grid-column:1/-1}
 .impact{grid-template-columns:1fr}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
@@ -1429,7 +1456,8 @@ def disk_limits(data):
 
 
 def disk_percent(disk):
-    return round(usage_percent(disk["used_bytes"], disk.get("available_bytes"), disk["total_bytes"]))
+    """One decimal, as PG-CAP-001 judges it: 79.6 % must not read as the 80 % limit (hc128)."""
+    return round(usage_percent(disk["used_bytes"], disk.get("available_bytes"), disk["total_bytes"]), 1)
 
 
 def fmt_used_of(used, total):
@@ -1490,7 +1518,7 @@ def disk_cell(disk, limits, t):
              else "warn" if pct >= limits.get("warning", 101) else "ok")
     return (f'<span class="meter"><i class="m-{level}" style="width:{min(pct, 100)}%"></i></span>'
             f'{e(fmt_used_of(disk["used_bytes"], disk["total_bytes"]))} · '
-            f'{e(t["percent"].format(n=pct))}')
+            f'{e(t["percent"].format(n=f"{pct:g}"))}')
 
 
 def failover_item(data, t):
@@ -1506,17 +1534,25 @@ def failover_item(data, t):
     started = primary["timeline_started_at"]
     if started is None:
         return t["inv_failover"], t["inv_failover_unknown"], timeline
-    ago = t["inv_failover_ago"].format(ago=fmt_duration((primary["captured_at"] - started).total_seconds(), t))
-    return t["inv_failover"], ago, f"{timeline} · {fmt_time(started)}"
+    seconds = (primary["captured_at"] - started).total_seconds()
+    unit = next((u for u in (86400, 3600, 60) if seconds >= u), 1)
+    ago = t["inv_failover_ago"].format(ago=fmt_duration(seconds // unit * unit, t))
+    return t["inv_failover"], fmt_time(started), f"{ago} · {timeline}"
 
 
 def render_inventory(data, t):
-    """Executive view of the estate: totals and a row per server when few. Displays, never judges."""
+    """Executive view of the estate. Displays, never judges.
+
+    Only facts true for the whole system are added up (servers, version, data, last timeline change);
+    hardware is per server, since 3 servers of 1 core are not "3 cores" (Hasan, hc128): a card per
+    server when few, otherwise the range per server and the fullest data disk.
+    """
     nodes = data["nodes"]
     known = [n for n in nodes if n["server_version"] is not None]
     hosts = [n for n in nodes if n["logical_cpu_count"] is not None or n["memory_total_bytes"] is not None]
     disks = {n["target_id"]: d for n in nodes if (d := data_disk(n, data["storage"])) is not None}
     total = len(nodes)
+    few = len(nodes) <= INVENTORY_TABLE_LIMIT
 
     def partial(count):
         return t["inv_partial"].format(known=count, total=total) if total and count < total else ""
@@ -1531,29 +1567,26 @@ def render_inventory(data, t):
         items.append((t["inv_servers"], str(total), roles))
         versions = sorted({short_version(n["server_version"]) for n in known})
         items.append((t["inv_version"], ", ".join(versions) or t["inv_unknown"], partial(len(known))))
-        if hosts:
-            cores = sum(n["logical_cpu_count"] or 0 for n in hosts)
-            memory = sum(n["memory_total_bytes"] or 0 for n in hosts)
-            items.append((t["inv_cpu"], t["inv_cores"].format(n=cores), partial(len(hosts))))
-            items.append((t["inv_memory"], fmt_bytes(memory), partial(len(hosts))))
     failover = failover_item(data, t)
     if failover:
         items.append(failover)
     if data["databases"]:
         size = sum(d["database_size_bytes"] or 0 for d in data["databases"])
         items.append((t["inv_data"], fmt_bytes(size), t["inv_databases"].format(n=len(data["databases"]))))
-    # Data disks when known: other mounts (/boot, backups) would distort the ratio.
-    disk_rows = list(disks.values()) or data["storage"]
-    if disk_rows:
-        used = sum(s_["used_bytes"] or 0 for s_ in disk_rows)
-        size = sum(s_["total_bytes"] or 0 for s_ in disk_rows)
-        disk_nodes = len({s_["target_id"] for s_ in disk_rows})
-        available = (sum(s_["available_bytes"] for s_ in disk_rows)
-                     if all(s_.get("available_bytes") is not None for s_ in disk_rows) else None)
-        share = usage_percent(used, available, size)
-        pct = t["inv_full"].format(p=t["percent"].format(n=round(share))) if share is not None else ""
-        items.append((t["inv_data_disk"] if disks else t["inv_disk"], fmt_used_of(used, size),
-                      " · ".join(x for x in (pct, partial(disk_nodes)) if x)))
+    if not few:
+        cores = sorted(n["logical_cpu_count"] for n in hosts if n["logical_cpu_count"])
+        memory = sorted(n["memory_total_bytes"] for n in hosts if n["memory_total_bytes"])
+        if cores:
+            items.append((t["inv_cpu"], t["inv_cores"].format(n=span(cores, str)),
+                          " · ".join(x for x in (t["inv_per_server"], partial(len(cores))) if x)))
+        if memory:
+            items.append((t["inv_memory"], span(memory, fmt_bytes),
+                          " · ".join(x for x in (t["inv_per_server"], partial(len(memory))) if x)))
+        if disks:
+            fullest = max(disks.items(), key=lambda item: disk_percent(item[1]))
+            name = next(n["name"] for n in nodes if n["target_id"] == fullest[0])
+            items.append((t["inv_fullest_disk"], t["percent"].format(n=f"{disk_percent(fullest[1]):g}"),
+                          " · ".join(x for x in (name, partial(len(disks))) if x)))
     if not items:
         return ""
 
@@ -1561,19 +1594,30 @@ def render_inventory(data, t):
              + "".join(f'<div><div class="l">{e(label)}</div><div class="v">{e(value)}</div>'
                        f'<div class="s">{e(sub)}</div></div>' for label, value, sub in items)
              + "</div>"]
-    shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
-             or n in hosts]
-    if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
-        rows = [[e(n["name"]), e(role_of(n, t)), or_unknown(os_text(n), t),
-                 or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else "", t),
-                 or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t),
-                 disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
-        parts.append(table([t["inv_servers"], t["inv_role"], t["os"], t["inv_cpu"], t["inv_memory"],
-                            t["inv_data_disk"]], rows, numeric=(3, 4)))
+    shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks or n in hosts]
+    if shown and few:
+        cards = []
+        for n in nodes:
+            facts = [(t["os"], or_unknown(os_text(n), t)),
+                     (t["inv_cpu"], or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"])
+                                               if n["logical_cpu_count"] else "", t)),
+                     (t["inv_memory"], or_unknown(fmt_bytes(n["memory_total_bytes"])
+                                                  if n["memory_total_bytes"] else "", t)),
+                     (t["inv_data_disk"], disk_cell(disks.get(n["target_id"]), disk_limits(data), t))]
+            cards.append(f'<div class="srv"><div class="h"><b>{e(n["name"])}</b>'
+                         f'<span class="note">{e(role_of(n, t))}</span></div>'
+                         + "".join(f'<div class="f"><span class="l">{e(label)}</span>{value}</div>'
+                                   for label, value in facts) + "</div>")
+        parts.append(f'<div class="servers">{"".join(cards)}</div>')
     elif shown:
         parts.append(f'<p class="note">{e(t["inv_large_note"])}</p>')
-
     return "".join(parts)
+
+
+def span(values, fmt):
+    """'8' when every server has the same, '4–16' otherwise."""
+    low, high = fmt(values[0]), fmt(values[-1])
+    return low if low == high else f"{low}–{high}"
 
 
 def render_impact_chart(data, lang, t):
@@ -1701,6 +1745,7 @@ def render_main_problems(data, lang, t):
         meaning = first_sentence(rule_text(data, result["rule_id"], lang, "MEANING"))
         items.append(f'<li>{badge(worst, t["severity"].get(worst, worst))}<b>{e(name)}</b>'
                      f'<span class="rule">{e(result["rule_key"])}</span>'
+                     f'<span class="note"> · {e(where_text(findings, t))}</span>'
                      f'<div class="facts">{e(meaning)}</div></li>')
     return f"<h2>{e(t['problems_title'])}</h2>" + (
         f'<ul class="lines">{"".join(items)}</ul><p class="note">{e(t["exec_problems_hint"])}</p>'
@@ -1735,9 +1780,12 @@ def unassessed_groups(data, lang, t):
     for r in data["results"]:
         if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED") and r.get("unassessed"):
             # Judged on some servers only: the others, with the full way to allow them, are said here.
-            cause = unassessed_line(r, t)
-            groups.setdefault(("partial", cause), {"cause": cause, "action": "", "rules": [], "source": None})[
-                "rules"].append(rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]))
+            cause = unassessed_line(r, t, short=True)
+            codes = dict.fromkeys(u["reason_code"] for u in r["unassessed"])
+            detail = " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
+            groups.setdefault(("partial", cause), {"cause": cause, "detail": detail, "action": "", "rules": [],
+                                                   "source": None})["rules"].append(
+                rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]))
             continue
         if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED", "NOT_APPLICABLE"):
             continue
@@ -1754,10 +1802,11 @@ def unassessed_groups(data, lang, t):
             offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
             action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
         else:
-            cause = explain_reason(r.get("reason"), data, t) or name
+            cause = explain_reason(r.get("reason"), data, t, short=True) or name
             key = ("cause", cause)                 # the same missing source is one item
             action = ""
         group = groups.setdefault(key, {"cause": cause, "action": action, "rules": [],
+                                        "detail": "" if failed else reason_detail(r.get("reason"), data, t),
                                         "source": match.group("source") if failed else None})
         group["rules"].append(name)
     # Settings the configuration recommendations could not cover for lack of server data.
@@ -1793,6 +1842,8 @@ def render_unassessed(data, lang, t):
     for g in groups:
         affected = ", ".join(g["rules"])
         item = f"<b>{e(g['cause'])}</b>"
+        if g.get("detail"):
+            item += f'<div class="detail">{e(g["detail"])}</div>'
         if g["rules"] != [g["cause"]]:
             item += f'<div class="facts">{e(t["unassessed_affects"])}: {e(affected)}</div>'
         if g["action"]:
@@ -1835,7 +1886,7 @@ def measures_line(data, counts, t):
         lines.append(line)
     if counts["not_applicable"]:
         lines.append(e(t["applicable_line"].format(n=counts["not_applicable"], defined=counts["defined"])))
-    return '<p class="note">' + "<br>".join(lines) + "</p>"
+    return '<div class="measures">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
 
 
 def render_executive(data, lang, t):
@@ -1861,15 +1912,18 @@ def where_text(findings, t):
         node = details.get("node") or details.get("node_name")
         if node:
             nodes.add(node)
-        if details.get("database_name"):
-            databases.add(details["database_name"])
+        database = details.get("database_name") or details.get("database")
+        if database:
+            databases.add(database)
     parts = []
     for found, key in ((nodes, "where_nodes"), (databases, "where_databases")):
         if len(found) == 1:
             parts.append(next(iter(found)))
         elif found:
             parts.append(t[key].format(n=len(found)))
-    return " · ".join(parts) or t["where_items"].format(n=len(findings))
+    if len(findings) > max(len(nodes), len(databases)):     # several per place, or no place known
+        parts.append(t["where_items"].format(n=len(findings)))
+    return " · ".join(parts)
 
 
 def next_step(data, rule_id, lang, findings):
@@ -1890,7 +1944,8 @@ def render_review_order(data, lang, t):
             continue
         name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
         rows.append([str(len(rows) + 1), f'<b>{e(name)}</b> <span class="rule">{e(result["rule_key"])}</span>',
-                     badge(worst, t["severity"].get(worst, worst)), e(where_text(findings, t)),
+                     badge(worst, t["severity"].get(worst, worst)),
+                     f'<span class="nowrap">{e(where_text(findings, t))}</span>',
                      e(next_step(data, result["rule_id"], lang, findings))])
     if not rows and not advice:
         return f"<h2>{e(t['review_title'])}</h2><p class=\"note\">{e(t['no_problems'])}</p>"
