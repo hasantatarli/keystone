@@ -383,7 +383,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = report.render_html(data, "tr")
         executive = executive[:executive.index(TECH_PANEL)]
         self.assertNotIn('<div class="l">Bulgu</div>', executive)
-        self.assertIn("2 bulgu", executive)                         # on the problem card
+        self.assertIn("2 etkilenen öğe", executive)                         # on the problem card
 
     def test_affected_areas_name_the_problem(self):
         page = self.render(self.make_check(), "tr")
@@ -391,7 +391,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         impact = section(executive, "Etkilenen alanlar")
         # PG-TRAN-001 affects Performance and Capacity: the same name in both rows.
         self.assertEqual(impact.count("Uzun süre boşta bekleyen transaction"), 2)
-        self.assertNotIn("1 bulgu", impact)
+        self.assertNotIn("1 etkilenen öğe", impact)
         self.assertIn("Aynı sorun birden fazla alanı etkileyebilir", impact)
 
     def test_os_is_shown_and_postgres_build_string_only_on_hover(self):
@@ -805,7 +805,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = report.render_html(data, "tr")
         executive = page[:page.index(ENG_PANEL)]
         self.assertNotIn("Öneriden farklı ayar", section(executive, "Öne çıkan sorunlar"))
-        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', page[page.index(TECH_PANEL):])
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 etkilenen öğe, bilgi)', page[page.index(TECH_PANEL):])
         self.assertIn("1 bilgi notu (öneri niteliğinde) Bulgular ve Kanıt&#x27;ta.", engineering(page))
         self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
         self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
@@ -845,7 +845,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         # One item per rule: the problem with its severity first, then what was fine.
         # One bullet per rule; severity in the bullet colour and in words, all texts aligned.
         self.assertIn('<li class="r-warning"><b>Uzun süre boşta bekleyen transaction</b> '
-                      '(1 bulgu, uyarı): Bazı session', topics)
+                      '(1 etkilenen öğe, uyarı): Bazı session', topics)
         self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         self.assertIn("Eşik: Uyarı ≥ 5 dakika", technical)       # on the finding, written once
         # Same words as the rest of the report: the severity, not "attention".
@@ -1553,3 +1553,11 @@ class ReportStepTwoTests(unittest.TestCase):
         self.assertNotIn("SSL?", html)                 # no finding, no decision
         self.assertEqual(html.count("<li>"), 1)        # PUBLIC schema: the DBA's own work
         self.assertEqual(report.render_decisions({**data, "findings": []}, "tr", self.t), "")
+
+    def test_all_collected_yet_not_assessed_is_explained(self):
+        data = {"results": [{"rule_id": 1, "rule_name": "Cache hit", "outcome": "INSUFFICIENT_EVIDENCE"}],
+                "rule_texts": {}, "collections": [{"status": "SUCCESS"}]}
+        self.assertIn("Veri toplama işlemlerinin tamamı başarıyla çalıştı",
+                      report.render_unassessed_short(data, "tr", self.t))
+        data["collections"] = [{"status": "FAILED"}]
+        self.assertNotIn("tamamı başarıyla", report.render_unassessed_short(data, "tr", self.t))

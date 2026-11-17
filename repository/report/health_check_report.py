@@ -54,12 +54,13 @@ TEXTS = {
         "exec_unassessed": "{n} kontrol değerlendirilemedi: {names}.",
         "exec_unassessed_hint": "Nedenleri ve nasıl açılacakları Mühendislik Görünümü'nde.",
         "and_more": "{n} kontrol daha",
+        "exec_collected_but": "Veri toplama işlemlerinin tamamı başarıyla çalıştı; bu kontroller için gereken yetki, gözlem süresi ya da iş yükü henüz yeterli değil.",
         "decisions_title": "Sizden beklenen kararlar", "decision_owner": "Karar",
         "review_title": "Önerilen inceleme sırası",
         "review_note": "Sıra önem derecesine ve kural sırasına göredir; işletmenizin önceliğini bilmez (örneğin bir test sisteminde arşivleme gerekmeyebilir).",
         "review_cols": ["#", "Bulgu", "Önem", "Nerede", "Sonraki adım"],
         "review_advice": "{n} bilgi notu (öneri niteliğinde) Bulgular ve Kanıt'ta.",
-        "where_nodes": "{n} sunucu", "where_databases": "{n} veritabanı", "where_items": "{n} bulgu",
+        "where_nodes": "{n} sunucu", "where_databases": "{n} veritabanı", "where_items": "{n} etkilenen öğe",
         "missing_title": "Eksik kanıt",
         "missing_cols": ["Neden", "Etkilenen kontroller", "Gereken aksiyon", "Tür"],
         "missing_note": "Komutlar ve seçenekler Bulgular ve Kanıt sekmesinde, ilgili kontrolün altında.",
@@ -109,7 +110,7 @@ TEXTS = {
         "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
-        "findings_word": "bulgu",
+        "findings_word": "etkilenen öğe",
         "config_title": "Konfigürasyon önerileri",
         "config_starting_values": "Sunucu profili (iş yükü, sunucunun PostgreSQL'e ayrılmış olup olmadığı, disk tipi) tam girilmediği için önerilen değerler bir başlangıç noktasıdır: mevcut değerlerin neden seçildiği ve gerçek iş yükü doğrulanmadan uygulanmamalıdır.",
         "config_many_connections": "max_connections = {n}: work_mem önerisi bağlantı sayısına bölündüğü için çok küçük çıkıyor. Asıl kaldıraç bağlantı sayısıdır; uygulama önünde bir connection pooler (PgBouncer gibi) ile max_connections düşürülürse sorgulara daha fazla bellek kalır.",
@@ -161,7 +162,7 @@ TEXTS = {
                           "no_recommendation": "Bu sürüm için öneri yok."},
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
-        "topic_na": "Uygulanmaz", "advice_word": "bilgi notu",
+        "topic_na": "Uygulanmaz", "advice_word": "etkilenen öğe, bilgi",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -375,12 +376,13 @@ TEXTS = {
         "exec_unassessed": "{n} checks could not be assessed: {names}.",
         "exec_unassessed_hint": "Why, and how to allow them, in the Engineering View.",
         "and_more": "{n} more",
+        "exec_collected_but": "Every collection ran successfully; what these checks need (a privilege, enough observation time, or workload) is not there yet.",
         "decisions_title": "Decisions expected from you", "decision_owner": "Decision",
         "review_title": "Suggested review order",
         "review_note": "The order follows severity and rule order; it does not know your business priority (a test system, for example, may not need archiving).",
         "review_cols": ["#", "Finding", "Severity", "Where", "Next step"],
         "review_advice": "{n} information notes (recommendations) in Findings and Evidence.",
-        "where_nodes": "{n} servers", "where_databases": "{n} databases", "where_items": "{n} findings",
+        "where_nodes": "{n} servers", "where_databases": "{n} databases", "where_items": "{n} affected items",
         "missing_title": "Missing evidence",
         "missing_cols": ["Cause", "Checks affected", "What to do", "Kind"],
         "missing_note": "Commands and options are in Findings and Evidence, under the check concerned.",
@@ -430,7 +432,7 @@ TEXTS = {
         "data_mount": "data",
         "impact_title": "Affected areas",
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
-        "findings_word": "finding(s)",
+        "findings_word": "affected item(s)",
         "config_title": "Configuration recommendations",
         "config_starting_values": "The server profile (workload, whether the server is dedicated to PostgreSQL, disk type) is not complete, so the recommended values are a starting point: do not apply them before checking why the current values were chosen and what the real workload is.",
         "config_many_connections": "max_connections = {n}: the work_mem recommendation comes out very small because it is divided by the connections. The lever is the number of connections; with a connection pooler (PgBouncer, say) in front of the application, a lower max_connections leaves more memory for queries.",
@@ -482,7 +484,7 @@ TEXTS = {
                           "no_recommendation": "No recommendation for this version."},
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
-        "topic_na": "Not applicable", "advice_word": "note(s)",
+        "topic_na": "Not applicable", "advice_word": "affected item(s), information",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -1791,6 +1793,9 @@ def render_unassessed_short(data, lang, t):
     if unknown:
         text = " ".join(x for x in (text, t["unknown_replica_cause"].format(
             n=len(unknown), list=", ".join(r["client_addr"] for r in unknown))) if x)
+    collections = data.get("collections") or []
+    if names and collections and all(c["status"] in ("SUCCESS", "PARTIAL_SUCCESS") for c in collections):
+        text += " " + t["exec_collected_but"]          # 39/39 collected, yet 5 not assessed: why
     return (f'<div class="card unknown"><h3>{badge("unknown", t["topic_unknown"])}{e(t["unassessed_title"])}</h3>'
             f'<div class="lead">{e(text)} {e(t["exec_unassessed_hint"])}</div></div>')
 
