@@ -46,9 +46,10 @@ TEXTS = {
         "target": "Sistem", "date": "Tarih", "check_no": "Kontrol no", "requested_by": "Talep eden",
         "evidence": "Kanıt", "evidence_offline": "offline toplandı (müşteri tarafında salt okunur script'lerle), içe aktarıldı {imported}",
         "part_exec": "Yönetici Özeti", "part_eng": "Mühendislik Görünümü", "part_tech": "Bulgular ve Kanıt",
-        "coverage_line": "Değerlendirme kapsamı: {total} uygulanabilir kontrolden {evaluated} tanesi değerlendirildi",
-        "collection_line": "Veri toplama: {ok} / {total} başarılı",
-        "applicable_line": "Tanımlı {defined} kontrolden {n} tanesi bu sisteme uygulanmaz.",
+        "m_coverage": "Değerlendirme kapsamı", "m_coverage_sub": "değerlendirilen / uygulanabilir",
+        "m_collection": "Veri toplama", "m_collection_sub": "başarılı / toplam",
+        "m_applicable": "Uygulanabilir kontrol", "m_applicable_sub": "uygulanabilir / tanımlı",
+        "m_not_applicable": "Uygulanmaz", "m_not_applicable_sub": "bu sisteme uymayan kontrol",
         "exec_problems_hint": "Ne yapılacağı Mühendislik Görünümü'nde, kanıtı ve ayrıntısı Bulgular ve Kanıt'ta.",
         "exec_unassessed": "{n} kontrol değerlendirilemedi: {names}.",
         "exec_unassessed_hint": "Nedenleri ve nasıl açılacakları Mühendislik Görünümü'nde.",
@@ -351,9 +352,10 @@ TEXTS = {
         "target": "System", "date": "Date", "check_no": "Check no", "requested_by": "Requested by",
         "evidence": "Evidence", "evidence_offline": "collected offline (read-only scripts on the customer side), imported {imported}",
         "part_exec": "Executive Summary", "part_eng": "Engineering View", "part_tech": "Findings and Evidence",
-        "coverage_line": "Assessment coverage: {evaluated} of {total} applicable checks assessed",
-        "collection_line": "Data collection: {ok} of {total} succeeded",
-        "applicable_line": "{n} of {defined} defined checks do not apply to this system.",
+        "m_coverage": "Assessment coverage", "m_coverage_sub": "assessed / applicable",
+        "m_collection": "Data collection", "m_collection_sub": "succeeded / total",
+        "m_applicable": "Applicable checks", "m_applicable_sub": "applicable / defined",
+        "m_not_applicable": "Not applicable", "m_not_applicable_sub": "checks that do not fit this system",
         "exec_problems_hint": "What to do is in the Engineering View; evidence and details in Findings and Evidence.",
         "exec_unassessed": "{n} checks could not be assessed: {names}.",
         "exec_unassessed_hint": "Why, and how to allow them, in the Engineering View.",
@@ -1280,8 +1282,8 @@ h3{font-size:15px;margin:20px 0 8px}
 .tile .l{color:var(--muted);font-size:13px}
 .note{color:var(--muted);font-size:14px}
 .inv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0}
-.measures{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:14px;color:var(--muted)}
-.measures>div{padding:2px 0}
+.tiles.measures .n{font-size:20px}
+.tile .s{font-size:12px;color:var(--muted);margin-top:2px}
 .servers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0}
 .srv{border:1px solid var(--line);border-radius:8px;padding:10px 14px}
 .srv .h{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px}
@@ -1871,22 +1873,26 @@ def shorten(text, limit=140):
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-def measures_line(data, counts, t):
-    """Coverage and collection as two measures (ADR-0021): all collected does not mean all assessed."""
+def tile(number, label, sub=""):
+    return (f'<div class="tile"><div class="n">{e(number)}</div><div class="l">{e(label)}</div>'
+            + (f'<div class="s">{e(sub)}</div>' if sub else "") + "</div>")
+
+
+def measure_tiles(data, counts, t):
+    """Coverage, collection and applicability as tiles (ADR-0021, Hasan): all collected is not all assessed."""
     collections = data["collections"]
     ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
-    lines = [e(t["coverage_line"].format(**counts))]
+    errors = sorted({first_line(c["status_message"]) for c in collections
+                     if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
+    collection_sub = (f"{t['collection_errors']}: {shorten(errors[0])}"
+                      + (f" {t['more_errors'].format(n=len(errors) - 1)}" if len(errors) > 1 else "")
+                      if errors else t["m_collection_sub"])
+    tiles = [tile(f'{counts["evaluated"]} / {counts["total"]}', t["m_coverage"], t["m_coverage_sub"])]
     if collections:
-        line = e(t["collection_line"].format(ok=ok, total=len(collections)))
-        errors = sorted({first_line(c["status_message"]) for c in collections
-                         if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
-        if errors:
-            line += (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
-                     + (f" {e(t['more_errors'].format(n=len(errors) - 1))}" if len(errors) > 1 else ""))
-        lines.append(line)
-    if counts["not_applicable"]:
-        lines.append(e(t["applicable_line"].format(n=counts["not_applicable"], defined=counts["defined"])))
-    return '<div class="measures">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
+        tiles.append(tile(f"{ok} / {len(collections)}", t["m_collection"], collection_sub))
+    tiles.append(tile(f'{counts["total"]} / {counts["defined"]}', t["m_applicable"], t["m_applicable_sub"]))
+    tiles.append(tile(str(counts["not_applicable"]), t["m_not_applicable"], t["m_not_applicable_sub"]))
+    return '<div class="tiles measures">' + "".join(tiles) + "</div>"
 
 
 def render_executive(data, lang, t):
@@ -1897,10 +1903,8 @@ def render_executive(data, lang, t):
             f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}'
             + (f' <span class="sub">{e(t["verdict_unassessed"].format(n=counts["not_assessed"]))}</span>'
                if counts["not_assessed"] and verdict != "none" else "") + "</div>"
-            + measures_line(data, counts, t) + '<div class="tiles">'
-            + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
-                      for n, label in tiles)
-            + "</div>" + render_main_problems(data, lang, t) + render_unassessed_short(data, lang, t)
+            + '<div class="tiles">' + "".join(tile(str(n), label) for n, label in tiles) + "</div>"
+            + measure_tiles(data, counts, t) + render_main_problems(data, lang, t) + render_unassessed_short(data, lang, t)
             + render_impact_chart(data, lang, t) + render_inventory(data, t))
 
 

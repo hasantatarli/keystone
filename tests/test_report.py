@@ -169,8 +169,9 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        self.assertIn("Veri toplama: 30 / 39 başarılı", executive)  # + nodes without connections
-        self.assertIn("connection refused", executive)
+        # + nodes without connections; the error in place of "succeeded / total"
+        self.assertRegex(executive, r'<div class="n">30 / 39</div><div class="l">Veri toplama</div>'
+                                    r'<div class="s">Hata: [^<]*connection refused')
 
     def test_checks_not_assessed_get_attention_without_being_findings(self):
         # Hasan 2026-10-30: unknown is worth attention, but it is not a problem found.
@@ -504,8 +505,11 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = report.render_html(data, "tr")
         executive = page[:page.index(ENG_PANEL)]
         defined = len(data["results"])
-        self.assertIn(f"Tanımlı {defined} kontrolden 2 tanesi bu sisteme uygulanmaz.", executive)
-        self.assertIn(f"Değerlendirme kapsamı: {defined - 2} uygulanabilir kontrolden", executive)
+        # Hasan: the measures as tiles, beside the counts.
+        self.assertIn(f'<div class="n">{defined - 2} / {defined}</div><div class="l">Uygulanabilir kontrol</div>',
+                      executive)
+        self.assertIn('<div class="n">2</div><div class="l">Uygulanmaz</div>', executive)
+        self.assertRegex(executive, rf'<div class="n">\d+ / {defined - 2}</div><div class="l">Değerlendirme kapsamı</div>')
         self.assertIn('<li class="r-na">Replikasyon gecikmesi (uygulanmaz): Sistemde replica yok.</li>',
                       page[page.index(TECH_PANEL):])
         card = engineering(page)
