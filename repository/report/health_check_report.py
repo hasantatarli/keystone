@@ -54,15 +54,28 @@ TEXTS = {
         "exec_unassessed": "{n} kontrol değerlendirilemedi: {names}.",
         "exec_unassessed_hint": "Nedenleri ve nasıl açılacakları Mühendislik Görünümü'nde.",
         "and_more": "{n} kontrol daha",
+        "exec_collected_but": "Veri toplama işlemlerinin tamamı başarıyla çalıştı; bu kontroller için gereken yetki, gözlem süresi ya da iş yükü henüz yeterli değil.",
+        "decisions_title": "Sizden beklenen kararlar", "decision_owner": "Karar",
         "review_title": "Önerilen inceleme sırası",
         "review_note": "Sıra önem derecesine ve kural sırasına göredir; işletmenizin önceliğini bilmez (örneğin bir test sisteminde arşivleme gerekmeyebilir).",
         "review_cols": ["#", "Bulgu", "Önem", "Nerede", "Sonraki adım"],
         "review_advice": "{n} bilgi notu (öneri niteliğinde) Bulgular ve Kanıt'ta.",
-        "where_nodes": "{n} sunucu", "where_databases": "{n} veritabanı", "where_items": "{n} bulgu",
+        "where_nodes": "{n} sunucu", "where_databases": "{n} veritabanı", "where_items": "{n} etkilenen öğe",
         "missing_title": "Eksik kanıt",
+        "missing_cols": ["Neden", "Etkilenen kontroller", "Gereken aksiyon", "Tür"],
+        "missing_note": "Komutlar ve seçenekler Bulgular ve Kanıt sekmesinde, ilgili kontrolün altında.",
+        "missing_kind": {"permission": "İzin / ayar gerekli", "time": "Zaman gerekli",
+                         "workload": "İş yükü gerekli", "collection": "Veri toplanamadı"},
+        "missing_action": {
+            "sequence_privilege_missing": "İzleme kullanıcısına bu sequence'ler için SELECT yetkisi verin.",
+            "wal_location_unreadable": "SSH kullanıcısının pg_wal konumunu okumasına izin verin (önerilen: tek komutluk sudo kuralı).",
+            "hba_not_readable": "Keystone'un rolüne pg_hba_file_rules'u okuma yetkisi verin.",
+            "bloat_not_measurable": "pgstattuple kurun ya da rolün tablo istatistiklerini görmesine izin verin.",
+            "time": "Aksiyon gerekmez; Keystone düzenli topladıkça değerlendirilir.",
+            "workload": "Aksiyon gerekmez; sistem ölçülecek kadar yük almıyor.",
+            "collection": "Eksik veriyi sağlayın; ayrıntı Bulgular ve Kanıt'ta."},
         "reason_short": {"wal_location_unreadable": "pg_wal'ın konumu okunamadı",
                          "hba_not_readable": "pg_hba kuralları okunamadı (yetki gerekli)"},
-        "how_in_eng": "Ayrıntısı Mühendislik Görünümü'nde (Eksik kanıt).",
         "results_by_area": "Alanlara göre kontroller",
         "verdict_critical": "Acil müdahale gerektiren sorunlar var.",
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
@@ -97,13 +110,16 @@ TEXTS = {
         "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
-        "findings_word": "bulgu",
+        "findings_word": "etkilenen öğe",
         "config_title": "Konfigürasyon önerileri",
         "config_starting_values": "Sunucu profili (iş yükü, sunucunun PostgreSQL'e ayrılmış olup olmadığı, disk tipi) tam girilmediği için önerilen değerler bir başlangıç noktasıdır: mevcut değerlerin neden seçildiği ve gerçek iş yükü doğrulanmadan uygulanmamalıdır.",
         "config_many_connections": "max_connections = {n}: work_mem önerisi bağlantı sayısına bölündüğü için çok küçük çıkıyor. Asıl kaldıraç bağlantı sayısıdır; uygulama önünde bir connection pooler (PgBouncer gibi) ile max_connections düşürülürse sorgulara daha fazla bellek kalır.",
-        "config_parts": {"DEVIATES": "{n} ayar önerilenden farklı", "NOT_ASSESSED": "{n} ayar değerlendirilemedi",
-                         "FITS": "{n} ayar uygun", "NOT_APPLICABLE": "{n} ayar uygulanmaz"},
-        "config_line": "{n} ayar bu sunucu için önerilen değerlerden farklı; ayrıntı Mühendislik Görünümü'nde.",
+        "config_parts": {"DEVIATES": "{n} ayar kabul edilebilir aralığın dışında",
+                         "NOT_ASSESSED": "{n} ayar değerlendirilemedi",
+                         "IN_RANGE": "{n} ayar kabul edilebilir aralıkta, iyileştirme önerisi var",
+                         "AT_RECOMMENDED": "{n} ayar önerilen değerde", "NOT_APPLICABLE": "{n} ayar uygulanmaz"},
+        "config_in_range_note": "Bu ayarlar kabul edilebilir aralıkta; önerilen değer bir iyileştirmedir, zorunlu değildir. Komutlar yalnızca aralık dışındaki ayarlar için yazıldı.",
+        "config_line": "{n} ayar kabul edilebilir aralığın dışında; ayrıntı Mühendislik Görünümü'nde.",
         "config_line_na": "{n} ayar sunucu bilgisi (SSH) olmadığı için değerlendirilemedi.",
         "config_settings": "Konfigürasyon önerileri ({n} ayar)",
         "config_inputs": "Hesap en küçük sunucuya göre yapıldı: {node} ({facts}).",
@@ -146,7 +162,7 @@ TEXTS = {
                           "no_recommendation": "Bu sürüm için öneri yok."},
         "topics_title": "Alanlara göre durum",
         "topic_ok": "Sorun bulunmadı", "topic_attention": "Uyarı", "topic_critical": "Kritik",
-        "topic_na": "Uygulanmaz", "advice_word": "bilgi notu",
+        "topic_na": "Uygulanmaz", "advice_word": "etkilenen öğe, bilgi",
         "topic_unknown": "Değerlendirilemedi", "topic_partial": "Kısmen değerlendirildi",
         "problems_title": "Öne çıkan sorunlar", "no_problems": "Öne çıkan bir sorun yok.",
         "open_hint": "Olası sebepler ve yapılması gerekenler için soruna tıklayın.",
@@ -360,15 +376,28 @@ TEXTS = {
         "exec_unassessed": "{n} checks could not be assessed: {names}.",
         "exec_unassessed_hint": "Why, and how to allow them, in the Engineering View.",
         "and_more": "{n} more",
+        "exec_collected_but": "Every collection ran successfully; what these checks need (a privilege, enough observation time, or workload) is not there yet.",
+        "decisions_title": "Decisions expected from you", "decision_owner": "Decision",
         "review_title": "Suggested review order",
         "review_note": "The order follows severity and rule order; it does not know your business priority (a test system, for example, may not need archiving).",
         "review_cols": ["#", "Finding", "Severity", "Where", "Next step"],
         "review_advice": "{n} information notes (recommendations) in Findings and Evidence.",
-        "where_nodes": "{n} servers", "where_databases": "{n} databases", "where_items": "{n} findings",
+        "where_nodes": "{n} servers", "where_databases": "{n} databases", "where_items": "{n} affected items",
         "missing_title": "Missing evidence",
+        "missing_cols": ["Cause", "Checks affected", "What to do", "Kind"],
+        "missing_note": "Commands and options are in Findings and Evidence, under the check concerned.",
+        "missing_kind": {"permission": "Needs a permission or setting", "time": "Needs time",
+                         "workload": "Needs workload", "collection": "Not collected"},
+        "missing_action": {
+            "sequence_privilege_missing": "Grant the monitoring user SELECT on these sequences.",
+            "wal_location_unreadable": "Allow the SSH user to read where pg_wal is (recommended: a one-command sudo rule).",
+            "hba_not_readable": "Allow Keystone's role to read pg_hba_file_rules.",
+            "bloat_not_measurable": "Install pgstattuple or let the role see table statistics.",
+            "time": "No action; assessed as Keystone keeps collecting.",
+            "workload": "No action; the system is too lightly used to measure.",
+            "collection": "Provide the missing data; details in Findings and Evidence."},
         "reason_short": {"wal_location_unreadable": "pg_wal location not readable",
                          "hba_not_readable": "pg_hba rules not readable (privilege needed)"},
-        "how_in_eng": "Details in the Engineering View (missing evidence).",
         "results_by_area": "Checks by area",
         "verdict_critical": "There are problems that need immediate action.",
         "verdict_warning": "There are problems that need attention.",
@@ -403,13 +432,16 @@ TEXTS = {
         "data_mount": "data",
         "impact_title": "Affected areas",
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
-        "findings_word": "finding(s)",
+        "findings_word": "affected item(s)",
         "config_title": "Configuration recommendations",
         "config_starting_values": "The server profile (workload, whether the server is dedicated to PostgreSQL, disk type) is not complete, so the recommended values are a starting point: do not apply them before checking why the current values were chosen and what the real workload is.",
         "config_many_connections": "max_connections = {n}: the work_mem recommendation comes out very small because it is divided by the connections. The lever is the number of connections; with a connection pooler (PgBouncer, say) in front of the application, a lower max_connections leaves more memory for queries.",
-        "config_parts": {"DEVIATES": "{n} setting(s) differ from the recommendation",
-                         "NOT_ASSESSED": "{n} not assessed", "FITS": "{n} fit", "NOT_APPLICABLE": "{n} not applicable"},
-        "config_line": "{n} setting(s) differ from the values recommended for this server; details in the Engineering View.",
+        "config_parts": {"DEVIATES": "{n} setting(s) outside the acceptable range",
+                         "NOT_ASSESSED": "{n} not assessed",
+                         "IN_RANGE": "{n} within the acceptable range, improvement suggested",
+                         "AT_RECOMMENDED": "{n} at the recommended value", "NOT_APPLICABLE": "{n} not applicable"},
+        "config_in_range_note": "These settings are within the acceptable range; the recommended value is an improvement, not a must. Commands are written only for settings outside the range.",
+        "config_line": "{n} setting(s) outside the acceptable range; details in the Engineering View.",
         "config_line_na": "{n} setting(s) could not be assessed without server data (SSH).",
         "config_settings": "Configuration recommendations ({n} settings)",
         "config_inputs": "Calculated for the smallest server: {node} ({facts}).",
@@ -452,7 +484,7 @@ TEXTS = {
                           "no_recommendation": "No recommendation for this version."},
         "topics_title": "Status by area",
         "topic_ok": "No problems found", "topic_attention": "Warning", "topic_critical": "Critical",
-        "topic_na": "Not applicable", "advice_word": "note(s)",
+        "topic_na": "Not applicable", "advice_word": "affected item(s), information",
         "topic_unknown": "Not assessed", "topic_partial": "Partly assessed",
         "problems_title": "Main problems", "no_problems": "No problems to highlight.",
         "open_hint": "Click a problem for likely causes and what to do.",
@@ -1044,24 +1076,6 @@ def nodes_unassessed_text(reasons, data, t, short=False):
     if every:
         return t["nodes_unassessed_all"].format(nodes=items)
     return t["reason_codes"]["nodes_unassessed"].format(nodes=items)
-
-
-def reason_detail(reason, data, t):
-    """The full way to allow a check, when its short form leaves it out (Engineering View only).
-
-    Servers not assessed: the full text of each reason once, not the sentence with the servers again.
-    """
-    coded = REASON_CODE_PATTERN.match(reason or "")
-    if coded and coded.group("code") == "nodes_unassessed":
-        try:
-            codes = dict.fromkeys(json.loads(coded.group("values") or "{}").get("reasons", {}).values())
-        except ValueError:
-            return ""
-        return " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
-    if coded:
-        full = explain_reason(reason, data, t)
-        return full if full != explain_reason(reason, data, t, short=True) else ""
-    return ""
 
 
 def explain_reason(reason, data, t, short=False):
@@ -1661,7 +1675,7 @@ def config_topic_item(data, t):
     if counts["NOT_ASSESSED"]:
         texts.append(t["config_line_na"].format(n=counts["NOT_ASSESSED"]))
     if not texts:
-        return ("ok", e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE"))))
+        return ("ok", e(config_summary(counts, t, ("IN_RANGE", "AT_RECOMMENDED", "NOT_APPLICABLE"))))
     cls = "info" if counts["DEVIATES"] else "unknown"
     return (cls, f"<b>{e(t['config_title'])}</b>: " + e(" · ".join(texts)))
 
@@ -1690,9 +1704,7 @@ def render_topics(data, lang, t):
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
                 label = t["severity"].get(severity, severity).lower()
-                partial = unassessed_line(r, t, short=True)
-                if partial and partial != unassessed_line(r, t):
-                    partial += " " + t["how_in_eng"]
+                partial = unassessed_line(r, t)
                 items.append((severity.lower(),
                               f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
                               + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
@@ -1706,13 +1718,10 @@ def render_topics(data, lang, t):
                 items.append(("na", f"{e(rule_name)} ({e(t['outcome']['NOT_APPLICABLE'].lower())})"
                               + (f": {e(reason)}" if reason else "")))
             else:
-                # The full way to allow it is in the Engineering View (missing evidence); written once.
-                reason = explain_reason(r.get("reason"), data, t, short=True)
-                more = (REASON_CODE_PATTERN.match(r.get("reason") or "") is not None
-                        and reason != explain_reason(r.get("reason"), data, t))
+                # The full way to allow it (commands, options) is written here, once (ADR-0021).
+                reason = explain_reason(r.get("reason"), data, t)
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
-                              + (f": {e(reason)}" if reason else "")
-                              + (f' <span class="facts">{e(t["how_in_eng"])}</span>' if more else "")))
+                              + (f": {e(reason)}" if reason else "")))
         opened = " open" if status in ("critical", "attention", "unknown", "partial") else ""
         rows.append(f'<details class="area"{opened}><summary><span class="name">{e(name)}</span>'
                     f'{badge(status, t["topic_" + status])}<span class="note">{len(items)}</span></summary>'
@@ -1757,6 +1766,21 @@ def render_main_problems(data, lang, t):
 EXEC_NAMES = 5                  # checks named in the executive summary; the rest counted
 
 
+def render_decisions(data, lang, t):
+    """Decisions a manager takes, from the rules that carry one (V067); only for rules with findings."""
+    items = []
+    for result, findings in findings_by_rule(data):
+        decision = rule_text(data, result["rule_id"], lang, "DECISION")
+        if not decision:
+            continue
+        name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
+        owner = rule_text(data, result["rule_id"], lang, "DECISION_OWNER")
+        items.append(f'<li><b>{e(name)}</b>'
+                     + (f'<span class="note"> · {e(t["decision_owner"])}: {e(owner)}</span>' if owner else "")
+                     + f'<div class="detail">{e(decision)}</div></li>')
+    return (f"<h2>{e(t['decisions_title'])}</h2><ul class=\"lines\">{''.join(items)}</ul>" if items else "")
+
+
 def render_unassessed_short(data, lang, t):
     """Executive: the checks not assessed in one sentence; why and how to allow them in the Engineering View."""
     names = [rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]) for r in data["results"]
@@ -1769,8 +1793,42 @@ def render_unassessed_short(data, lang, t):
     if unknown:
         text = " ".join(x for x in (text, t["unknown_replica_cause"].format(
             n=len(unknown), list=", ".join(r["client_addr"] for r in unknown))) if x)
+    collections = data.get("collections") or []
+    if names and collections and all(c["status"] in ("SUCCESS", "PARTIAL_SUCCESS") for c in collections):
+        text += " " + t["exec_collected_but"]          # 39/39 collected, yet 5 not assessed: why
     return (f'<div class="card unknown"><h3>{badge("unknown", t["topic_unknown"])}{e(t["unassessed_title"])}</h3>'
             f'<div class="lead">{e(text)} {e(t["exec_unassessed_hint"])}</div></div>')
+
+
+# Why a check could not be assessed, by kind (ADR-0021): what the customer can do, or that nothing is needed.
+MISSING_KIND = {"sequence_privilege_missing": "permission", "wal_location_unreadable": "permission",
+                "hba_not_readable": "permission", "bloat_not_measurable": "permission",
+                "statistics_too_young": "time", "too_few_checkpoints": "time", "period_unknown": "time",
+                "statistics_too_recent": "time", "too_little_activity": "workload"}
+KIND_ORDER = {"permission": 0, "collection": 1, "time": 2, "workload": 3}
+
+
+def reason_codes_of(reason):
+    """Codes behind a result's reason: its own, or each server's when servers were not assessed."""
+    coded = REASON_CODE_PATTERN.match(reason or "")
+    if not coded:
+        return []
+    if coded.group("code") == "nodes_unassessed":
+        try:
+            return list(dict.fromkeys(json.loads(coded.group("values") or "{}").get("reasons", {}).values()))
+        except ValueError:
+            return []
+    return [coded.group("code")]
+
+
+def kind_and_action(codes, t):
+    """The kind of missing evidence and the short step: a permission first, then collection, time, workload."""
+    kinds = sorted((MISSING_KIND.get(c, "collection") for c in codes), key=KIND_ORDER.get) or ["collection"]
+    kind = kinds[0]
+    if kind == "permission":
+        code = next(c for c in codes if MISSING_KIND.get(c) == "permission")
+        return kind, t["missing_action"][code]
+    return kind, t["missing_action"][kind]
 
 
 def unassessed_groups(data, lang, t):
@@ -1783,9 +1841,8 @@ def unassessed_groups(data, lang, t):
         if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED") and r.get("unassessed"):
             # Judged on some servers only: the others, with the full way to allow them, are said here.
             cause = unassessed_line(r, t, short=True)
-            codes = dict.fromkeys(u["reason_code"] for u in r["unassessed"])
-            detail = " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
-            groups.setdefault(("partial", cause), {"cause": cause, "detail": detail, "action": "", "rules": [],
+            kind, action = kind_and_action([u["reason_code"] for u in r["unassessed"]], t)
+            groups.setdefault(("partial", cause), {"cause": cause, "kind": kind, "action": action, "rules": [],
                                                    "source": None})["rules"].append(
                 rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]))
             continue
@@ -1803,12 +1860,12 @@ def unassessed_groups(data, lang, t):
             key = (targets, status)
             offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
             action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
+            kind = "collection"
         else:
             cause = explain_reason(r.get("reason"), data, t, short=True) or name
             key = ("cause", cause)                 # the same missing source is one item
-            action = ""
-        group = groups.setdefault(key, {"cause": cause, "action": action, "rules": [],
-                                        "detail": "" if failed else reason_detail(r.get("reason"), data, t),
+            kind, action = kind_and_action(reason_codes_of(r.get("reason")), t)
+        group = groups.setdefault(key, {"cause": cause, "kind": kind, "action": action, "rules": [],
                                         "source": match.group("source") if failed else None})
         group["rules"].append(name)
     # Settings the configuration recommendations could not cover for lack of server data.
@@ -1819,42 +1876,39 @@ def unassessed_groups(data, lang, t):
         host_group = next((g for g in groups.values() if g.get("source") == "PG_HOST_SNAPSHOT"), None)
         if host_group is None:
             host_group = groups.setdefault(("config", "host"), {
-                "cause": t["config_reason"]["no_memory"],
+                "cause": t["config_reason"]["no_memory"], "kind": "collection",
                 "action": t["action_NOT_COLLECTED_offline" if data["check"].get("source") == "OFFLINE"
                             else "action_NOT_COLLECTED"],
                 "rules": [], "source": "PG_HOST_SNAPSHOT"})
         host_group["rules"].append(label)
-    return list(groups.values())
+    return sorted(groups.values(), key=lambda g: KIND_ORDER[g["kind"]])
 
 
 def render_unassessed(data, lang, t):
-    """Executive card for checks not done: draws attention without being a finding."""
+    """Engineering View: checks not done as a table (cause, checks, what to do, kind). Never a finding.
+
+    The commands and options themselves are written once, in Findings and Evidence (ADR-0021).
+    """
     groups = unassessed_groups(data, lang, t)
     unknown = data.get("unknown_replicas") or []
     if not groups and not unknown:
         return ""
     # The same number as the verdict: checks not assessed (settings without data are listed, not counted).
     count = summarize(data)[0]["not_assessed"]
-    items = []
+    rows = []
     if unknown:
         listed = ", ".join(f"{r['client_addr']} ({', '.join(x for x in (r['application_name'], r['state'], r['sync_state']) if x)})"
                            for r in unknown)
-        items.append(f"<li><b>{e(t['unknown_replica_cause'].format(n=len(unknown), list=listed))}</b>"
-                     f'<div class="facts">{e(t["unassessed_action"])}: {e(t["unknown_replica_action"])}</div></li>')
+        rows.append([f"<b>{e(t['unknown_replica_cause'].format(n=len(unknown), list=listed))}</b>", "",
+                     e(t["unknown_replica_action"]), e(t["missing_kind"]["collection"])])
     for g in groups:
-        affected = ", ".join(g["rules"])
-        item = f"<b>{e(g['cause'])}</b>"
-        if g.get("detail"):
-            item += f'<div class="detail">{e(g["detail"])}</div>'
-        if g["rules"] != [g["cause"]]:
-            item += f'<div class="facts">{e(t["unassessed_affects"])}: {e(affected)}</div>'
-        if g["action"]:
-            item += f'<div class="facts">{e(t["unassessed_action"])}: {e(g["action"])}</div>'
-        items.append(f"<li>{item}</li>")
-    return (f'<details class="card unknown" open><summary><h3>{badge("unknown", t["topic_unknown"])}'
+        rows.append([f"<b>{e(g['cause'])}</b>",
+                     e(", ".join(g["rules"])) if g["rules"] != [g["cause"]] else "",
+                     e(g["action"]), f'<span class="nowrap">{e(t["missing_kind"][g["kind"]])}</span>'])
+    return (f'<div class="card unknown"><h3>{badge("unknown", t["topic_unknown"])}'
             f'{e(t["unassessed_title"])}<span class="note">{count}</span></h3>'
-            f'<div class="lead">{e(t["unassessed_lead"])}</div></summary>'
-            f'<ul class="items">{"".join(items)}</ul></details>')
+            f'<div class="lead">{e(t["unassessed_lead"])}</div>'
+            + table(t["missing_cols"], rows) + f'<p class="note">{e(t["missing_note"])}</p></div>')
 
 
 def first_line(text):
@@ -1904,7 +1958,8 @@ def render_executive(data, lang, t):
             + (f' <span class="sub">{e(t["verdict_unassessed"].format(n=counts["not_assessed"]))}</span>'
                if counts["not_assessed"] and verdict != "none" else "") + "</div>"
             + '<div class="tiles">' + "".join(tile(str(n), label) for n, label in tiles) + "</div>"
-            + measure_tiles(data, counts, t) + render_main_problems(data, lang, t) + render_unassessed_short(data, lang, t)
+            + measure_tiles(data, counts, t) + render_main_problems(data, lang, t)
+            + render_decisions(data, lang, t) + render_unassessed_short(data, lang, t)
             + render_impact_chart(data, lang, t) + render_inventory(data, t))
 
 
@@ -2418,9 +2473,7 @@ def render_findings_detail(data, lang, t):
                                                    -float(f["observed_value"] or 0)))
         worst = findings[0]["severity"]
         rid = result["rule_id"]
-        partial = unassessed_line(result, t, short=True)
-        if partial and partial != unassessed_line(result, t):
-            partial += " " + t["how_in_eng"]
+        partial = unassessed_line(result, t)
         facts = [x for x in (threshold_line(result, t), parameter_line(result, t), partial) if x]
         cards.append(
             f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
@@ -2455,14 +2508,28 @@ HOST_REASONS = ("no_memory", "no_cpus", "no_disk")
 CONFIG_RULE = "PG-CONF-003"
 
 
+def config_state(row):
+    """FITS split in two (review of hc128): at the recommended value, or acceptable with a better value."""
+    if row["status"] != "FITS":
+        return row["status"]
+    current, recommended = config_number(row["current_value"]), config_number(row["recommended_value"])
+    if current is None or recommended is None:
+        return "AT_RECOMMENDED"
+    if isinstance(current, str) or isinstance(recommended, str):
+        return "AT_RECOMMENDED" if str(current) == str(recommended) else "IN_RANGE"
+    vt = row["value_type"]
+    return ("AT_RECOMMENDED" if config_rec.round_for(current, vt) == config_rec.round_for(recommended, vt)
+            else "IN_RANGE")
+
+
 def config_counts(data):
-    counts = {"FITS": 0, "DEVIATES": 0, "NOT_ASSESSED": 0, "NOT_APPLICABLE": 0}
+    counts = {"DEVIATES": 0, "NOT_ASSESSED": 0, "IN_RANGE": 0, "AT_RECOMMENDED": 0, "NOT_APPLICABLE": 0}
     for r in data.get("config") or []:
-        counts[r["status"]] += 1
+        counts[config_state(r)] += 1
     return counts
 
 
-def config_summary(counts, t, statuses=("DEVIATES", "NOT_ASSESSED", "FITS", "NOT_APPLICABLE")):
+def config_summary(counts, t, statuses=("DEVIATES", "NOT_ASSESSED", "IN_RANGE", "AT_RECOMMENDED", "NOT_APPLICABLE")):
     """'11 settings differ · 3 fit · 4 not applicable'; statuses with no setting are left out."""
     return " · ".join(t["config_parts"][s].format(n=counts[s]) for s in statuses if counts[s])
 
@@ -2708,7 +2775,8 @@ def render_config(data, lang, t):
     counts = config_counts(data)
     action = [r for r in rows if r["status"] == "DEVIATES"]
     missing = [r for r in rows if r["status"] == "NOT_ASSESSED"]
-    fine = [r for r in rows if r["status"] in ("FITS", "NOT_APPLICABLE")]
+    in_range = [r for r in rows if config_state(r) == "IN_RANGE"]
+    fine = [r for r in rows if config_state(r) in ("AT_RECOMMENDED", "NOT_APPLICABLE")]
     summary = config_summary(counts, t)
     inputs = config_inputs(data, t)
     parts = [f'<details class="section"><summary><h2>{e(t["config_title"])}'
@@ -2742,8 +2810,12 @@ def render_config(data, lang, t):
         parts.append(f'<p><b>{e(t["config_not_assessed"].format(n=len(names)))}</b>: '
                      f'{e(", ".join(names))}<span class="facts"> — {e(cause)}</span></p>')
     parts.append(config_commands(data, rows, t))
+    if in_range:
+        parts.append(f'<h3>{e(t["config_parts"]["IN_RANGE"].format(n=len(in_range)))}</h3>'
+                     + table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in in_range])
+                     + f'<p class="note">{e(t["config_in_range_note"])}</p>')
     if fine:
-        parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("FITS", "NOT_APPLICABLE")))}</summary>'
+        parts.append(f'<details class="more"><summary>{e(config_summary(counts, t, ("AT_RECOMMENDED", "NOT_APPLICABLE")))}</summary>'
                      + table(t["config_cols"], [config_row(r, data, lang, t, profile) for r in fine])
                      + "</details>")
     return "".join(parts) + "</details>"

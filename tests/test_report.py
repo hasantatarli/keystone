@@ -183,13 +183,14 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Nedenleri ve nasıl açılacakları Mühendislik Görünümü&#x27;nde.", executive)
         self.assertNotIn("Yapılması gereken", executive)
         card = engineering(page)
-        card = card[card.index('<details class="card unknown" open>'):]
-        card = card[:card.index("</details>")]
+        card = card[card.index('<div class="card unknown">'):]
+        card = card[:card.index("</table>")]
         self.assertIn("Değerlendirilemeyen kontroller", card)
-        # One cause listed once with every check it stopped, and what to do about it.
+        # A table (ADR-0021): one cause listed once with every check it stopped, what to do, its kind.
+        self.assertIn("<th>Neden</th><th>Etkilenen kontroller</th><th>Gereken aksiyon</th><th>Tür</th>", card)
         self.assertIn("cluster: PG_REPLICATION_SLOTS toplanamadı (bağlantı hatası)", card)
-        self.assertIn("Etkilenen kontroller: ", card)
-        self.assertIn("Yapılması gereken: Keystone&#x27;un bu sunuculara bağlanabildiğini", card)
+        self.assertIn("<td>Keystone&#x27;un bu sunuculara bağlanabildiğini", card)
+        self.assertIn("Veri toplanamadı", card)
         self.assertEqual(card.count("PG_REPLICATION_SLOTS toplanamadı"), 1)
         self.assertIn("Hiçbir kontrol değerlendirilemedi", executive)       # nothing assessed at all
         # With some checks assessed, the verdict also says how many could not be done.
@@ -219,8 +220,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
         technical = page[page.index(TECH_PANEL):]
-        self.assertIn("PG_REPLICATION_SLOTS toplanamadı (bağlantı hatası); ayrıntı Toplanan Veriler&#x27;de.",
-                      technical)
+        self.assertIn("PG_REPLICATION_SLOTS bu kontrolde toplanamadı", technical)     # in full, once
 
     def test_default_file_name_has_target_and_check_time(self):
         check_id = self.make_check()
@@ -383,7 +383,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         executive = report.render_html(data, "tr")
         executive = executive[:executive.index(TECH_PANEL)]
         self.assertNotIn('<div class="l">Bulgu</div>', executive)
-        self.assertIn("2 bulgu", executive)                         # on the problem card
+        self.assertIn("2 etkilenen öğe", executive)                         # on the problem card
 
     def test_affected_areas_name_the_problem(self):
         page = self.render(self.make_check(), "tr")
@@ -391,7 +391,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         impact = section(executive, "Etkilenen alanlar")
         # PG-TRAN-001 affects Performance and Capacity: the same name in both rows.
         self.assertEqual(impact.count("Uzun süre boşta bekleyen transaction"), 2)
-        self.assertNotIn("1 bulgu", impact)
+        self.assertNotIn("1 etkilenen öğe", impact)
         self.assertIn("Aynı sorun birden fazla alanı etkileyebilir", impact)
 
     def test_os_is_shown_and_postgres_build_string_only_on_hover(self):
@@ -514,7 +514,7 @@ class ReportTests(test_health_check.HealthCheckTests):
                       page[page.index(TECH_PANEL):])
         card = engineering(page)
         card = card[card.index("Değerlendirilemeyen kontroller"):]
-        self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</details>")])
+        self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</table>")])
 
     def test_server_profile_is_kept_per_check_and_assumed_values_are_said(self):
         self.conn.execute("UPDATE keystone.target SET workload_type = NULL, dedicated = NULL, "
@@ -720,7 +720,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         system, technical = page[page.index(TECH_PANEL):], engineering(page)
         self.assertIn("<b>Konfigürasyon önerileri</b>: ", system)                 # checks by area
-        self.assertIn("ayar bu sunucu için önerilen değerlerden farklı; ayrıntı Mühendislik Görünümü&#x27;nde.",
+        self.assertIn("ayar kabul edilebilir aralığın dışında; ayrıntı Mühendislik Görünümü&#x27;nde.",
                       system)
         self.assertNotIn("PG-CONF-003</span></h3>", page)             # the table replaces the card
         self.assertIn("<h2>Konfigürasyon önerileri<span class=\"note\">", technical)
@@ -805,7 +805,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = report.render_html(data, "tr")
         executive = page[:page.index(ENG_PANEL)]
         self.assertNotIn("Öneriden farklı ayar", section(executive, "Öne çıkan sorunlar"))
-        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', page[page.index(TECH_PANEL):])
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 etkilenen öğe, bilgi)', page[page.index(TECH_PANEL):])
         self.assertIn("1 bilgi notu (öneri niteliğinde) Bulgular ve Kanıt&#x27;ta.", engineering(page))
         self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
         self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
@@ -845,7 +845,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         # One item per rule: the problem with its severity first, then what was fine.
         # One bullet per rule; severity in the bullet colour and in words, all texts aligned.
         self.assertIn('<li class="r-warning"><b>Uzun süre boşta bekleyen transaction</b> '
-                      '(1 bulgu, uyarı): Bazı session', topics)
+                      '(1 etkilenen öğe, uyarı): Bazı session', topics)
         self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
         self.assertIn("Eşik: Uyarı ≥ 5 dakika", technical)       # on the finding, written once
         # Same words as the rest of the report: the severity, not "attention".
@@ -1497,3 +1497,67 @@ class QueryStatsSectionTests(unittest.TestCase):
     def test_nothing_without_pg_stat_statements(self):
         self.assertEqual(report.render_query_stats({"query_stats": [{"record_type": "SYSTEM", "available": False}]},
                                                    self.T), "")
+
+
+class ReportStepTwoTests(unittest.TestCase):
+    """Review of hc128 (ChatGPT, Hasan 2026-11-17): missing evidence kinds, configuration states, decisions."""
+
+    t = report.TEXTS["tr"]
+
+    def test_kind_of_missing_evidence(self):
+        cases = {("sequence_privilege_missing",): ("permission", "İzleme kullanıcısına"),
+                 ("wal_location_unreadable", "no_disk"): ("permission", "SSH kullanıcısının"),
+                 ("no_disk",): ("collection", "Eksik veriyi"),
+                 ("statistics_too_young",): ("time", "Aksiyon gerekmez; Keystone"),
+                 ("too_little_activity",): ("workload", "Aksiyon gerekmez; sistem"),
+                 (): ("collection", "Eksik veriyi")}
+        for codes, (kind, action) in cases.items():
+            with self.subTest(codes=codes):
+                got_kind, got_action = report.kind_and_action(list(codes), self.t)
+                self.assertEqual(got_kind, kind)
+                self.assertTrue(got_action.startswith(action), got_action)
+
+    def test_codes_behind_a_reason(self):
+        self.assertEqual(report.reason_codes_of('PG_HOST_SNAPSHOT: [nodes_unassessed] x {"nodes": ["a", "b"], '
+                                                '"reasons": {"a": "wal_location_unreadable", "b": "no_disk"}}'),
+                         ["wal_location_unreadable", "no_disk"])
+        self.assertEqual(report.reason_codes_of("PG_X: [too_little_activity] y {}"), ["too_little_activity"])
+        self.assertEqual(report.reason_codes_of("PG_X not collected"), [])
+
+    def test_configuration_states(self):
+        def row(status, current, recommended, vt="bytes"):
+            return {"status": status, "current_value": current, "recommended_value": recommended, "value_type": vt}
+        # hc128: maintenance_work_mem 64 MB, 123 MB recommended, both acceptable: not "fits".
+        self.assertEqual(report.config_state(row("FITS", "67108864", "128974848")), "IN_RANGE")
+        self.assertEqual(report.config_state(row("FITS", "16777216", "16777216")), "AT_RECOMMENDED")
+        self.assertEqual(report.config_state(row("FITS", "on", "on", "enum")), "AT_RECOMMENDED")
+        self.assertEqual(report.config_state(row("FITS", "1", None)), "AT_RECOMMENDED")
+        self.assertEqual(report.config_state(row("DEVIATES", "1", "2")), "DEVIATES")
+        self.assertEqual(report.config_summary({"DEVIATES": 1, "NOT_ASSESSED": 0, "IN_RANGE": 3,
+                                                "AT_RECOMMENDED": 11, "NOT_APPLICABLE": 4}, self.t),
+                         "1 ayar kabul edilebilir aralığın dışında · 3 ayar kabul edilebilir aralıkta, "
+                         "iyileştirme önerisi var · 11 ayar önerilen değerde · 4 ayar uygulanmaz")
+
+    def test_decisions_only_for_rules_with_a_finding_and_a_decision(self):
+        data = {"results": [{"rule_id": 1, "rule_key": "PG-BKP-002", "rule_name": "WAL archiving"},
+                            {"rule_id": 2, "rule_key": "PG-SEC-004", "rule_name": "Public schema"},
+                            {"rule_id": 3, "rule_key": "PG-SEC-003", "rule_name": "SSL"}],
+                "findings": [{"rule_id": 1, "severity": "WARNING"}, {"rule_id": 2, "severity": "WARNING"}],
+                "rule_texts": {1: {"tr": {"NAME": "WAL arşivleme", "DECISION": "Kayıp kabul edilebilir mi?",
+                                          "DECISION_OWNER": "İş birimi ve IT"}},
+                               3: {"tr": {"DECISION": "SSL?"}}}}
+        html = report.render_decisions(data, "tr", self.t)
+        self.assertIn("<h2>Sizden beklenen kararlar</h2>", html)
+        self.assertIn("<b>WAL arşivleme</b><span class=\"note\"> · Karar: İş birimi ve IT</span>", html)
+        self.assertIn("Kayıp kabul edilebilir mi?", html)
+        self.assertNotIn("SSL?", html)                 # no finding, no decision
+        self.assertEqual(html.count("<li>"), 1)        # PUBLIC schema: the DBA's own work
+        self.assertEqual(report.render_decisions({**data, "findings": []}, "tr", self.t), "")
+
+    def test_all_collected_yet_not_assessed_is_explained(self):
+        data = {"results": [{"rule_id": 1, "rule_name": "Cache hit", "outcome": "INSUFFICIENT_EVIDENCE"}],
+                "rule_texts": {}, "collections": [{"status": "SUCCESS"}]}
+        self.assertIn("Veri toplama işlemlerinin tamamı başarıyla çalıştı",
+                      report.render_unassessed_short(data, "tr", self.t))
+        data["collections"] = [{"status": "FAILED"}]
+        self.assertNotIn("tamamı başarıyla", report.render_unassessed_short(data, "tr", self.t))
