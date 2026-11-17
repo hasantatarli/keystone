@@ -14,6 +14,17 @@ import test_health_check
 
 
 TECH_PANEL = 'class="panel panel-tech"'
+ENG_PANEL = 'class="panel panel-eng"'
+
+
+def section(text, title):
+    """From a heading to the next one: one section of the report."""
+    part = text[text.index(title):]
+    return part[:part.index("<h2>")] if "<h2>" in part else part
+
+
+def engineering(page):
+    return page[page.index(ENG_PANEL):page.index(TECH_PANEL)]
 
 
 class ReportTests(test_health_check.HealthCheckTests):
@@ -90,13 +101,14 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("connection refused", page)                 # why a source is missing
         self.assertIn("Bağlantı hatası", page)
 
-    def test_two_parts_executive_first(self):
+    def test_three_parts_executive_first(self):
         page = self.render(self.make_check(), "tr")
-        self.assertLess(page.index("panel panel-exec"), page.index(TECH_PANEL))
-        executive = page[:page.index(TECH_PANEL)]
-        # Plain-language Dictionary texts in the executive part, no technical context.
+        self.assertLess(page.index("panel panel-exec"), page.index(ENG_PANEL))
+        self.assertLess(page.index(ENG_PANEL), page.index(TECH_PANEL))
+        executive = page[:page.index(ENG_PANEL)]
+        # ADR-0021: one line per problem in the summary; causes and steps written once, later.
         self.assertIn("Uzun süre boşta bekleyen transaction", executive)
-        self.assertIn("Olası sebep", executive)
+        self.assertNotIn("Olası sebep", executive)
         self.assertNotIn("billing-api", executive)
         self.assertNotIn("Session 4711", executive)
 
@@ -108,8 +120,8 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("Kapasite", executive)
         # Areas whose rules could not be assessed say so (review 2026-11-09), never "no problems".
         self.assertNotIn("Sorun bulunmadı</span></div><div class=\"name\" title=\"Yetki", executive)
-        self.assertIn("Transaction yönetimi", executive)
         self.assertIn("Değerlendirilemedi", executive)            # replication not assessed
+        self.assertIn("Transaction yönetimi", page[page.index(TECH_PANEL):])   # checks by area
 
     def test_technical_part_shows_who_and_where(self):
         page = self.render(self.make_check(), "tr")
@@ -164,8 +176,13 @@ class ReportTests(test_health_check.HealthCheckTests):
         # Hasan 2026-10-30: unknown is worth attention, but it is not a problem found.
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
-        executive = page[:page.index(TECH_PANEL)]
-        card = executive[executive.index('<details class="card unknown">'):]
+        executive = page[:page.index(ENG_PANEL)]
+        # The summary says it in one sentence and where to look (ADR-0021).
+        self.assertIn("kontrol değerlendirilemedi", executive)
+        self.assertIn("Nedenleri ve nasıl açılacakları Mühendislik Görünümü&#x27;nde.", executive)
+        self.assertNotIn("Yapılması gereken", executive)
+        card = engineering(page)
+        card = card[card.index('<details class="card unknown" open>'):]
         card = card[:card.index("</details>")]
         self.assertIn("Değerlendirilemeyen kontroller", card)
         # One cause listed once with every check it stopped, and what to do about it.
@@ -200,7 +217,9 @@ class ReportTests(test_health_check.HealthCheckTests):
     def test_failed_collection_explains_the_rule_reason(self):
         self.failing = {"PG_REPLICATION_SLOTS"}
         page = self.render(self.run_check(), "tr")
-        self.assertIn("PG_REPLICATION_SLOTS bu kontrolde toplanamadı", page)
+        technical = page[page.index(TECH_PANEL):]
+        self.assertIn("PG_REPLICATION_SLOTS toplanamadı (bağlantı hatası); ayrıntı Toplanan Veriler&#x27;de.",
+                      technical)
 
     def test_default_file_name_has_target_and_check_time(self):
         check_id = self.make_check()
@@ -209,12 +228,14 @@ class ReportTests(test_health_check.HealthCheckTests):
         stamp = data["check"]["started_at"].strftime("%Y%m%d-%H%M")
         self.assertEqual(name, f"cluster_{stamp}_hc{check_id}_tr.html")
 
-    def test_parts_are_css_tabs_and_both_print(self):
+    def test_parts_are_css_tabs_and_all_print(self):
         page = self.render(self.make_check(), "tr")
         self.assertIn('id="tab-exec" checked', page)
-        self.assertIn('<label for="tab-tech">Teknik Detaylar</label>', page)
+        self.assertIn('<label for="tab-eng">Mühendislik Görünümü</label>', page)
+        self.assertIn('<label for="tab-tech">Bulgular ve Kanıt</label>', page)
         self.assertNotIn("<script", page)
-        self.assertIn(".tabs>.panel{display:block!important", page)     # print shows both
+        self.assertIn(".tabs>.panel{display:block!important", page)     # print shows all three
+        self.assertIn(".panel-eng,.panel-tech{break-before:page}", page)
 
     def test_executive_inventory_with_partial_host_data(self):
         check_id = self.make_check()
@@ -366,7 +387,7 @@ class ReportTests(test_health_check.HealthCheckTests):
     def test_affected_areas_name_the_problem(self):
         page = self.render(self.make_check(), "tr")
         executive = page[:page.index(TECH_PANEL)]
-        impact = executive[executive.index("Etkilenen alanlar"):executive.index("Alanlara göre durum")]
+        impact = section(executive, "Etkilenen alanlar")
         # PG-TRAN-001 affects Performance and Capacity: the same name in both rows.
         self.assertEqual(impact.count("Uzun süre boşta bekleyen transaction"), 2)
         self.assertNotIn("1 bulgu", impact)
@@ -482,14 +503,15 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertEqual(counts["not_applicable"], 2)
         self.assertEqual(counts["total"], len(data["results"]) - 2)
         page = report.render_html(data, "tr")
-        executive = page[:page.index(TECH_PANEL)]
+        executive = page[:page.index(ENG_PANEL)]
         defined = len(data["results"])
-        self.assertIn(f"Tanımlı {defined} kontrolden {defined - 2} tanesi bu sisteme uygulanabilir", executive)
+        self.assertIn(f"Tanımlı {defined} kontrolden 2 tanesi bu sisteme uygulanmaz.", executive)
+        self.assertIn(f"Değerlendirme kapsamı: {defined - 2} uygulanabilir kontrolden", executive)
         self.assertIn('<li class="r-na">Replikasyon gecikmesi (uygulanmaz): Sistemde replica yok.</li>',
-                      executive)
-        card = executive[executive.index("Değerlendirilemeyen kontroller"):]
+                      page[page.index(TECH_PANEL):])
+        card = engineering(page)
+        card = card[card.index("Değerlendirilemeyen kontroller"):]
         self.assertNotIn("Replikasyon gecikmesi", card[:card.index("</details>")])
-        self.assertIn('<span class="badge b-NOT_APPLICABLE">Uygulanmaz</span>', page)
 
     def test_server_profile_is_kept_per_check_and_assumed_values_are_said(self):
         self.conn.execute("UPDATE keystone.target SET workload_type = NULL, dedicated = NULL, "
@@ -531,18 +553,20 @@ class ReportTests(test_health_check.HealthCheckTests):
                           "cluster_manager": {"value": None, "assumed": False}})
         self.assertEqual(report.profile_line(None, report.TEXTS["tr"]), "")
 
-    def test_problem_cards_list_causes_and_steps(self):
+    def test_problems_are_one_line_in_the_summary_and_written_once(self):
         page = self.render(self.make_check(), "tr")
-        executive = page[:page.index(TECH_PANEL)]
-        card = executive[executive.index("Öne çıkan sorunlar"):executive.index("Sistem envanteri")
-                         if "Sistem envanteri" in executive else None]
-        # Closed by default: name, severity and what is happening in one line; the rest on demand.
-        self.assertIn('<details class="card WARNING"><summary><h3>', card)
-        self.assertIn('<div class="lead">Bazı session', card)
-        self.assertNotIn("<dt>Ne oluyor</dt>", card)
-        self.assertIn("<dt>Olası sebepler</dt><dd><ul class=\"items\"><li>", card)
-        self.assertIn("<li>Connection pool session&#x27;ı bırakmıyor</li>", card)
-        self.assertIn("<dt>Ne yapılmalı</dt><dd><ul class=\"items\">", card)
+        executive = page[:page.index(ENG_PANEL)]
+        card = section(executive, "Öne çıkan sorunlar")
+        # ADR-0021: one line per problem (severity, name, rule, what is happening); written once later.
+        self.assertIn('<ul class="lines"><li><span class="badge b-WARNING">Uyarı</span>'
+                      '<b>Uzun süre boşta bekleyen transaction</b><span class="rule">PG-TRAN-001</span>', card)
+        self.assertIn('<div class="facts">Bazı session', card)
+        self.assertNotIn("<dt>", card)
+        self.assertNotIn("Connection pool session", executive)
+        # The engineering view orders it with its first step.
+        review = section(engineering(page), "Önerilen inceleme sırası")
+        self.assertIn("<td>1</td><td><b>Uzun süre boşta bekleyen transaction</b>", review)
+        self.assertIn("işletmenizin önceliğini bilmez", review)
         technical = page[page.index(TECH_PANEL):]
         self.assertIn("<dt>Olası sebepler</dt>", technical)
         self.assertIn("idle_in_transaction_session_timeout", technical)
@@ -691,9 +715,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         engine.run_assessment(self.conn, "PG_CONFIGURATION_TUNING", self.system, health_check_id=check_id)
 
         page = self.render(check_id, "tr")
-        executive, technical = page[:page.index(TECH_PANEL)], page[page.index(TECH_PANEL):]
-        self.assertIn("<b>Konfigürasyon önerileri</b>: ", executive)
-        self.assertIn("ayar bu sunucu için önerilen değerlerden farklı; ayrıntı teknik bölümde.", executive)
+        system, technical = page[page.index(TECH_PANEL):], engineering(page)
+        self.assertIn("<b>Konfigürasyon önerileri</b>: ", system)                 # checks by area
+        self.assertIn("ayar bu sunucu için önerilen değerlerden farklı; ayrıntı Mühendislik Görünümü&#x27;nde.",
+                      system)
         self.assertNotIn("PG-CONF-003</span></h3>", page)             # the table replaces the card
         self.assertIn("<h2>Konfigürasyon önerileri<span class=\"note\">", technical)
         self.assertIn("Hesap en küçük sunucuya göre yapıldı: node-2 (2 CPU, 8.0 GB, veri diski 100.0 GB).",
@@ -709,7 +734,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("-- ALTER SYSTEM SET shared_buffers = &#x27;2GB&#x27;;", technical)
         self.assertIn("Restart gerektirir:", technical)
         self.assertIn("# patronictl restart", technical)
-        self.assertIn("Ayar yönetimi: belirtilmedi", technical)
+        self.assertIn("Ayar yönetimi: belirtilmedi", system)
         self.assertIn("4&#x27;ten az CPU var; paralellik ayarları varsayılanda kalır.", technical)
         self.assertNotIn("bildiriyor", technical)                     # rotation not collected: no note
 
@@ -745,8 +770,7 @@ class ReportTests(test_health_check.HealthCheckTests):
                           "FROM keystone.assessment_run)))", (check_id,))
         self.conn.commit()
         data = report.load_report_data(self.conn, check_id)
-        technical = report.render_html(data, "tr")
-        technical = technical[technical.index(TECH_PANEL):]
+        technical = engineering(report.render_html(data, "tr"))
         self.assertIn("<p><b>10 ayar değerlendirilemedi</b>: shared_buffers, effective_cache_size", technical)
         self.assertNotIn("<td>shared_buffers ↻</td>", technical)       # no table row per missing setting
         groups = report.unassessed_groups(data, "tr", report.TEXTS["tr"])
@@ -776,10 +800,10 @@ class ReportTests(test_health_check.HealthCheckTests):
         data = report.load_report_data(self.conn, check_id)
         before = report.summarize(data)[0]
         page = report.render_html(data, "tr")
-        executive = page[:page.index(TECH_PANEL)]
-        problems = executive[executive.index("Öne çıkan sorunlar"):]
-        self.assertNotIn("Öneriden farklı ayar", problems[:problems.index("<h2>", 5)])
-        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', executive)
+        executive = page[:page.index(ENG_PANEL)]
+        self.assertNotIn("Öneriden farklı ayar", section(executive, "Öne çıkan sorunlar"))
+        self.assertIn('<li class="r-info"><b>Öneriden farklı ayar</b> (1 bilgi notu)', page[page.index(TECH_PANEL):])
+        self.assertIn("1 bilgi notu (öneri niteliğinde) Bulgular ve Kanıt&#x27;ta.", engineering(page))
         self.assertEqual(before["warning"], 1)                 # only the PG-TRAN-001 problem
         self.assertIn("shared_buffers is 128MB.", page[page.index(TECH_PANEL):])
 
@@ -813,17 +837,16 @@ class ReportTests(test_health_check.HealthCheckTests):
             "AND rd.rule_key = 'PG-TRAN-003'")
         self.conn.commit()
         page = self.render(check_id, "tr")
-        executive = page[:page.index(TECH_PANEL)]
-        topics = executive[executive.index("Alanlara göre durum"):]
+        technical = page[page.index(TECH_PANEL):]
+        topics = technical[technical.index("Alanlara göre kontroller"):]
         # One item per rule: the problem with its severity first, then what was fine.
         # One bullet per rule; severity in the bullet colour and in words, all texts aligned.
         self.assertIn('<li class="r-warning"><b>Uzun süre boşta bekleyen transaction</b> '
                       '(1 bulgu, uyarı): Bazı session', topics)
         self.assertIn('<li class="r-ok">Açık kalma süresi', topics)   # the healthy rule of the topic
-        results = page[page.index("Kontrol sonuçları"):]
-        self.assertIn("1 bulgu · Eşik: Uyarı ≥ 5 dakika", results)
+        self.assertIn("Eşik: Uyarı ≥ 5 dakika", technical)       # on the finding, written once
         # Same words as the rest of the report: the severity, not "attention".
-        self.assertIn('<span class="badge b-WARNING">Uyarı</span></td><td>1 bulgu', results)
+        self.assertIn('<span class="badge b-attention">Uyarı</span>', topics)
         self.assertNotIn(">Dikkat<", page)
 
     def test_topic_lists_a_rule_that_could_not_be_assessed(self):
@@ -840,9 +863,9 @@ class ReportTests(test_health_check.HealthCheckTests):
             "FROM keystone.rule_definition rd WHERE rd.rule_id = res.rule_id AND rd.rule_key = 'PG-TRAN-005'")
         self.conn.commit()
         page = self.render(check_id, "tr")
-        topics = page[page.index("Alanlara göre durum"):page.index(TECH_PANEL)]
+        topics = page[page.index("Alanlara göre kontroller"):]
         transactions = topics[topics.index("Transaction yönetimi"):]
-        transactions = transactions[:transactions.index('<div class="topic">')]
+        transactions = transactions[:transactions.index('<details class="area"')]
         self.assertIn('<span class="badge b-partial">Kısmen değerlendirildi</span>', transactions)
         self.assertIn('<li class="r-unknown"><b>Uzun bekleyen prepared transaction</b> '
                       '(değerlendirilemedi): PG_PREPARED_TRANSACTIONS verisi yok.</li>', transactions)
@@ -1144,7 +1167,7 @@ class ReportTests(test_health_check.HealthCheckTests):
                                  "status_message": "FATAL:  no pg_hba.conf entry for host"}]}
         reason = "PG_WAL_STATUS: Required evidence is not available."
         self.assertEqual(report.explain_reason(reason, data, t, short=True),
-                         "PG_WAL_STATUS toplanamadı (bağlantı hatası); ayrıntı teknik bölümde.")
+                         "PG_WAL_STATUS toplanamadı (bağlantı hatası); ayrıntı Toplanan Veriler'de.")
         self.assertIn("no pg_hba.conf entry", report.explain_reason(reason, data, t))
 
     def test_reason_with_values_is_explained(self):
@@ -1220,7 +1243,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         page = self.render(check_id, "tr")
         executive = page[:page.index(TECH_PANEL)]
         # PG-CONN-001 healthy, other rules of the same areas not assessed: partly, not "no problems".
-        impact = executive[executive.index("Etkilenen alanlar"):executive.index("Alanlara göre durum")]
+        impact = section(executive, "Etkilenen alanlar")
         self.assertIn("Kısmen değerlendirildi", impact)
         self.assertNotIn("Sorun bulunmadı", impact)
         self.assertNotIn("Sorun yok", executive)
@@ -1252,7 +1275,7 @@ class ReportTests(test_health_check.HealthCheckTests):
         self.assertIn("10 primary, 20 replica", html)
         self.assertIn("240 çekirdek", html)
         self.assertIn("%40 dolu", html)                           # data disks only
-        self.assertIn("Teknik Detaylar bölümünde", html)
+        self.assertIn("Bulgular ve Kanıt sekmesinde (Sistem Bilgisi)", html)
 
     def test_healthy_text_states_the_limit_used(self):
         check_id = self.make_check()

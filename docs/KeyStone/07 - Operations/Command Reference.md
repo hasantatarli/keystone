@@ -162,7 +162,7 @@ python -m repository.report.health_check_report --target 1 --output C:\temp\repo
 ```
 
 - Default file: `reports/<target>_<yyyymmdd-hhmm>_hc<id>_<lang>.html` (check start time); a new check never overwrites an older report. The command prints which check it reports.
-- Two tabs: Executive Summary and Technical Details; printing shows both.
+- Three tabs (ADR-0021): Executive Summary (verdict, coverage and collection as two measures, one line per problem, affected areas, inventory), Engineering View (suggested review order with the first step, missing evidence with how to allow it, configuration recommendations), Findings and Evidence (each finding once in full, checks by area, top queries, system information, collected data, method). Printing shows all three, each on a new page.
 - Context data (servers, disks, databases) comes only from that check's time window; data a check could not collect is shown as not collected, never from an older check.
 
 ```sql
