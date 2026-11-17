@@ -45,7 +45,25 @@ TEXTS = {
         "title": "Veritabanı Sağlık Kontrolü Raporu",
         "target": "Sistem", "date": "Tarih", "check_no": "Kontrol no", "requested_by": "Talep eden",
         "evidence": "Kanıt", "evidence_offline": "offline toplandı (müşteri tarafında salt okunur script'lerle), içe aktarıldı {imported}",
-        "part_exec": "Yönetici Özeti", "part_tech": "Teknik Detaylar",
+        "part_exec": "Yönetici Özeti", "part_eng": "Mühendislik Görünümü", "part_tech": "Bulgular ve Kanıt",
+        "m_coverage": "Değerlendirme kapsamı", "m_coverage_sub": "değerlendirilen / uygulanabilir",
+        "m_collection": "Veri toplama", "m_collection_sub": "başarılı / toplam",
+        "m_applicable": "Uygulanabilir kontrol", "m_applicable_sub": "uygulanabilir / tanımlı",
+        "m_not_applicable": "Uygulanmaz", "m_not_applicable_sub": "bu sisteme uymayan kontrol",
+        "exec_problems_hint": "Ne yapılacağı Mühendislik Görünümü'nde, kanıtı ve ayrıntısı Bulgular ve Kanıt'ta.",
+        "exec_unassessed": "{n} kontrol değerlendirilemedi: {names}.",
+        "exec_unassessed_hint": "Nedenleri ve nasıl açılacakları Mühendislik Görünümü'nde.",
+        "and_more": "{n} kontrol daha",
+        "review_title": "Önerilen inceleme sırası",
+        "review_note": "Sıra önem derecesine ve kural sırasına göredir; işletmenizin önceliğini bilmez (örneğin bir test sisteminde arşivleme gerekmeyebilir).",
+        "review_cols": ["#", "Bulgu", "Önem", "Nerede", "Sonraki adım"],
+        "review_advice": "{n} bilgi notu (öneri niteliğinde) Bulgular ve Kanıt'ta.",
+        "where_nodes": "{n} sunucu", "where_databases": "{n} veritabanı", "where_items": "{n} bulgu",
+        "missing_title": "Eksik kanıt",
+        "reason_short": {"wal_location_unreadable": "pg_wal'ın konumu okunamadı",
+                         "hba_not_readable": "pg_hba kuralları okunamadı (yetki gerekli)"},
+        "how_in_eng": "Ayrıntısı Mühendislik Görünümü'nde (Eksik kanıt).",
+        "results_by_area": "Alanlara göre kontroller",
         "verdict_critical": "Acil müdahale gerektiren sorunlar var.",
         "verdict_warning": "Dikkat gerektiren sorunlar var.",
         "verdict_healthy": "Değerlendirilen alanlarda sorun bulunmadı.",
@@ -59,7 +77,7 @@ TEXTS = {
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
         "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
         "action_NOT_COLLECTED_offline": "Eksik dosyayı toplayın: sunucu bilgisi için veritabanı sunucusunda host script'ini (host_snapshot.sh ya da host_snapshot_windows.ps1) çalıştırın; diğerleri için toplayıcıyı yeniden çalıştırın.",
-        "action_other": "Hata ayrıntısı teknik bölümde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
+        "action_other": "Hata ayrıntısı Bulgular ve Kanıt sekmesinde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "Tanımlı {defined} kontrolden {total} tanesi bu sisteme uygulanabilir; {evaluated} tanesi sonuç verdi.",
         "not_assessed_note": "{count} kontrol yeterli veri olmadığı için değerlendirilemedi.",
         "not_applicable_note": "{count} kontrol bu sisteme uygulanmaz.",
@@ -74,8 +92,8 @@ TEXTS = {
         "unknown_replica_action": "Bu sunucuları da toplayın (offline script'i onlarda da çalıştırın ya da bağlantılarını tanımlayın); ayarları, diski ve sürümü ancak o zaman değerlendirilir.",
         "inv_databases": "{n} veritabanı", "inv_partial": "{known} / {total} sunucu için",
         "inv_unknown": "Toplanamadı", "percent": "%{n}", "inv_full": "{p} dolu",
-        "inv_data_disk": "Veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
-        "inv_large_note": "Sunucu bazlı ayrıntı Teknik Detaylar bölümünde.",
+        "inv_data_disk": "Veri diski", "inv_per_server": "sunucu başına", "inv_fullest_disk": "En dolu veri diski", "inv_role": "Rol", "inv_disk_unknown": "Bilinmiyor",
+        "inv_large_note": "Sunucu bazlı ayrıntı Bulgular ve Kanıt sekmesinde (Sistem Bilgisi).",
         "data_mount": "veri",
         "impact_title": "Etkilenen alanlar",
         "impact_none": "Sorun bulunmadı", "impact_not_checked": "Bu kontrolde incelenmedi",
@@ -85,7 +103,7 @@ TEXTS = {
         "config_many_connections": "max_connections = {n}: work_mem önerisi bağlantı sayısına bölündüğü için çok küçük çıkıyor. Asıl kaldıraç bağlantı sayısıdır; uygulama önünde bir connection pooler (PgBouncer gibi) ile max_connections düşürülürse sorgulara daha fazla bellek kalır.",
         "config_parts": {"DEVIATES": "{n} ayar önerilenden farklı", "NOT_ASSESSED": "{n} ayar değerlendirilemedi",
                          "FITS": "{n} ayar uygun", "NOT_APPLICABLE": "{n} ayar uygulanmaz"},
-        "config_line": "{n} ayar bu sunucu için önerilen değerlerden farklı; ayrıntı teknik bölümde.",
+        "config_line": "{n} ayar bu sunucu için önerilen değerlerden farklı; ayrıntı Mühendislik Görünümü'nde.",
         "config_line_na": "{n} ayar sunucu bilgisi (SSH) olmadığı için değerlendirilemedi.",
         "config_settings": "Konfigürasyon önerileri ({n} ayar)",
         "config_inputs": "Hesap en küçük sunucuya göre yapıldı: {node} ({facts}).",
@@ -150,7 +168,7 @@ TEXTS = {
         "databases": "Veritabanları", "database": "Veritabanı", "owner": "Sahip", "size": "Boyut",
         "not_collected_here": "Bu kontrolde toplanamadı.",
         "collection_summary": "Veri toplama: {ok} / {total} başarılı",
-        "more_errors": "(+{n} hata daha; teknik bölümde)",
+        "more_errors": "(+{n} hata daha; Toplanan Veriler'de)",
         "collection_errors": "Hata",
         "findings": "Bulgular", "no_findings": "Bulgu yok.",
         "meaning": "Anlamı", "impact": "Etkisi", "recommendation": "Öneri",
@@ -319,7 +337,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Toplanamadı", "WAIT_LIMIT": "Beklenmedi"},
         "days": "gün", "hours": "saat", "minutes": "dakika", "seconds": "saniye",
         "reason_not_collected": "{source} bu kontrolde toplanamadı ({detail}).",
-        "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı teknik bölümde.",
+        "reason_not_collected_short": "{source} toplanamadı{status}; ayrıntı Toplanan Veriler'de.",
         "reason_stale": "{source} verisi {age} önce toplanmış; bu kontrol için en fazla {limit} eski veri kabul ediliyor.",
         "reason_missing": "{source} verisi yok.",
         "reason_reference_stale": ("Keystone'daki PostgreSQL sürüm referansı {age} önce alınmış ({as_of}); bu kontrol "
@@ -333,7 +351,25 @@ TEXTS = {
         "title": "Database Health Check Report",
         "target": "System", "date": "Date", "check_no": "Check no", "requested_by": "Requested by",
         "evidence": "Evidence", "evidence_offline": "collected offline (read-only scripts on the customer side), imported {imported}",
-        "part_exec": "Executive Summary", "part_tech": "Technical Details",
+        "part_exec": "Executive Summary", "part_eng": "Engineering View", "part_tech": "Findings and Evidence",
+        "m_coverage": "Assessment coverage", "m_coverage_sub": "assessed / applicable",
+        "m_collection": "Data collection", "m_collection_sub": "succeeded / total",
+        "m_applicable": "Applicable checks", "m_applicable_sub": "applicable / defined",
+        "m_not_applicable": "Not applicable", "m_not_applicable_sub": "checks that do not fit this system",
+        "exec_problems_hint": "What to do is in the Engineering View; evidence and details in Findings and Evidence.",
+        "exec_unassessed": "{n} checks could not be assessed: {names}.",
+        "exec_unassessed_hint": "Why, and how to allow them, in the Engineering View.",
+        "and_more": "{n} more",
+        "review_title": "Suggested review order",
+        "review_note": "The order follows severity and rule order; it does not know your business priority (a test system, for example, may not need archiving).",
+        "review_cols": ["#", "Finding", "Severity", "Where", "Next step"],
+        "review_advice": "{n} information notes (recommendations) in Findings and Evidence.",
+        "where_nodes": "{n} servers", "where_databases": "{n} databases", "where_items": "{n} findings",
+        "missing_title": "Missing evidence",
+        "reason_short": {"wal_location_unreadable": "pg_wal location not readable",
+                         "hba_not_readable": "pg_hba rules not readable (privilege needed)"},
+        "how_in_eng": "Details in the Engineering View (missing evidence).",
+        "results_by_area": "Checks by area",
         "verdict_critical": "There are problems that need immediate action.",
         "verdict_warning": "There are problems that need attention.",
         "verdict_healthy": "No problems were found in the assessed areas.",
@@ -347,7 +383,7 @@ TEXTS = {
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
         "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
         "action_NOT_COLLECTED_offline": "Collect the missing file: for server data run the host script (host_snapshot.sh or host_snapshot_windows.ps1) on the database server; for the rest run the collector again.",
-        "action_other": "The error is in the technical part (collected data); fix it and run the health check again.",
+        "action_other": "The error is in Findings and Evidence (collected data); fix it and run the health check again.",
         "coverage": "Of {defined} defined checks, {total} apply to this system; {evaluated} produced a result.",
         "not_assessed_note": "{count} check(s) could not be evaluated for lack of data.",
         "not_applicable_note": "{count} check(s) do not apply to this system.",
@@ -362,8 +398,8 @@ TEXTS = {
         "unknown_replica_action": "Collect these servers too (run the offline script on them or define their connections); only then are their settings, disk and version assessed.",
         "inv_databases": "{n} databases", "inv_partial": "for {known} of {total} servers",
         "inv_unknown": "Not collected", "percent": "{n}%", "inv_full": "{p} used",
-        "inv_data_disk": "Data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
-        "inv_large_note": "Per-server details are in the Technical Details part.",
+        "inv_data_disk": "Data disk", "inv_per_server": "per server", "inv_fullest_disk": "Fullest data disk", "inv_role": "Role", "inv_disk_unknown": "Unknown",
+        "inv_large_note": "Per-server details are in Findings and Evidence (system information).",
         "data_mount": "data",
         "impact_title": "Affected areas",
         "impact_none": "No problems found", "impact_not_checked": "Not covered by this check",
@@ -373,7 +409,7 @@ TEXTS = {
         "config_many_connections": "max_connections = {n}: the work_mem recommendation comes out very small because it is divided by the connections. The lever is the number of connections; with a connection pooler (PgBouncer, say) in front of the application, a lower max_connections leaves more memory for queries.",
         "config_parts": {"DEVIATES": "{n} setting(s) differ from the recommendation",
                          "NOT_ASSESSED": "{n} not assessed", "FITS": "{n} fit", "NOT_APPLICABLE": "{n} not applicable"},
-        "config_line": "{n} setting(s) differ from the values recommended for this server; details in the technical part.",
+        "config_line": "{n} setting(s) differ from the values recommended for this server; details in the Engineering View.",
         "config_line_na": "{n} setting(s) could not be assessed without server data (SSH).",
         "config_settings": "Configuration recommendations ({n} settings)",
         "config_inputs": "Calculated for the smallest server: {node} ({facts}).",
@@ -437,7 +473,7 @@ TEXTS = {
         "databases": "Databases", "database": "Database", "owner": "Owner", "size": "Size",
         "not_collected_here": "Not collected in this check.",
         "collection_summary": "Data collection: {ok} of {total} succeeded",
-        "more_errors": "(+{n} more; see the technical part)",
+        "more_errors": "(+{n} more; see collected data)",
         "collection_errors": "Error",
         "findings": "Findings", "no_findings": "No findings.",
         "meaning": "Meaning", "impact": "Impact", "recommendation": "Recommendation",
@@ -605,7 +641,7 @@ TEXTS = {
                               "NOT_COLLECTED": "Not collected", "WAIT_LIMIT": "Not waited for"},
         "days": "days", "hours": "hours", "minutes": "minutes", "seconds": "seconds",
         "reason_not_collected": "{source} could not be collected in this check ({detail}).",
-        "reason_not_collected_short": "{source} not collected{status}; details in the technical part.",
+        "reason_not_collected_short": "{source} not collected{status}; details in collected data.",
         "reason_stale": "{source} data was collected {age} ago; at most {limit} old data is accepted for this check.",
         "reason_missing": "No {source} data.",
         "reason_reference_stale": ("Keystone's PostgreSQL release reference was taken {age} ago ({as_of}); this "
@@ -989,19 +1025,43 @@ REASON_PATTERN = re.compile(
 REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+: \[(?P<code>[a-z_]+)\] .*?(?P<values>\{.*\})?$")
 
 
-def nodes_unassessed_text(reasons, data, t):
+def reason_label(code, t, short=False):
+    """Why a server was not assessed; short: one clause, the full way to allow it is in the Engineering View."""
+    text = t["unassessed_reason"].get(code, code)
+    return (t["reason_short"].get(code) or first_sentence(text)) if short else text
+
+
+def nodes_unassessed_text(reasons, data, t, short=False):
     """Servers not assessed with why, grouped by reason; 'no server' when it is every server (hc124:
     "no problem on the other servers" was said when there were no others)."""
     by_reason = {}
     for node, code in reasons.items():
         by_reason.setdefault(code, []).append(node)
-    items = "; ".join(f'{", ".join(nodes)} ({t["unassessed_reason"].get(code, code)})'
+    items = "; ".join(f'{", ".join(nodes)} ({reason_label(code, t, short)})'
                       for code, nodes in by_reason.items())
     known = {n["name"] for n in data.get("nodes") or []}
     every = not known or known <= set(reasons)
     if every:
         return t["nodes_unassessed_all"].format(nodes=items)
     return t["reason_codes"]["nodes_unassessed"].format(nodes=items)
+
+
+def reason_detail(reason, data, t):
+    """The full way to allow a check, when its short form leaves it out (Engineering View only).
+
+    Servers not assessed: the full text of each reason once, not the sentence with the servers again.
+    """
+    coded = REASON_CODE_PATTERN.match(reason or "")
+    if coded and coded.group("code") == "nodes_unassessed":
+        try:
+            codes = dict.fromkeys(json.loads(coded.group("values") or "{}").get("reasons", {}).values())
+        except ValueError:
+            return ""
+        return " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
+    if coded:
+        full = explain_reason(reason, data, t)
+        return full if full != explain_reason(reason, data, t, short=True) else ""
+    return ""
 
 
 def explain_reason(reason, data, t, short=False):
@@ -1014,8 +1074,9 @@ def explain_reason(reason, data, t, short=False):
         try:
             values = json.loads(coded.group("values") or "{}")
             if coded.group("code") == "nodes_unassessed" and values.get("reasons"):
-                return nodes_unassessed_text(values["reasons"], data, t)
-            return t["reason_codes"][coded.group("code")].format(**values)
+                return nodes_unassessed_text(values["reasons"], data, t, short)
+            text = t["reason_codes"][coded.group("code")].format(**values)
+            return first_sentence(text) if short else text
         except (ValueError, KeyError):
             return reason
     match = REASON_PATTERN.match(reason or "")
@@ -1220,7 +1281,14 @@ h3{font-size:15px;margin:20px 0 8px}
 .tile .n{font-size:24px;font-weight:700;line-height:1.2}
 .tile .l{color:var(--muted);font-size:13px}
 .note{color:var(--muted);font-size:14px}
-.inv{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:8px 0}
+.inv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0}
+.tiles.measures .n{font-size:20px}
+.tile .s{font-size:12px;color:var(--muted);margin-top:2px}
+.servers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0}
+.srv{border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.srv .h{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px}
+.srv .f{display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13.5px;padding:3px 0}
+.srv .f .l{color:var(--muted)}
 .inv>div{background:var(--soft);border-radius:8px;padding:10px 14px}
 .inv .l{color:var(--muted);font-size:13px}
 .inv .v{font-size:19px;font-weight:700;line-height:1.3}
@@ -1232,6 +1300,16 @@ h3{font-size:15px;margin:20px 0 8px}
 .impact .name{font-weight:600}
 .impact .val{font-size:14px;display:flex;flex-wrap:wrap;gap:6px 16px}
 .problem .badge{margin-right:6px}
+.detail{margin:4px 0;font-size:13.5px}
+.nowrap{white-space:nowrap}
+.lines{list-style:none;margin:0;padding:0}.lines li{padding:8px 0;border-bottom:1px solid var(--line)}
+.lines .badge{margin-right:8px}.lines .rule{margin-left:8px}
+details.area{border-bottom:1px solid var(--line);padding:6px 0}
+details.area>summary{cursor:pointer;list-style:none;display:flex;gap:12px;align-items:baseline;padding:4px 0}
+details.area>summary .name{font-weight:600;min-width:200px}
+details.area>summary::before{content:"▸";color:var(--muted);width:12px}
+details.area[open]>summary::before{content:"▾"}
+details.area .rules{margin:4px 0 6px 24px}
 .topic{display:grid;grid-template-columns:200px 130px 1fr;gap:6px 14px;align-items:baseline;
 padding:9px 0;border-bottom:1px solid var(--line)}
 .topic .name{font-weight:600}
@@ -1290,17 +1368,17 @@ font-size:13px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
 .tabs>input:checked+label{background:#fff;color:var(--accent);border-color:var(--accent);
 box-shadow:inset 0 3px 0 var(--accent)}
 .tabs>.panel{display:none;border-top:2px solid var(--accent)}
-#tab-exec:checked~.panel-exec,#tab-tech:checked~.panel-tech{display:block}
+#tab-exec:checked~.panel-exec,#tab-eng:checked~.panel-eng,#tab-tech:checked~.panel-tech{display:block}
 .tabs .part{display:none}
 footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
-@media (max-width:640px){main{padding:24px 16px 48px}h1{font-size:22px}
+@media (max-width:640px){main{padding:24px 16px 48px}.inv{grid-template-columns:repeat(2,1fr)}h1{font-size:22px}
 table{display:block;overflow-x:auto}.topic{grid-template-columns:1fr auto}.topic .rules{grid-column:1/-1}
 .impact{grid-template-columns:1fr}.card dl{grid-template-columns:1fr}}
 @media print{main{padding:0;max-width:none}h2{break-after:avoid}.card,tr,.topic{break-inside:avoid}
 details::details-content{content-visibility:visible;display:block}
-details.card>summary h3::before,details.section>summary h2::before{content:none}
+details.card>summary h3::before,details.section>summary h2::before,details.area>summary::before{content:none}
 .tabs>label{display:none}.tabs>.panel{display:block!important;border-top:none}.tabs .part{display:block}
-.panel-tech{break-before:page}body{font-size:12px}
+.panel-eng,.panel-tech{break-before:page}body{font-size:12px}
 .meter i,.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 """
 
@@ -1380,7 +1458,8 @@ def disk_limits(data):
 
 
 def disk_percent(disk):
-    return round(usage_percent(disk["used_bytes"], disk.get("available_bytes"), disk["total_bytes"]))
+    """One decimal, as PG-CAP-001 judges it: 79.6 % must not read as the 80 % limit (hc128)."""
+    return round(usage_percent(disk["used_bytes"], disk.get("available_bytes"), disk["total_bytes"]), 1)
 
 
 def fmt_used_of(used, total):
@@ -1441,7 +1520,7 @@ def disk_cell(disk, limits, t):
              else "warn" if pct >= limits.get("warning", 101) else "ok")
     return (f'<span class="meter"><i class="m-{level}" style="width:{min(pct, 100)}%"></i></span>'
             f'{e(fmt_used_of(disk["used_bytes"], disk["total_bytes"]))} · '
-            f'{e(t["percent"].format(n=pct))}')
+            f'{e(t["percent"].format(n=f"{pct:g}"))}')
 
 
 def failover_item(data, t):
@@ -1457,17 +1536,25 @@ def failover_item(data, t):
     started = primary["timeline_started_at"]
     if started is None:
         return t["inv_failover"], t["inv_failover_unknown"], timeline
-    ago = t["inv_failover_ago"].format(ago=fmt_duration((primary["captured_at"] - started).total_seconds(), t))
-    return t["inv_failover"], ago, f"{timeline} · {fmt_time(started)}"
+    seconds = (primary["captured_at"] - started).total_seconds()
+    unit = next((u for u in (86400, 3600, 60) if seconds >= u), 1)
+    ago = t["inv_failover_ago"].format(ago=fmt_duration(seconds // unit * unit, t))
+    return t["inv_failover"], fmt_time(started), f"{ago} · {timeline}"
 
 
 def render_inventory(data, t):
-    """Executive view of the estate: totals and a row per server when few. Displays, never judges."""
+    """Executive view of the estate. Displays, never judges.
+
+    Only facts true for the whole system are added up (servers, version, data, last timeline change);
+    hardware is per server, since 3 servers of 1 core are not "3 cores" (Hasan, hc128): a card per
+    server when few, otherwise the range per server and the fullest data disk.
+    """
     nodes = data["nodes"]
     known = [n for n in nodes if n["server_version"] is not None]
     hosts = [n for n in nodes if n["logical_cpu_count"] is not None or n["memory_total_bytes"] is not None]
     disks = {n["target_id"]: d for n in nodes if (d := data_disk(n, data["storage"])) is not None}
     total = len(nodes)
+    few = len(nodes) <= INVENTORY_TABLE_LIMIT
 
     def partial(count):
         return t["inv_partial"].format(known=count, total=total) if total and count < total else ""
@@ -1482,29 +1569,26 @@ def render_inventory(data, t):
         items.append((t["inv_servers"], str(total), roles))
         versions = sorted({short_version(n["server_version"]) for n in known})
         items.append((t["inv_version"], ", ".join(versions) or t["inv_unknown"], partial(len(known))))
-        if hosts:
-            cores = sum(n["logical_cpu_count"] or 0 for n in hosts)
-            memory = sum(n["memory_total_bytes"] or 0 for n in hosts)
-            items.append((t["inv_cpu"], t["inv_cores"].format(n=cores), partial(len(hosts))))
-            items.append((t["inv_memory"], fmt_bytes(memory), partial(len(hosts))))
     failover = failover_item(data, t)
     if failover:
         items.append(failover)
     if data["databases"]:
         size = sum(d["database_size_bytes"] or 0 for d in data["databases"])
         items.append((t["inv_data"], fmt_bytes(size), t["inv_databases"].format(n=len(data["databases"]))))
-    # Data disks when known: other mounts (/boot, backups) would distort the ratio.
-    disk_rows = list(disks.values()) or data["storage"]
-    if disk_rows:
-        used = sum(s_["used_bytes"] or 0 for s_ in disk_rows)
-        size = sum(s_["total_bytes"] or 0 for s_ in disk_rows)
-        disk_nodes = len({s_["target_id"] for s_ in disk_rows})
-        available = (sum(s_["available_bytes"] for s_ in disk_rows)
-                     if all(s_.get("available_bytes") is not None for s_ in disk_rows) else None)
-        share = usage_percent(used, available, size)
-        pct = t["inv_full"].format(p=t["percent"].format(n=round(share))) if share is not None else ""
-        items.append((t["inv_data_disk"] if disks else t["inv_disk"], fmt_used_of(used, size),
-                      " · ".join(x for x in (pct, partial(disk_nodes)) if x)))
+    if not few:
+        cores = sorted(n["logical_cpu_count"] for n in hosts if n["logical_cpu_count"])
+        memory = sorted(n["memory_total_bytes"] for n in hosts if n["memory_total_bytes"])
+        if cores:
+            items.append((t["inv_cpu"], t["inv_cores"].format(n=span(cores, str)),
+                          " · ".join(x for x in (t["inv_per_server"], partial(len(cores))) if x)))
+        if memory:
+            items.append((t["inv_memory"], span(memory, fmt_bytes),
+                          " · ".join(x for x in (t["inv_per_server"], partial(len(memory))) if x)))
+        if disks:
+            fullest = max(disks.items(), key=lambda item: disk_percent(item[1]))
+            name = next(n["name"] for n in nodes if n["target_id"] == fullest[0])
+            items.append((t["inv_fullest_disk"], t["percent"].format(n=f"{disk_percent(fullest[1]):g}"),
+                          " · ".join(x for x in (name, partial(len(disks))) if x)))
     if not items:
         return ""
 
@@ -1512,19 +1596,30 @@ def render_inventory(data, t):
              + "".join(f'<div><div class="l">{e(label)}</div><div class="v">{e(value)}</div>'
                        f'<div class="s">{e(sub)}</div></div>' for label, value, sub in items)
              + "</div>"]
-    shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks
-             or n in hosts]
-    if shown and len(nodes) <= INVENTORY_TABLE_LIMIT:
-        rows = [[e(n["name"]), e(role_of(n, t)), or_unknown(os_text(n), t),
-                 or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"]) if n["logical_cpu_count"] else "", t),
-                 or_unknown(fmt_bytes(n["memory_total_bytes"]) if n["memory_total_bytes"] else "", t),
-                 disk_cell(disks.get(n["target_id"]), disk_limits(data), t)] for n in nodes]
-        parts.append(table([t["inv_servers"], t["inv_role"], t["os"], t["inv_cpu"], t["inv_memory"],
-                            t["inv_data_disk"]], rows, numeric=(3, 4)))
+    shown = [n for n in nodes if n["server_version"] is not None or n["target_id"] in disks or n in hosts]
+    if shown and few:
+        cards = []
+        for n in nodes:
+            facts = [(t["os"], or_unknown(os_text(n), t)),
+                     (t["inv_cpu"], or_unknown(t["inv_cores"].format(n=n["logical_cpu_count"])
+                                               if n["logical_cpu_count"] else "", t)),
+                     (t["inv_memory"], or_unknown(fmt_bytes(n["memory_total_bytes"])
+                                                  if n["memory_total_bytes"] else "", t)),
+                     (t["inv_data_disk"], disk_cell(disks.get(n["target_id"]), disk_limits(data), t))]
+            cards.append(f'<div class="srv"><div class="h"><b>{e(n["name"])}</b>'
+                         f'<span class="note">{e(role_of(n, t))}</span></div>'
+                         + "".join(f'<div class="f"><span class="l">{e(label)}</span>{value}</div>'
+                                   for label, value in facts) + "</div>")
+        parts.append(f'<div class="servers">{"".join(cards)}</div>')
     elif shown:
         parts.append(f'<p class="note">{e(t["inv_large_note"])}</p>')
-
     return "".join(parts)
+
+
+def span(values, fmt):
+    """'8' when every server has the same, '4–16' otherwise."""
+    low, high = fmt(values[0]), fmt(values[-1])
+    return low if low == high else f"{low}–{high}"
 
 
 def render_impact_chart(data, lang, t):
@@ -1595,7 +1690,9 @@ def render_topics(data, lang, t):
                 count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
                 severity = r["max_severity"] or "WARNING"
                 label = t["severity"].get(severity, severity).lower()
-                partial = unassessed_line(r, t)
+                partial = unassessed_line(r, t, short=True)
+                if partial and partial != unassessed_line(r, t):
+                    partial += " " + t["how_in_eng"]
                 items.append((severity.lower(),
                               f"<b>{e(rule_name)}</b> ({count} {e(t['findings_word'])}, {e(label)}): "
                               + e(first_sentence(rule_text(data, r["rule_id"], lang, "MEANING")))
@@ -1604,17 +1701,24 @@ def render_topics(data, lang, t):
                 # The rule's own scoped statement: no claim beyond what was checked.
                 items.append(("ok", e(healthy_text(data, r, lang, t))))
             elif r["outcome"] == "NOT_APPLICABLE":
-                reason = explain_reason(r.get("reason"), data, t, short=True)
+                # Said only here, so in full (pg_stat_statements: how to set it up).
+                reason = explain_reason(r.get("reason"), data, t)
                 items.append(("na", f"{e(rule_name)} ({e(t['outcome']['NOT_APPLICABLE'].lower())})"
                               + (f": {e(reason)}" if reason else "")))
             else:
+                # The full way to allow it is in the Engineering View (missing evidence); written once.
                 reason = explain_reason(r.get("reason"), data, t, short=True)
+                more = (REASON_CODE_PATTERN.match(r.get("reason") or "") is not None
+                        and reason != explain_reason(r.get("reason"), data, t))
                 items.append(("unknown", f"<b>{e(rule_name)}</b> ({e(t['topic_unknown'].lower())})"
-                              + (f": {e(reason)}" if reason else "")))
-        rows.append(f'<div class="topic"><span class="name">{e(name)}</span>'
-                    f'{badge(status, t["topic_" + status])}<ul class="rules">'
-                    + "".join(f'<li class="r-{cls}">{text}</li>' for cls, text in items) + "</ul></div>")
-    return (f"<h2>{e(t['topics_title'])}</h2>" + "".join(rows)
+                              + (f": {e(reason)}" if reason else "")
+                              + (f' <span class="facts">{e(t["how_in_eng"])}</span>' if more else "")))
+        opened = " open" if status in ("critical", "attention", "unknown", "partial") else ""
+        rows.append(f'<details class="area"{opened}><summary><span class="name">{e(name)}</span>'
+                    f'{badge(status, t["topic_" + status])}<span class="note">{len(items)}</span></summary>'
+                    '<ul class="rules">'
+                    + "".join(f'<li class="r-{cls}">{text}</li>' for cls, text in items) + "</ul></details>")
+    return (f"<h2>{e(t['results_by_area'])}</h2>" + "".join(rows)
             + f'<p class="note">{e(t["scope_note"])}</p>')
 
 
@@ -1633,23 +1737,40 @@ def problem_rows(data, rule_id, lang, t, findings, short, meaning=True):
 
 
 def render_main_problems(data, lang, t):
-    cards = []
+    """One line per problem: the full text is written once, in Findings and Evidence (ADR-0021)."""
+    items = []
     for result, findings in findings_by_rule(data):
-        worst = min((f["severity"] for f in findings), key=lambda s: SEVERITY_ORDER.get(s, 9))
+        worst = min((f["severity"] for f in findings), key=lambda s_: SEVERITY_ORDER.get(s_, 9))
         if worst == "INFO":
-            continue                         # recommendations stay out of the executive cards
+            continue                         # recommendations stay out of the executive summary
         name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
         meaning = first_sentence(rule_text(data, result["rule_id"], lang, "MEANING"))
-        # Closed by default: name, severity and one sentence; causes and steps on demand.
-        cards.append(
-            f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
-            f"{e(name)}<span class=\"note\">{len(findings)} {e(t['findings_word'])}</span></h3>"
-            f'<div class="lead">{e(meaning)}</div></summary><dl>'
-            + problem_rows(data, result["rule_id"], lang, t, findings, short=True, meaning=False)
-            + "</dl></details>")
+        items.append(f'<li>{badge(worst, t["severity"].get(worst, worst))}<b>{e(name)}</b>'
+                     f'<span class="rule">{e(result["rule_key"])}</span>'
+                     f'<span class="note"> · {e(where_text(findings, t))}</span>'
+                     f'<div class="facts">{e(meaning)}</div></li>')
     return f"<h2>{e(t['problems_title'])}</h2>" + (
-        f'<p class="note">{e(t["open_hint"])}</p>' + "".join(cards) if cards
-        else f'<p class="note">{e(t["no_problems"])}</p>')
+        f'<ul class="lines">{"".join(items)}</ul><p class="note">{e(t["exec_problems_hint"])}</p>'
+        if items else f'<p class="note">{e(t["no_problems"])}</p>')
+
+
+EXEC_NAMES = 5                  # checks named in the executive summary; the rest counted
+
+
+def render_unassessed_short(data, lang, t):
+    """Executive: the checks not assessed in one sentence; why and how to allow them in the Engineering View."""
+    names = [rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]) for r in data["results"]
+             if r["outcome"] not in ("HEALTHY", "ATTENTION_REQUIRED", "NOT_APPLICABLE")]
+    unknown = data.get("unknown_replicas") or []
+    if not names and not unknown:
+        return ""
+    shown = names if len(names) <= EXEC_NAMES else names[:EXEC_NAMES] + [t["and_more"].format(n=len(names) - EXEC_NAMES)]
+    text = t["exec_unassessed"].format(n=len(names), names=", ".join(shown)) if names else ""
+    if unknown:
+        text = " ".join(x for x in (text, t["unknown_replica_cause"].format(
+            n=len(unknown), list=", ".join(r["client_addr"] for r in unknown))) if x)
+    return (f'<div class="card unknown"><h3>{badge("unknown", t["topic_unknown"])}{e(t["unassessed_title"])}</h3>'
+            f'<div class="lead">{e(text)} {e(t["exec_unassessed_hint"])}</div></div>')
 
 
 def unassessed_groups(data, lang, t):
@@ -1659,6 +1780,15 @@ def unassessed_groups(data, lang, t):
     """
     groups = {}
     for r in data["results"]:
+        if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED") and r.get("unassessed"):
+            # Judged on some servers only: the others, with the full way to allow them, are said here.
+            cause = unassessed_line(r, t, short=True)
+            codes = dict.fromkeys(u["reason_code"] for u in r["unassessed"])
+            detail = " ".join(reason_label(c, t) for c in codes if reason_label(c, t) != reason_label(c, t, True))
+            groups.setdefault(("partial", cause), {"cause": cause, "detail": detail, "action": "", "rules": [],
+                                                   "source": None})["rules"].append(
+                rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"]))
+            continue
         if r["outcome"] in ("HEALTHY", "ATTENTION_REQUIRED", "NOT_APPLICABLE"):
             continue
         name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
@@ -1674,10 +1804,11 @@ def unassessed_groups(data, lang, t):
             offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
             action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
         else:
-            cause = explain_reason(r.get("reason"), data, t) or name
+            cause = explain_reason(r.get("reason"), data, t, short=True) or name
             key = ("cause", cause)                 # the same missing source is one item
             action = ""
         group = groups.setdefault(key, {"cause": cause, "action": action, "rules": [],
+                                        "detail": "" if failed else reason_detail(r.get("reason"), data, t),
                                         "source": match.group("source") if failed else None})
         group["rules"].append(name)
     # Settings the configuration recommendations could not cover for lack of server data.
@@ -1713,12 +1844,14 @@ def render_unassessed(data, lang, t):
     for g in groups:
         affected = ", ".join(g["rules"])
         item = f"<b>{e(g['cause'])}</b>"
+        if g.get("detail"):
+            item += f'<div class="detail">{e(g["detail"])}</div>'
         if g["rules"] != [g["cause"]]:
             item += f'<div class="facts">{e(t["unassessed_affects"])}: {e(affected)}</div>'
         if g["action"]:
             item += f'<div class="facts">{e(t["unassessed_action"])}: {e(g["action"])}</div>'
         items.append(f"<li>{item}</li>")
-    return (f'<details class="card unknown"><summary><h3>{badge("unknown", t["topic_unknown"])}'
+    return (f'<details class="card unknown" open><summary><h3>{badge("unknown", t["topic_unknown"])}'
             f'{e(t["unassessed_title"])}<span class="note">{count}</span></h3>'
             f'<div class="lead">{e(t["unassessed_lead"])}</div></summary>'
             f'<ul class="items">{"".join(items)}</ul></details>')
@@ -1740,32 +1873,98 @@ def shorten(text, limit=140):
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+def tile(number, label, sub=""):
+    return (f'<div class="tile"><div class="n">{e(number)}</div><div class="l">{e(label)}</div>'
+            + (f'<div class="s">{e(sub)}</div>' if sub else "") + "</div>")
+
+
+def measure_tiles(data, counts, t):
+    """Coverage, collection and applicability as tiles (ADR-0021, Hasan): all collected is not all assessed."""
+    collections = data["collections"]
+    ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
+    errors = sorted({first_line(c["status_message"]) for c in collections
+                     if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
+    collection_sub = (f"{t['collection_errors']}: {shorten(errors[0])}"
+                      + (f" {t['more_errors'].format(n=len(errors) - 1)}" if len(errors) > 1 else "")
+                      if errors else t["m_collection_sub"])
+    tiles = [tile(f'{counts["evaluated"]} / {counts["total"]}', t["m_coverage"], t["m_coverage_sub"])]
+    if collections:
+        tiles.append(tile(f"{ok} / {len(collections)}", t["m_collection"], collection_sub))
+    tiles.append(tile(f'{counts["total"]} / {counts["defined"]}', t["m_applicable"], t["m_applicable_sub"]))
+    tiles.append(tile(str(counts["not_applicable"]), t["m_not_applicable"], t["m_not_applicable_sub"]))
+    return '<div class="tiles measures">' + "".join(tiles) + "</div>"
+
+
 def render_executive(data, lang, t):
     counts, verdict = summarize(data)
     tiles = [(counts["critical"], t["count_critical"]), (counts["warning"], t["count_warning"]),
              (counts["healthy"], t["count_healthy"]), (counts["not_assessed"], t["count_not_assessed"])]
-    coverage = e(t["coverage"].format(**counts)) + (
-        f" · {e(t['not_assessed_note'].format(count=counts['not_assessed']))}"
-        if counts["not_assessed"] else "")   # the checks that do not apply are in the first sentence
-    collections = data["collections"]
-    ok = sum(1 for c in collections if c["status"] in ("SUCCESS", "PARTIAL_SUCCESS"))
-    if collections and ok < len(collections):
-        errors = sorted({first_line(c["status_message"]) for c in collections
-                         if c["status"] not in ("SUCCESS", "PARTIAL_SUCCESS") and c["status_message"]})
-        coverage += ("<br>" + e(t["collection_summary"].format(ok=ok, total=len(collections)))
-                     + (f" · {e(t['collection_errors'])}: {e(shorten(errors[0]))}"
-                        + (f" {e(t['more_errors'].format(n=len(errors) - 1))}" if len(errors) > 1 else "")
-                        if errors else ""))
     return (f'<div class="part">{e(t["part_exec"])}</div>'
             f'<div class="verdict v-{verdict}">{e(t["verdict_" + verdict])}'
             + (f' <span class="sub">{e(t["verdict_unassessed"].format(n=counts["not_assessed"]))}</span>'
                if counts["not_assessed"] and verdict != "none" else "") + "</div>"
-            + f'<p class="note">{coverage}</p><div class="tiles">'
-            + "".join(f'<div class="tile"><div class="n">{n}</div><div class="l">{e(label)}</div></div>'
-                      for n, label in tiles)
-            + "</div>" + render_main_problems(data, lang, t) + render_unassessed(data, lang, t)
-            + render_inventory(data, t)
-            + render_impact_chart(data, lang, t) + render_topics(data, lang, t))
+            + '<div class="tiles">' + "".join(tile(str(n), label) for n, label in tiles) + "</div>"
+            + measure_tiles(data, counts, t) + render_main_problems(data, lang, t) + render_unassessed_short(data, lang, t)
+            + render_impact_chart(data, lang, t) + render_inventory(data, t))
+
+
+def where_text(findings, t):
+    """'postgre-3', '3 servers', '3 databases': where a rule's findings are."""
+    nodes, databases = set(), set()
+    for f in findings:
+        details = f.get("details") or {}
+        node = details.get("node") or details.get("node_name")
+        if node:
+            nodes.add(node)
+        database = details.get("database_name") or details.get("database")
+        if database:
+            databases.add(database)
+    parts = []
+    for found, key in ((nodes, "where_nodes"), (databases, "where_databases")):
+        if len(found) == 1:
+            parts.append(next(iter(found)))
+        elif found:
+            parts.append(t[key].format(n=len(found)))
+    if len(findings) > max(len(nodes), len(databases)):     # several per place, or no place known
+        parts.append(t["where_items"].format(n=len(findings)))
+    return " · ".join(parts)
+
+
+def next_step(data, rule_id, lang, findings):
+    """The first item of the rule's recommendation: the step to start with."""
+    items = list_items(rule_text(data, rule_id, lang, "RECOMMENDATION", findings[0]["recommendation"]))
+    return items[0] if items else ""
+
+
+def render_review_order(data, lang, t):
+    """Findings in the suggested review order (ADR-0021): severity, then rule; never 'priority'."""
+    rows, advice = [], 0
+    for result, findings in findings_by_rule(data):
+        if result["rule_key"] == CONFIG_RULE and data.get("config"):
+            continue                         # the configuration table below
+        worst = min((f["severity"] for f in findings), key=lambda s_: SEVERITY_ORDER.get(s_, 9))
+        if worst == "INFO":
+            advice += 1
+            continue
+        name = rule_text(data, result["rule_id"], lang, "NAME", result["rule_name"])
+        rows.append([str(len(rows) + 1), f'<b>{e(name)}</b> <span class="rule">{e(result["rule_key"])}</span>',
+                     badge(worst, t["severity"].get(worst, worst)),
+                     f'<span class="nowrap">{e(where_text(findings, t))}</span>',
+                     e(next_step(data, result["rule_id"], lang, findings))])
+    if not rows and not advice:
+        return f"<h2>{e(t['review_title'])}</h2><p class=\"note\">{e(t['no_problems'])}</p>"
+    return (f"<h2>{e(t['review_title'])}</h2>"
+            + (table(t["review_cols"], rows) if rows else "")
+            + f'<p class="note">{e(t["review_note"])}'
+            + (f' {e(t["review_advice"].format(n=advice))}' if advice else "") + "</p>")
+
+
+def render_engineering(data, lang, t):
+    missing = render_unassessed(data, lang, t)
+    return (f'<div class="part">{e(t["part_eng"])}</div>'
+            + render_review_order(data, lang, t)
+            + (f"<h2>{e(t['missing_title'])}</h2>" + missing if missing else "")
+            + render_config(data, lang, t))
 
 
 def profile_line(profile, t):
@@ -2194,9 +2393,9 @@ def parameter_line(result, t):
         f"{key} = {fmt_quantity(p['value'], p['unit'], t)}" for key, p in sorted(params.items()))
 
 
-def unassessed_line(result, t):
+def unassessed_line(result, t, short=False):
     """'Server not assessed: postgre-2 (data not collected)' for a result with partial coverage."""
-    items = [f'{u["node"]} ({t["unassessed_reason"].get(u["reason_code"], u["reason_code"])})'
+    items = [f'{u["node"]} ({reason_label(u["reason_code"], t, short)})'
              for u in result.get("unassessed") or []]
     return t["unassessed_line"].format(items=", ".join(items)) if items else ""
 
@@ -2219,8 +2418,10 @@ def render_findings_detail(data, lang, t):
                                                    -float(f["observed_value"] or 0)))
         worst = findings[0]["severity"]
         rid = result["rule_id"]
-        facts = [x for x in (threshold_line(result, t), parameter_line(result, t),
-                             unassessed_line(result, t)) if x]
+        partial = unassessed_line(result, t, short=True)
+        if partial and partial != unassessed_line(result, t):
+            partial += " " + t["how_in_eng"]
+        facts = [x for x in (threshold_line(result, t), parameter_line(result, t), partial) if x]
         cards.append(
             f'<details class="card {e(worst)}"><summary><h3>{badge(worst, t["severity"].get(worst, worst))}'
             f'{e(rule_text(data, rid, lang, "NAME", result["rule_name"]))}'
@@ -2233,32 +2434,6 @@ def render_findings_detail(data, lang, t):
             + related_queries(result, findings, data, t) + "</details>")
     return f"<h2>{e(t['findings'])}</h2>" + (
         "".join(cards) or f'<p class="note">{e(t["no_findings"])}</p>')
-
-
-def render_results(data, lang, t):
-    rows = []
-    for key, topic in topic_summary(data):
-        entry = data["topics"].get(key)
-        topic_name = localized(entry, lang, "name") if entry else ""
-        for r in topic["results"]:
-            name = rule_text(data, r["rule_id"], lang, "NAME", r["rule_name"])
-            if r["outcome"] == "HEALTHY":
-                note = healthy_text(data, r, lang, t)
-            elif r["outcome"] == "ATTENTION_REQUIRED":
-                count = sum(1 for f in data["findings"] if f["rule_id"] == r["rule_id"])
-                note = " · ".join(x for x in (f"{count} {t['findings_word']}", threshold_line(r, t),
-                                              unassessed_line(r, t)) if x)
-            else:
-                note = explain_reason(r["reason"], data, t)
-            # A rule with findings shows their severity, the word used everywhere else in the report.
-            if r["outcome"] == "ATTENTION_REQUIRED" and r["max_severity"]:
-                status = badge(r["max_severity"], t["severity"].get(r["max_severity"], r["max_severity"]))
-            else:
-                status = badge(r["outcome"], t["outcome"].get(r["outcome"], r["outcome"]))
-            rows.append([e(topic_name), f'{e(name)} <span class="rule">{e(r["rule_key"])}</span>',
-                         status, e(note)])
-    return f"<h2>{e(t['results'])}</h2>" + table(
-        [t["area"], t["rule"], t["status"], ""], rows)
 
 
 def render_collections(data, t):
@@ -2645,19 +2820,20 @@ def related_queries(result, findings, data, t):
 def render_technical(data, lang, t):
     offline = data["check"].get("source") == "OFFLINE"
     return (f'<div class="part part-tech">{e(t["part_tech"])}</div>'
-            + render_system(data, t) + render_findings_detail(data, lang, t)
-            + render_config(data, lang, t) + render_query_stats(data, t)
-            + render_results(data, lang, t) + render_collections(data, t)
+            + render_findings_detail(data, lang, t) + render_topics(data, lang, t)
+            + render_query_stats(data, t) + render_system(data, t) + render_collections(data, t)
             + f"<h2>{e(t['method'])}</h2><p>{e(t['method_text_offline' if offline else 'method_text'])}</p>")
 
 
 def render_html(data, lang="tr"):
     t = TEXTS[lang]
-    # CSS-only tabs (no script): works in mail clients and locked-down browsers; print shows both.
+    # CSS-only tabs (no script): works in mail clients and locked-down browsers; print shows all three.
     tabs = ('<div class="tabs">'
             f'<input type="radio" name="part" id="tab-exec" checked><label for="tab-exec">{e(t["part_exec"])}</label>'
+            f'<input type="radio" name="part" id="tab-eng"><label for="tab-eng">{e(t["part_eng"])}</label>'
             f'<input type="radio" name="part" id="tab-tech"><label for="tab-tech">{e(t["part_tech"])}</label>'
             f'<div class="panel panel-exec">{render_executive(data, lang, t)}</div>'
+            f'<div class="panel panel-eng">{render_engineering(data, lang, t)}</div>'
             f'<div class="panel panel-tech">{render_technical(data, lang, t)}</div></div>')
     body = (render_header(data, t) + tabs
             + f"<footer>{e(t['generated'])}: {e(fmt_time(datetime.now(timezone.utc).astimezone()))}"
