@@ -16,7 +16,7 @@
 # df -a lists every mount: without it df keeps one mount per device, so the
 # data directory's own mount can be hidden behind "/" (bind mounts, containers).
 # Pseudo filesystems (size 0) are skipped by the parser. DATA_PATHS: where
-# pg_wal of each running data directory points (sudo -n when allowed).
+# pg_wal of each data directory points (sudo -n when allowed).
 # =============================================================================
 
 echo "===CAPTURED_AT==="
@@ -48,20 +48,30 @@ while read -r device; do
     echo "$device $(lsblk -ndo ROTA "$device" 2>/dev/null)"
 done
 
-# DATA_PATHS: per postmaster (-D in its command line) the data directory, the
-# real location of its pg_wal and how it was read: DIRECT, SUDO (sudo -n as
-# the postmaster's user, only if a sudoers rule allows exactly this readlink),
-# or DENIED. Nothing is changed; no password is ever asked.
+# DATA_PATHS: per data directory, where its pg_wal really is and how it was read:
+# DIRECT, SUDO (sudo -n as the postmaster's user, only if a sudoers rule allows
+# exactly this readlink), or DENIED. The directories: KEYSTONE_DATA_DIRECTORY,
+# which Keystone sets from SHOW data_directory (PostgreSQL started without -D,
+# e.g. the official Docker image, shows none), and every postmaster's -D.
+# Nothing is changed; no password is ever asked.
 echo "===DATA_PATHS==="
-ps -eo uid=,args= 2>/dev/null |
-awk '{ n = split($2, p, "/"); if (p[n] != "postgres" && p[n] != "postmaster") next
-       for (i = 3; i < NF; i++) if ($i == "-D") print $1, $(i + 1) }' | sort -u |
+KEYSTONE_DATA_DIRECTORY=${KEYSTONE_DATA_DIRECTORY:-${1:-}}    # or "sh -s -- <dir>" (offline)
+{
+    ps -eo uid=,args= 2>/dev/null |
+    awk '{ n = split($2, p, "/"); if (p[n] != "postgres" && p[n] != "postmaster") next
+           for (i = 3; i < NF; i++) if ($i == "-D") print $1, $(i + 1) }'
+    if [ -n "${KEYSTONE_DATA_DIRECTORY:-}" ]; then
+        uid=$(ps -eo uid=,args= 2>/dev/null |
+              awk '{ n = split($2, p, "/"); if (p[n] == "postgres" || p[n] == "postmaster") { print $1; exit } }')
+        echo "${uid:--} ${KEYSTONE_DATA_DIRECTORY}"
+    fi
+} | while read -r uid data; do echo "$uid ${data%/}"; done | sort -u -k2,2 |
 while read -r uid data; do
-    data=${data%/}
     owner=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1)
+    [ -n "$owner" ] || owner=postgres
     if [ -x "$data" ] && wal=$(readlink -f "$data/pg_wal" 2>/dev/null) && [ -n "$wal" ]; then
         via=DIRECT
-    elif [ -n "$owner" ] && wal=$(sudo -n -u "$owner" readlink -f "$data/pg_wal" 2>/dev/null) && [ -n "$wal" ]; then
+    elif wal=$(sudo -n -u "$owner" readlink -f "$data/pg_wal" 2>/dev/null) && [ -n "$wal" ]; then
         via=SUDO
     else
         wal=""; via=DENIED

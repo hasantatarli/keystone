@@ -1561,3 +1561,27 @@ class ReportStepTwoTests(unittest.TestCase):
                       report.render_unassessed_short(data, "tr", self.t))
         data["collections"] = [{"status": "FAILED"}]
         self.assertNotIn("tamamı başarıyla", report.render_unassessed_short(data, "tr", self.t))
+
+
+class MissingConnectionTextTests(unittest.TestCase):
+    """hc134: a missing database connection must not be told as a missing SSH (HOST) connection."""
+
+    def groups(self):
+        def result(rule_id, source):
+            return {"rule_id": rule_id, "rule_name": f"Rule {rule_id}", "outcome": "INSUFFICIENT_EVIDENCE",
+                    "reason": f"{source}: Required evidence is not available."}
+        data = {"results": [result(1, "PG_WAL_STATUS"), result(2, "PG_HOST_SNAPSHOT"), result(3, "PG_ROLES")],
+                "collections": [{"collector_key": k, "target_name": "TTL", "status": "NOT_COLLECTED",
+                                 "status_message": m}
+                                for k, m in (("PG_WAL_STATUS", "no database connection defined for this target"),
+                                             ("PG_HOST_SNAPSHOT", "no HOST connection defined for this target"),
+                                             ("PG_ROLES", "no database connection defined for this target"))],
+                "check": {"source": "ONLINE"}, "config": [], "rule_texts": {}}
+        return report.unassessed_groups(data, "tr", report.TEXTS["tr"])
+
+    def test_database_and_host_connections_apart(self):
+        groups = {g["source"]: g for g in self.groups()}
+        self.assertEqual(len(self.groups()), 2)                       # same server, two missing connections
+        self.assertIn("veritabanı bağlantısını", groups["PG_WAL_STATUS"]["action"])
+        self.assertEqual(groups["PG_WAL_STATUS"]["rules"], ["Rule 1", "Rule 3"])
+        self.assertIn("HOST bağlantısı", groups["PG_HOST_SNAPSHOT"]["action"])

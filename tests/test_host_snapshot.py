@@ -5,6 +5,7 @@ Run from the repository root:
 """
 
 import unittest
+from pathlib import Path
 
 from repository.worker import worker
 
@@ -124,3 +125,38 @@ class DiskTypeNoteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DataDirectoryGivenTests(unittest.TestCase):
+    """PostgreSQL without -D (official Docker image): the data directory comes from Keystone (hc132)."""
+
+    SCRIPT = Path(__file__).resolve().parents[1] / "providers" / "postgresql" / "telemetry" / "collectors" / "host_snapshot.sh"
+
+    def run_script(self, args=(), env=None):
+        import os
+        import subprocess
+        output = subprocess.run(["sh", str(self.SCRIPT), *args], capture_output=True, text=True, check=True,
+                                env={**os.environ, **(env or {})}).stdout
+        return [(r["data_directory"], r["wal_location"], r["read_via"])
+                for r in worker.parse_host_snapshot_output(output) if r["record_type"] == "DATA_PATH"]
+
+    def setUp(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, root)
+        (root / "wal").mkdir()
+        (root / "data").mkdir()
+        (root / "data" / "pg_wal").symlink_to(root / "wal")
+        self.data, self.wal = str(root / "data"), str((root / "wal").resolve())
+
+    def test_given_by_the_worker(self):
+        self.assertIn((self.data, self.wal, "DIRECT"),
+                      self.run_script(env={"KEYSTONE_DATA_DIRECTORY": self.data + "/"}))
+
+    def test_given_by_the_offline_collector(self):
+        self.assertIn((self.data, self.wal, "DIRECT"), self.run_script(args=[self.data]))
+
+    def test_the_worker_sets_it_before_the_script(self):
+        script = worker.script_with_data_directory("echo x\n", "/var/lib/it's data")
+        self.assertEqual(script, "KEYSTONE_DATA_DIRECTORY='/var/lib/it'\"'\"'s data'\necho x\n")
+        self.assertEqual(worker.script_with_data_directory("echo x\n", None), "echo x\n")

@@ -79,13 +79,19 @@ for HOST in $(echo "$HOSTS" | tr ',' ' '); do
             { echo "[$LABEL] $DB atlandi (hata)." >&2; rm -f "$OUT/${NAME}_db_$(safe "$DB").json"; }
     done
 
+    # The data directory as PostgreSQL reports it: the host script finds pg_wal there even when
+    # PostgreSQL runs without -D (the official Docker image).
+    # shellcheck disable=SC2086
+    DATADIR=$("$PSQL" -X -q -At $CONN -d postgres -c "SHOW data_directory" 2>/dev/null || true)
+    QUOTED="'$(printf %s "$DATADIR" | sed "s/'/'\\\\''/g")'"
+
     # Host facts: run here for this machine; over SSH for the others (the script is sent on stdin,
     # nothing is copied to the server; SSH asks its own password unless a key is set up).
     if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "127.0.0.1" ] || [ "$LABEL" = "$(hostname)" ]; then
-        sh "$HERE/host_snapshot.sh" > "$OUT/${NAME}_host.txt" 2>/dev/null && echo "[$LABEL] sunucu bilgisi toplandi."
+        sh "$HERE/host_snapshot.sh" "$DATADIR" > "$OUT/${NAME}_host.txt" 2>/dev/null && echo "[$LABEL] sunucu bilgisi toplandi."
     elif [ -n "$SSH_USER" ]; then
         echo "[$LABEL] sunucu bilgisi SSH ile toplaniyor ($SSH_USER@$HOST)..."
-        ssh -o ConnectTimeout=10 "$SSH_USER@$HOST" "sh -s" < "$HERE/host_snapshot.sh" > "$OUT/${NAME}_host.txt"
+        ssh -o ConnectTimeout=10 "$SSH_USER@$HOST" "sh -s -- $QUOTED" < "$HERE/host_snapshot.sh" > "$OUT/${NAME}_host.txt"
         if grep -q "^===CAPTURED_AT===" "$OUT/${NAME}_host.txt" 2>/dev/null; then
             echo "[$LABEL] sunucu bilgisi toplandi."
         else
