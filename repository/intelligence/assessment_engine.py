@@ -5,7 +5,6 @@ import argparse
 import ipaddress
 import json
 import logging
-import os
 import re
 from datetime import datetime, timezone
 
@@ -14,6 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg.rows import dict_row
 
 from repository.common.logging_config import configure_logging, get_logger
+from repository.common.repository_settings import repository_settings
 from repository.common.server_profile import server_profile
 from repository.intelligence import config_dictionary, config_recommendations as config_rec
 
@@ -22,16 +22,6 @@ from repository.intelligence import config_dictionary, config_recommendations as
 logger = get_logger("assessment_engine")
 
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-REPOSITORY_CONFIG = {
-    "host": os.getenv("KEYSTONE_REPOSITORY_HOST", "localhost"),
-    "port": int(os.getenv("KEYSTONE_REPOSITORY_PORT", "5432")),
-    "dbname": os.getenv("KEYSTONE_REPOSITORY_DB", "keystone_lab"),
-    "user": os.getenv("KEYSTONE_REPOSITORY_USER", "postgres"),
-    "password": os.getenv("KEYSTONE_REPOSITORY_PASSWORD"),
-}
 
 
 # -----------------------------------------------------------------------------
@@ -39,7 +29,7 @@ REPOSITORY_CONFIG = {
 # -----------------------------------------------------------------------------
 def connect_repository():
     return psycopg.connect(
-        **REPOSITORY_CONFIG,
+        **repository_settings(),
         row_factory=dict_row,
     )
 

@@ -4,7 +4,6 @@
 import hashlib
 import shlex
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 import uuid
@@ -14,6 +13,7 @@ import paramiko
 
 from psycopg.rows import dict_row
 from repository.common.credentials import decrypt_credential
+from repository.common.repository_settings import repository_settings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg.errors import QueryCanceled
 from psycopg import OperationalError
@@ -77,16 +77,6 @@ def log_task_outcome(task, status, exc):
                    task["target_name"], status, exc,
                    extra={"context": task_context(task)})
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-REPOSITORY_CONFIG = {
-    "host": os.getenv("KEYSTONE_REPOSITORY_HOST", "localhost"),
-    "port": int(os.getenv("KEYSTONE_REPOSITORY_PORT", "5432")),
-    "dbname": os.getenv("KEYSTONE_REPOSITORY_DB", "keystone_lab"),
-    "user": os.getenv("KEYSTONE_REPOSITORY_USER", "postgres"),
-    "password": os.getenv("KEYSTONE_REPOSITORY_PASSWORD")
-}
 
 # -----------------------------------------------------------------------------
 # Paths
@@ -102,7 +92,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def connect_repository():
     """Connection to the Keystone repository (KEYSTONE_REPOSITORY_* env vars)."""
     return psycopg.connect(
-        **REPOSITORY_CONFIG,
+        **repository_settings(),
         row_factory=dict_row
     )
 

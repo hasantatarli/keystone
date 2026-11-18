@@ -8,14 +8,14 @@ Shell syntax differs: examples are given for **PowerShell** (Windows lab) and **
 
 ## 1. Environment
 
-Every component reads the repository connection and secrets from environment variables.
+Every component reads the repository connection and secrets from environment variables, in one place (`repository/common/repository_settings.py`), when it connects. Temporary for V1: these settings will be managed from the web interface.
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `KEYSTONE_REPOSITORY_HOST` | Repository PostgreSQL host | `localhost` |
 | `KEYSTONE_REPOSITORY_PORT` | Port | `5432` |
-| `KEYSTONE_REPOSITORY_DB` | Database | `keystone_lab` |
-| `KEYSTONE_REPOSITORY_USER` | User | `postgres` |
+| `KEYSTONE_REPOSITORY_DB` | Database | `keystone` |
+| `KEYSTONE_REPOSITORY_USER` | User | none — **required**; without it every command stops with a message. Keystone never falls back to a superuser silently. |
 | `KEYSTONE_REPOSITORY_PASSWORD` | Password | none |
 | `KEYSTONE_MASTER_KEY` | Decrypts target credentials (worker, agent, credential tool) | none |
 | `KEYSTONE_LOG_DIR` | Log file directory (`<component>.log`, rotating) | `logs` |
