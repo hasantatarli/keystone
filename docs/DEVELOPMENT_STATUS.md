@@ -290,6 +290,7 @@ Hardening backlog:
 
 - Later (Engineering Intelligence): known activity windows, for example a weekend backup, as context so that long runs inside them are not reported. Related to the deferred time windows in ADR-0015.
 - Collector target sessions: short `lock_timeout`; shorter `statement_timeout` for `PG_TABLE_CAPACITY` (relation size functions take AccessShareLock on every relation; a concurrent DDL would queue other sessions behind it). Values to be decided from field experience.
+- Multi-system tour, laptop-pg (Windows, PostgreSQL 17.9, live, 2026-11-18, hc137–hc140). Fixed on `fix/no-connection-live-check`: a target with no active connection is refused before anything is written (hc137 was a live check of an offline-fed target, 0 of 55 assessed). From the review, to do: PG-SEC-005 weighs only the method, so `host all all 0.0.0.0/0 md5` is INFO — an open address range for every database and user should count (with the MEANING-vs-observed item above); live host collection on Windows (SSH runs `sh` only; Windows host data is offline only); a SYSTEM target without its own connection could use its primary node's (to discuss); the Executive Summary collection tile shows the raw English error; a missing-evidence row names one collector when fifteen failed for the same reason; Keystone's own `ix_rule_evidence_requirement_rule` is covered by `uq_rule_evidence_requirement` (PG-IDX-003 on the lab repository) — drop it by migration.
 
 Planned, not blocking the MVP engine:
 

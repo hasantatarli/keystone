@@ -150,6 +150,8 @@ python -m repository.healthcheck.health_check --help
 
 - Missing collector assignments are created as ON_DEMAND only when the target has a suitable connection; otherwise the collection is listed as NOT_COLLECTED with the reason.
 - A collector past the wait limit is not waited for (WAIT_LIMIT); the command still waits for it to end before exiting.
+- A target with no active connection at all (neither on the target nor on its nodes) is refused before anything is written, exit code 2: it is fed by offline evidence, so a live check would collect nothing (hc137, 2026-11-18). Import its evidence with `import_bundle`, or render an imported check again with `health_check_report --health-check <id>`. One connection is enough to start; what cannot be collected is listed as NOT_COLLECTED. Unknown and inactive targets end the same way.
+- A SYSTEM target's own collectors (database inventory, activity, statistics) use a connection on the SYSTEM target itself, not a node's: a one-node system needs the connection on both (laptop-pg, hc138).
 
 ### Report of an existing health check
 
