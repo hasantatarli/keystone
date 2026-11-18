@@ -10,6 +10,7 @@ health check; its rules end INSUFFICIENT_EVIDENCE and the reason is kept.
 
 import argparse
 import getpass
+import sys
 import time
 import uuid
 
@@ -60,6 +61,14 @@ def load_target_tree(conn, target_id):
         "ORDER BY target_id", (target_id,)
     ).fetchall()
     return target, nodes
+
+
+def has_any_connection(conn, target, nodes):
+    """True if the target or one of its nodes has an active connection of any kind."""
+    ids = [target["target_id"]] + [n["target_id"] for n in nodes]
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM keystone.target_connection "
+        "WHERE target_id = ANY(%s) AND is_active) AS ok", (ids,)).fetchone()["ok"]
 
 
 def load_assessments(conn, provider, assessment_key=None):
@@ -275,6 +284,13 @@ def run_health_check(connect, target_id, assessment_key=None,
     """Returns the health_check_id. Raises only if the health check itself cannot run."""
     with connect() as conn:
         target, nodes = load_target_tree(conn, target_id)
+        if not has_any_connection(conn, target, nodes):
+            # Fed by offline evidence only: a live check would collect nothing (hc137).
+            raise ValueError(
+                f"Target {target_id} ({target['name']}) has no active connection, so a live health "
+                "check cannot collect anything. For evidence collected on the customer side use "
+                "python -m repository.offline.import_bundle; to render an imported check again use "
+                "python -m repository.report.health_check_report --health-check <id>.")
         assessment_keys = load_assessments(conn, target["provider"], assessment_key)
         # The profile as it is now: reports of this check keep it after the target changes.
         row = conn.execute(
@@ -450,8 +466,12 @@ def main(argv=None):
     except Exception:
         user = None
     release_reference.refresh(worker.connect_repository)     # best effort: offline goes on silently
-    health_check_id = run_health_check(worker.connect_repository, args.target,
-                                       args.assessment, args.wait_minutes, requested_by=user)
+    try:
+        health_check_id = run_health_check(worker.connect_repository, args.target,
+                                           args.assessment, args.wait_minutes, requested_by=user)
+    except ValueError as error:      # unknown, inactive or unreachable target: nothing was written
+        print(error, file=sys.stderr)
+        raise SystemExit(2)
     with worker.connect_repository() as conn:
         print_summary(conn, health_check_id)
         if args.report:

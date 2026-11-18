@@ -231,6 +231,44 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(self.conn.execute(
             "SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"], 0)
 
+    def test_target_without_any_connection_fails_before_creating_a_record(self):
+        # Fed by offline evidence only (hc137, 2026-11-18): a live check would collect nothing.
+        offline = self.add_target("offline-system", "SYSTEM", sql_connection=False)
+        self.add_target("offline-node", "NODE", parent=offline, sql_connection=False)
+        with self.assertRaises(ValueError) as raised:
+            hc.run_health_check(self.connect, offline)
+        self.assertIn("no active connection", str(raised.exception))
+        self.assertIn("import_bundle", str(raised.exception))
+        self.assertEqual(self.conn.execute(
+            "SELECT count(*) AS n FROM keystone.health_check").fetchone()["n"], 0)
+
+    def test_inactive_connections_count_as_none(self):
+        self.conn.execute("UPDATE keystone.target_connection SET is_active = FALSE")
+        self.conn.commit()
+        with self.assertRaises(ValueError):
+            hc.run_health_check(self.connect, self.system)
+
+    def test_one_node_connection_is_enough_to_start(self):
+        # Partly connected systems still run; what cannot be collected is reported (node3).
+        partly = self.add_target("partly", "SYSTEM", sql_connection=False)
+        self.add_target("partly-node", "NODE", parent=partly, host=True, sql_connection=False)
+        with patch.object(worker, "connect_repository", self.connect), \
+                self.assertLogs("keystone", level="INFO"):
+            check_id = hc.run_health_check(self.connect, partly, process=self.fake_process)
+        self.assertIsNotNone(check_id)
+
+    def test_main_prints_the_reason_and_exits_without_a_traceback(self):
+        offline = self.add_target("offline-system", "SYSTEM", sql_connection=False)
+        err = io.StringIO()
+        with patch.object(worker, "connect_repository", self.connect), \
+                patch.object(hc, "configure_logging"), \
+                patch.object(hc.release_reference, "refresh"), \
+                contextlib.redirect_stderr(err), \
+                self.assertRaises(SystemExit) as raised:
+            hc.main(["--target", str(offline)])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("no active connection", err.getvalue())
+
     def test_summary_prints_collections_and_rules(self):
         self.failing = {"PG_REPLICATION_SLOTS"}
         check_id = self.run_check()
