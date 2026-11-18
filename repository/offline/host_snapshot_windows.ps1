@@ -67,11 +67,18 @@ try {
 # the data directory, where its pg_wal really is (junction or symbolic link
 # target, else pg_wal itself) and DIRECT or DENIED. Reads only.
 "===DATA_PATHS==="
-Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
+# KEYSTONE_DATA_DIRECTORY: set by keystone_collect.ps1 from SHOW data_directory.
+$DataDirs = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
     Where-Object { $_.PathName -match 'pg_ctl' } |
     ForEach-Object {
-        if ($_.PathName -notmatch '-D\s+(?:"([^"]+)"|(\S+))') { return }
-        $data = (@($Matches[1], $Matches[2]) | Where-Object { $_ } | Select-Object -First 1).TrimEnd('\')
+        if ($_.PathName -match '-D\s+(?:"([^"]+)"|(\S+))') {
+            @($Matches[1], $Matches[2]) | Where-Object { $_ } | Select-Object -First 1
+        }
+    })
+if ($env:KEYSTONE_DATA_DIRECTORY) { $DataDirs += $env:KEYSTONE_DATA_DIRECTORY }
+$DataDirs | ForEach-Object { $_.Replace('/', '\').TrimEnd('\') } | Sort-Object -Unique |
+    ForEach-Object {
+        $data = $_
         try {
             $item = Get-Item -LiteralPath (Join-Path $data "pg_wal") -ErrorAction Stop
             $wal = if ($item.LinkType -and $item.Target) { @($item.Target)[0] } else { $item.FullName }

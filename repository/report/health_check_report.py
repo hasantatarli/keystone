@@ -89,6 +89,7 @@ TEXTS = {
         "unassessed_action": "Yapılması gereken",
         "action_CONNECTION_FAILED": "Keystone'un bu sunuculara bağlanabildiğini kontrol edin: ağ erişimi, pg_hba.conf, kullanıcı ve şifre.",
         "action_NOT_COLLECTED": "Bu sunucular için gereken bağlantıyı tanımlayın (SSH verisi için HOST bağlantısı).",
+        "action_NOT_COLLECTED_database": "Bu sunucular için veritabanı bağlantısını tanımlayın (DIRECT bağlantı); veritabanından gelen bütün veriler bunu bekliyor.",
         "action_NOT_COLLECTED_offline": "Eksik dosyayı toplayın: sunucu bilgisi için veritabanı sunucusunda host script'ini (host_snapshot.sh ya da host_snapshot_windows.ps1) çalıştırın; diğerleri için toplayıcıyı yeniden çalıştırın.",
         "action_other": "Hata ayrıntısı Bulgular ve Kanıt sekmesinde (Toplanan Veriler); sorunu giderip health check'i tekrarlayın.",
         "coverage": "Tanımlı {defined} kontrolden {total} tanesi bu sisteme uygulanabilir; {evaluated} tanesi sonuç verdi.",
@@ -411,6 +412,7 @@ TEXTS = {
         "unassessed_action": "What to do",
         "action_CONNECTION_FAILED": "Check that Keystone can connect to these servers: network access, pg_hba.conf, user and password.",
         "action_NOT_COLLECTED": "Define the connection these servers need (a HOST connection for SSH data).",
+        "action_NOT_COLLECTED_database": "Define the database connection of these servers (a DIRECT connection); every piece of data from the database waits for it.",
         "action_NOT_COLLECTED_offline": "Collect the missing file: for server data run the host script (host_snapshot.sh or host_snapshot_windows.ps1) on the database server; for the rest run the collector again.",
         "action_other": "The error is in Findings and Evidence (collected data); fix it and run the health check again.",
         "coverage": "Of {defined} defined checks, {total} apply to this system; {evaluated} produced a result.",
@@ -1857,9 +1859,13 @@ def unassessed_groups(data, lang, t):
             targets = ", ".join(sorted({c["target_name"] for c in failed}))
             cause = t["unassessed_collect"].format(
                 targets=targets, source=match.group("source"), status=status_suffix(status, t))
-            key = (targets, status)
+            # Which connection is missing decides what to define: SSH for host data, else the database.
+            ssh = match.group("source") == "PG_HOST_SNAPSHOT"
+            key = (targets, status, ssh)
             offline = data["check"].get("source") == "OFFLINE" and status == "NOT_COLLECTED"
-            action = t["action_NOT_COLLECTED_offline"] if offline else t.get("action_" + status, t["action_other"])
+            action = (t["action_NOT_COLLECTED_offline"] if offline
+                      else t["action_NOT_COLLECTED_database"] if status == "NOT_COLLECTED" and not ssh
+                      else t.get("action_" + status, t["action_other"]))
             kind = "collection"
         else:
             cause = explain_reason(r.get("reason"), data, t, short=True) or name

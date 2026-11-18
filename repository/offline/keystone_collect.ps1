@@ -142,6 +142,9 @@ try {
         # Host facts: this computer directly; a Linux server over SSH (the script goes on stdin,
         # nothing is copied to the server; SSH asks its own password unless a key is set up).
         $HostFile = Join-Path $Out "${Name}_host.txt"
+        # The data directory as PostgreSQL reports it: pg_wal is found there even without -D.
+        $DataDir = (& $Psql @Conn -d postgres -c "SHOW data_directory" 2>$null | Select-Object -First 1)
+        $env:KEYSTONE_DATA_DIRECTORY = $DataDir
         if ($NoHost) { }
         elseif ($HostName -in $Me) {
             & (Join-Path $Here "host_snapshot_windows.ps1") | Out-File -Encoding utf8 $HostFile
@@ -151,7 +154,7 @@ try {
             Write-Host "[$Label] sunucu bilgisi SSH ile toplaniyor ($SshUser@$HostName)..."
             # Start-Process passes the file and the output byte for byte (a PowerShell pipe would not).
             Start-Process -FilePath $Ssh.Source -NoNewWindow -Wait `
-                -ArgumentList @("-o", "ConnectTimeout=10", "$SshUser@$HostName", "sh -s") `
+                -ArgumentList @("-o", "ConnectTimeout=10", "$SshUser@$HostName", ("sh -s -- '" + ($DataDir -replace "'", "'\''") + "'")) `
                 -RedirectStandardInput $HostScript -RedirectStandardOutput $HostFile
             if ((Test-Path $HostFile) -and (Select-String -Path $HostFile -Pattern "^===CAPTURED_AT===" -Quiet)) {
                 Write-Host "[$Label] sunucu bilgisi toplandi."

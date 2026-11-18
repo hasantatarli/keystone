@@ -2,6 +2,7 @@
 # Imports
 # -----------------------------------------------------------------------------
 import hashlib
+import shlex
 import logging
 import os
 from datetime import datetime, timezone
@@ -786,7 +787,29 @@ def parse_data_paths(sections, captured_at):
     return rows
 
 
-def execute_ssh_collector(task):
+def known_data_directory(conn, target_id):
+    """data_directory of the node from its latest configuration snapshot, or None before the first one.
+
+    The host script needs it to find pg_wal: PostgreSQL started without -D (the official Docker image,
+    PGDATA) shows no data directory on its command line, while SHOW data_directory is always right.
+    """
+    row = conn.execute(
+        """
+        SELECT setting_value FROM postgresql.configuration_snapshot
+        WHERE target_id = %s AND setting_name = 'data_directory'
+        ORDER BY captured_at DESC LIMIT 1
+        """, (target_id,)).fetchone()
+    return (row or {}).get("setting_value") or None
+
+
+def script_with_data_directory(script, data_directory):
+    """The script with KEYSTONE_DATA_DIRECTORY set before it; the file and its checksum stay unchanged."""
+    if not data_directory:
+        return script
+    return f"KEYSTONE_DATA_DIRECTORY={shlex.quote(data_directory)}\n" + script
+
+
+def execute_ssh_collector(task, data_directory=None):
     """Verify checksum, run the shell collector over SSH, parse its output."""
     script_path = PROJECT_ROOT / task["script_file"]
 
@@ -802,9 +825,7 @@ def execute_ssh_collector(task):
             f"Collector checksum mismatch: {task['collector_key']}"
         )
 
-    script = script_path.read_text(
-        encoding="utf-8"
-    )
+    script = script_with_data_directory(script_path.read_text(encoding="utf-8"), data_directory)
 
     client = connect_ssh_target(task)
 
@@ -2520,7 +2541,7 @@ def process_task(task):
                 error_message = None
 
                 if task["execution_type"] == "SSH":
-                    rows = execute_ssh_collector(task)
+                    rows = execute_ssh_collector(task, known_data_directory(conn, task["target_id"]))
 
                 elif task["execution_scope"] in ("DATABASE", "NODE_DATABASE"):
                     rows, execution_info = execute_database_scoped_collector(task)
