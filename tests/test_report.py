@@ -7,6 +7,7 @@ Run from the repository root:
 from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from repository.report import health_check_report as report
@@ -1585,3 +1586,32 @@ class MissingConnectionTextTests(unittest.TestCase):
         self.assertIn("veritabanı bağlantısını", groups["PG_WAL_STATUS"]["action"])
         self.assertEqual(groups["PG_WAL_STATUS"]["rules"], ["Rule 1", "Rule 3"])
         self.assertIn("HOST bağlantısı", groups["PG_HOST_SNAPSHOT"]["action"])
+
+
+class HbaWeaknessColumnTests(unittest.TestCase):
+    """PG-SEC-005 (V068): each line says why it is weak; old findings without the reason keep their table."""
+
+    def finding(self, weakness=None):
+        details = {"node": "TTL", "line_number": 115, "conn_type": "host", "databases": "{all}",
+                   "users": "{all}", "address": "0.0.0.0/0", "auth_method": "md5",
+                   "captured_at": "2026-11-18T17:46:00+03:00"}
+        if weakness is not None:
+            details["weakness"] = weakness
+        return {"severity": "WARNING", "details": details, "template_values": {"node_name": "TTL"},
+                "observed_value": None, "observed_unit": None}
+
+    def test_reasons_in_both_languages(self):
+        for lang, expected in (("tr", "md5, scram-sha-256'dan zayıf · her adrese açık"),
+                               ("en", "md5, weaker than scram-sha-256 · open to every address")):
+            fields = report.finding_fields(self.finding(["md5", "open_address"]), report.TEXTS[lang])
+            self.assertEqual(fields["weakness"], expected)
+
+    def test_column_only_when_findings_carry_it(self):
+        result = {"rule_key": "PG-SEC-005"}
+        t = report.TEXTS["tr"]
+        with unittest.mock.patch.object(report, "finding_sentence", return_value=""):
+            new = report.findings_table(result, [self.finding(["md5", "open_address"])], {}, "tr", t)
+            old = report.findings_table(result, [self.finding()], {}, "tr", t)
+        self.assertIn("<th>Neden</th>", new)
+        self.assertIn("her adrese açık", new)
+        self.assertNotIn("<th>Neden</th>", old)

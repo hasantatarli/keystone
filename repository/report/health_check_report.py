@@ -308,7 +308,10 @@ TEXTS = {
         "col_object": "Nesne", "col_kind": "Tür", "col_wasted": "Tahmini boş alan", "col_wasted_share": "Boş alan payı",
         "col_method": "Yöntem", "object_kind": {"TABLE": "tablo", "INDEX": "index"},
         "col_hba_line": "Satır", "col_conn_type": "Tür", "col_databases": "Veritabanı", "col_users": "Kullanıcı",
-        "col_address": "Adres", "col_auth_method": "Yöntem",
+        "col_address": "Adres", "col_auth_method": "Yöntem", "col_hba_why": "Neden",
+        "hba_weakness": {"trust_network": "ağdan şifresiz giriş (trust)", "trust_local": "yerel socket'ten şifresiz giriş (trust)",
+                         "password_network": "şifre ağda açık metin (password)", "md5": "md5, scram-sha-256'dan zayıf",
+                         "open_address": "her adrese açık"},
         "col_table": "Tablo", "col_table_size": "Boyut", "col_seq_scans": "Sequential scan",
         "col_index_scans": "Index scan", "col_seq_share": "Sequential payı", "col_rows_per_scan": "Tarama başına satır",
         "col_wait": "Bekleme", "col_blocker": "Bloklayan oturum", "col_blocker_query": "Bloklayanın son sorgusu",
@@ -629,7 +632,10 @@ TEXTS = {
         "col_object": "Object", "col_kind": "Kind", "col_wasted": "Estimated free space", "col_wasted_share": "Free share",
         "col_method": "Method", "object_kind": {"TABLE": "table", "INDEX": "index"},
         "col_hba_line": "Line", "col_conn_type": "Type", "col_databases": "Database", "col_users": "User",
-        "col_address": "Address", "col_auth_method": "Method",
+        "col_address": "Address", "col_auth_method": "Method", "col_hba_why": "Why",
+        "hba_weakness": {"trust_network": "no password over the network (trust)", "trust_local": "no password on the local socket (trust)",
+                         "password_network": "password in clear text on the network (password)", "md5": "md5, weaker than scram-sha-256",
+                         "open_address": "open to every address"},
         "col_table": "Table", "col_table_size": "Size", "col_seq_scans": "Sequential scans",
         "col_index_scans": "Index scans", "col_seq_share": "Sequential share", "col_rows_per_scan": "Rows per scan",
         "col_wait": "Waiting", "col_blocker": "Blocking session", "col_blocker_query": "Blocker's last query",
@@ -2258,6 +2264,8 @@ def finding_fields(f, t):
             details[key] = f"{details[key]:,}"
     if isinstance(details.get("size_bytes"), (int, float)):
         details["size_bytes"] = fmt_bytes(details["size_bytes"])
+    if isinstance(details.get("weakness"), list):  # PG-SEC-005: why the line is weak (V068)
+        details["weakness"] = " · ".join(t["hba_weakness"].get(w, w) for w in details["weakness"])
     if isinstance(details.get("uses"), list):     # PG-CAP-003: what lives on the disk
         details["uses"] = ", ".join(details["uses"])
         if isinstance(details.get("available_bytes"), (int, float)):
@@ -2340,7 +2348,7 @@ FINDING_COLUMNS = {
                      ("observed", "col_wasted_share"), ("method", "col_method")],
     "PG-SEC-005": [("node", "detail_node"), ("line_number", "col_hba_line"), ("conn_type", "col_conn_type"),
                    ("databases", "col_databases"), ("users", "col_users"), ("address", "col_address"),
-                   ("auth_method", "col_auth_method")],
+                   ("auth_method", "col_auth_method"), ("weakness", "col_hba_why")],
     "PG-IDX-005": [("database_name", "detail_database"), ("table", "col_table"), ("size_bytes", "col_table_size"),
                    ("seq_scans", "col_seq_scans"), ("index_scans", "col_index_scans"),
                    ("observed", "col_seq_share"), ("rows_per_scan", "col_rows_per_scan"), ("period", "col_period")],
