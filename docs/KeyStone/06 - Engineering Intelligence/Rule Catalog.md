@@ -962,8 +962,12 @@ Unit tests: full scans of a large table over a week, LIMIT scans, small, indexed
 | --- | --- |
 | Evidence | `PG_HBA_RULES` (PG026: `pg_hba_file_rules` per node through `query_to_xml`, with an ACCESS row), required, 86 400 s |
 | Condition | per line: `trust` on host types → CRITICAL; `trust` on local → WARNING; `password` on host types → WARNING; `md5` → INFO |
+| Open address (V068) | a weak network line open to every address (`all`, `0.0.0.0/0`, `::/0`) is one level higher: `md5` → WARNING, `password` → CRITICAL (`trust` is already CRITICAL). The address decides, not all databases / all users. `scram-sha-256` open to every address is network exposure, not this rule's. `samenet` / `samehost` are not every address |
+| Details | `weakness`: the reasons of the line (`trust_network`, `trust_local`, `password_network`, `md5`, `open_address`); the report shows them in a Why column. MEANING and IMPACT no longer list methods the system may not have (V068) |
 | Privilege | superuser only by default; without it the node is not assessed (`hba_not_readable`) and the report gives `GRANT SELECT ON pg_catalog.pg_hba_file_rules` and `GRANT EXECUTE ON FUNCTION pg_catalog.pg_hba_file_rules()` |
 | Subject | HBA_RULE (node:line) |
+
+Verification (V068): unit tests for every method open and narrow (IPv4, IPv6, `all`, `samenet`, a /32 host, scram open), local lines never open; report column in both languages and absent for older findings. Lab: laptop-pg line 115 `host all all 0.0.0.0/0 md5` (hc140 INFO) expected WARNING.
 
 ## PG-MAINT-004 — Table and Index Bloat (PG_MAINTENANCE_HEALTH, topic MAINTENANCE)
 

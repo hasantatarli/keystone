@@ -2050,6 +2050,35 @@ class HbaRuleTests(unittest.TestCase):
         self.assertEqual(findings[1]["template_values"]["address"], "0.0.0.0/0")
         self.assertEqual(findings[0]["template_values"]["address"], "local")
 
+    def test_open_to_every_address_is_one_level_higher(self):
+        # laptop-pg hc140 (2026-11-18): host all all 0.0.0.0/0 md5 was INFO.
+        rows = [hba_access(1, "pg1"),
+                hba(1, "pg1", 115, "host", "md5", "0.0.0.0", "0.0.0.0"),
+                hba(1, "pg1", 116, "host", "md5", "::", "::"),
+                hba(1, "pg1", 117, "hostssl", "md5", "all"),
+                hba(1, "pg1", 118, "host", "password", "0.0.0.0", "0.0.0.0"),
+                hba(1, "pg1", 119, "host", "trust", "all"),
+                hba(1, "pg1", 120, "host", "md5", "192.168.1.0", "255.255.255.0"),
+                hba(1, "pg1", 121, "host", "md5", "10.0.0.5", "255.255.255.255"),
+                hba(1, "pg1", 122, "host", "scram-sha-256", "0.0.0.0", "0.0.0.0"),
+                hba(1, "pg1", 123, "host", "md5", "samenet")]
+        findings = engine.evaluate_hba_rules(rows, rule(), [])
+        got = {f["details"]["line_number"]: (f["severity"], f["details"]["weakness"]) for f in findings}
+        self.assertEqual(got, {
+            115: ("WARNING", ["md5", "open_address"]),
+            116: ("WARNING", ["md5", "open_address"]),
+            117: ("WARNING", ["md5", "open_address"]),
+            118: ("CRITICAL", ["password_network", "open_address"]),
+            119: ("CRITICAL", ["trust_network", "open_address"]),     # already the highest
+            120: ("INFO", ["md5"]),
+            121: ("INFO", ["md5"]),
+            123: ("INFO", ["md5"])})                                  # samenet is not every address
+        self.assertNotIn(122, got)                                    # scram open: not this rule's
+
+    def test_local_lines_are_never_open_addresses(self):
+        line = hba(1, "pg1", 90, "local", "trust", "all")
+        self.assertEqual(engine.hba_weakness(line), ("WARNING", ["trust_local"]))
+
     def test_unreadable_node_is_not_assessed(self):
         r = rule()
         rows = [hba_access(1, "pg1", readable=False), hba_access(2, "pg2"), hba(2, "pg2", 90, "local", "trust")]

@@ -3037,26 +3037,50 @@ def evaluate_heavy_seq_scans(rows, rule, thresholds):
 HBA_NETWORK_TYPES = {"host", "hostssl", "hostnossl", "hostgssenc", "hostnogssenc"}
 
 
-def hba_severity(rule_row):
-    """The risk of one pg_hba.conf line, or None.
+HBA_SEVERITY_UP = {"INFO": "WARNING", "WARNING": "CRITICAL", "CRITICAL": "CRITICAL"}
+HBA_ANY_ADDRESS = {"0.0.0.0/0", "::/0"}
+
+
+def hba_open_address(rule_row):
+    """True for a network line that accepts every address: all, 0.0.0.0/0 or ::/0."""
+    if rule_row["conn_type"] not in HBA_NETWORK_TYPES:
+        return False
+    address = (rule_row["address"] or "").strip().lower()
+    return address == "all" or hba_address(rule_row["address"], rule_row["netmask"]) in HBA_ANY_ADDRESS
+
+
+def hba_weakness(rule_row):
+    """(severity, reasons) of one pg_hba.conf line, or (None, []).
 
     trust over the network: anyone reaching the port logs in without a password (CRITICAL);
     trust on the local socket: any operating system user, as any database user (WARNING);
     password over the network: the password travels in clear text (WARNING);
     md5: deprecated (PostgreSQL 18), weaker than scram-sha-256 (INFO).
+    A weak line open to every address is one level higher (Hasan, 2026-11-18: 0.0.0.0/0 md5 on
+    laptop-pg was INFO). An open line with scram-sha-256 is network exposure, not this rule's.
     """
     method, network = rule_row["auth_method"], rule_row["conn_type"] in HBA_NETWORK_TYPES
     if method == "trust":
-        return "CRITICAL" if network else "WARNING"
-    if method == "password" and network:
-        return "WARNING"
-    if method == "md5":
-        return "INFO"
-    return None
+        severity, reason = ("CRITICAL" if network else "WARNING"), ("trust_network" if network else "trust_local")
+    elif method == "password" and network:
+        severity, reason = "WARNING", "password_network"
+    elif method == "md5":
+        severity, reason = "INFO", "md5"
+    else:
+        return None, []
+    if hba_open_address(rule_row):
+        return HBA_SEVERITY_UP[severity], [reason, "open_address"]
+    return severity, [reason]
+
+
+def hba_severity(rule_row):
+    """The risk of one pg_hba.conf line, or None (hba_weakness without the reasons)."""
+    return hba_weakness(rule_row)[0]
 
 
 def evaluate_hba_rules(rows, rule, thresholds):
-    """PG-SEC-005: pg_hba.conf lines with trust, clear-text password or md5, per node.
+    """PG-SEC-005: pg_hba.conf lines with trust, clear-text password or md5, per node; one level
+    higher when the line is open to every address (details["weakness"] says why).
 
     pg_hba_file_rules is superuser only by default: a node whose rules could not be read is
     listed as not assessed with the privilege to grant.
@@ -3068,7 +3092,7 @@ def evaluate_hba_rules(rows, rule, thresholds):
                            "PG_HBA_RULES", "hba_not_readable")
             continue
         for line in (r for r in rows if r["record_type"] == "RULE" and r["target_id"] == access["target_id"]):
-            severity = hba_severity(line)
+            severity, reasons = hba_weakness(line)
             if severity is None:
                 continue
             address = hba_address(line["address"], line["netmask"]) or \
@@ -3084,7 +3108,7 @@ def evaluate_hba_rules(rows, rule, thresholds):
                 "details": {"node": line["node_name"], "line_number": line["line_number"],
                             "conn_type": line["conn_type"], "databases": line["databases"],
                             "users": line["users"], "address": address, "auth_method": line["auth_method"],
-                            "captured_at": iso(line["captured_at"])}})
+                            "weakness": reasons, "captured_at": iso(line["captured_at"])}})
     return findings
 
 
