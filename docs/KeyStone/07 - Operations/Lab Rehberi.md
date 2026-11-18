@@ -26,6 +26,8 @@ Komutlar repository kökünden çalışır (`C:\Yazılım\keystone`). PowerShell
 Her komut repository bağlantısını ve anahtarı ortam değişkenlerinden okur (`KEYSTONE_REPOSITORY_*`, `KEYSTONE_MASTER_KEY`). Yeni bir PowerShell penceresinde bunlar yoksa komutlar bağlanamaz.
 
 - Ayarlamak: `$env:AD = "değer"` (`set AD=değer` PowerShell'de çalışmaz).
+- Ürünün varsayılanı veritabanı `keystone`, kullanıcı yok (2026-11-18). Lab repository'si `keystone_lab` olduğu için ikisi de verilmeli; kalıcı olması için bir kez (yeni pencerelerde geçerli olur):
+  `[Environment]::SetEnvironmentVariable("KEYSTONE_REPOSITORY_DB", "keystone_lab", "User")` ve `[Environment]::SetEnvironmentVariable("KEYSTONE_REPOSITORY_USER", "postgres", "User")`.
 - **Master key ve parolalar ekrana, dokümana ya da sohbete yazılmaz.**
 
 ---

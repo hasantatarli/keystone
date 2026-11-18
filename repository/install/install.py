@@ -2,22 +2,10 @@ from pathlib import Path
 import re
 import sys
 import hashlib
-import os
 import psycopg
 import time
 
-
-# -----------------------------------------------------------------------------
-# Configuration - temporary for V1 development
-# -----------------------------------------------------------------------------
-
-DB_CONFIG = {
-    "host": os.getenv("KEYSTONE_REPOSITORY_HOST", "localhost"),
-    "port": int(os.getenv("KEYSTONE_REPOSITORY_PORT", "5432")),
-    "dbname": os.getenv("KEYSTONE_REPOSITORY_DB", "keystone_lab"),
-    "user": os.getenv("KEYSTONE_REPOSITORY_USER", "postgres"),
-    "password": os.getenv("KEYSTONE_REPOSITORY_PASSWORD")
-}
+from repository.common.repository_settings import repository_settings
 
 
 # -----------------------------------------------------------------------------
@@ -61,7 +49,7 @@ POSTGRESQL_COLLECTORS_DIR = (
 
 def connect_repository():
     """Connection to the Keystone repository (KEYSTONE_REPOSITORY_* env vars)."""
-    return psycopg.connect(**DB_CONFIG)
+    return psycopg.connect(**repository_settings())
 
 
 def run_bootstrap(conn):
