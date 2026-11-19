@@ -143,7 +143,7 @@ class TargetCommandTests(unittest.TestCase):
         with self.assertRaises(target.TargetError) as raised:
             self.run_cmd("add-server", "--name", "PG-A", "--environment", "LAB",
                          *self.server_args(), "--skip-connection-test")
-        self.assertIn("already exists", str(raised.exception))
+        self.assertIn("A system named pg-a already exists", str(raised.exception))   # the stored name
         with self.assertRaises(target.TargetError) as raised:
             self.run_cmd("add-server", "--name", "pg-b", "--environment", "LAB", *self.server_args())
         self.assertIn("already defined", str(raised.exception))
@@ -167,7 +167,7 @@ class TargetCommandTests(unittest.TestCase):
         with self.assertRaises(target.TargetError) as raised:
             self.run_cmd("add-member", "--cluster", "pg-prod", "--name", "POSTGRE-1",
                          "--host", "10.9.9.3", "--user", "u", "--skip-connection-test")
-        self.assertIn("already has a member", str(raised.exception))
+        self.assertIn("already has a member named postgre-1", str(raised.exception))
 
         listed = self.run_cmd("list")
         self.assertIn("cluster", listed)

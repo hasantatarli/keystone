@@ -57,19 +57,19 @@ def top_level(conn, name):
 
 def name_taken(conn, name):
     row = conn.execute(
-        "SELECT target_id FROM keystone.target WHERE lower(name) = lower(%s) AND is_active "
+        "SELECT target_id, name FROM keystone.target WHERE lower(name) = lower(%s) AND is_active "
         "AND parent_target_id IS NULL", (name,)).fetchone()
     if row:
-        raise TargetError(f"A system named {name} already exists (target {row['target_id']}). "
+        raise TargetError(f"A system named {row['name']} already exists (target {row['target_id']}). "
                           "Choose another name, or use set-password to change its password.")
 
 
 def member_name_taken(conn, system_id, name):
     row = conn.execute(
-        "SELECT target_id FROM keystone.target WHERE parent_target_id = %s AND is_active "
+        "SELECT target_id, name FROM keystone.target WHERE parent_target_id = %s AND is_active "
         "AND lower(name) = lower(%s)", (system_id, name)).fetchone()
     if row:
-        raise TargetError(f"The cluster already has a member named {name} (target {row['target_id']}).")
+        raise TargetError(f"The cluster already has a member named {row['name']} (target {row['target_id']}).")
 
 
 def address_taken(conn, host, port):
