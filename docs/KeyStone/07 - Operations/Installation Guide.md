@@ -2,8 +2,6 @@
 
 Installing Keystone for a new customer, from an empty PostgreSQL server to the first health check report. Draft from the first clean install as a customer would do it (2026-11-19, Windows, PostgreSQL 17.9, database `keystone`, hc1–hc2). Commands for daily use are in [[Command Reference]]; this page is the order of the first time.
 
-Steps marked **(manual for now)** are replaced by the target CLI (in progress); until then they are written out here.
-
 ---
 
 ## 0. What you need
@@ -114,39 +112,15 @@ The GRANTs are per database: run them in the database named in the connection, n
 
 ---
 
-## 6. Define the target (manual for now)
-
-Encrypt the monitoring role's password (asked without echo; the output changes on every run, every output is valid):
+## 6. Define the target
 
 ```powershell
-python -m repository.tools.encrypt_credential
+python -m repository.tools.target add-server --name <system name> --environment <PROD|TEST|LAB> --host <address> --user keystone_monitor
 ```
 
-Then in `psql -h localhost -U keystone -d keystone`, a SYSTEM with one NODE and a connection on each (a SYSTEM's own collectors need a connection on the SYSTEM too):
+Asks the monitoring role's password (no echo), connects to the server, and only then stores it encrypted. It prints the server's version and role and the health check command with the target id. A cluster is `add-cluster` (its entry point) and one `add-member` per server; options in [[Command Reference]] §7. `python -m repository.tools.target list` shows what is defined.
 
-```sql
-\prompt 'Encrypted credential: ' cred
-WITH s AS (
-  INSERT INTO keystone.target (name, provider, target_type, environment)
-  VALUES ('<system name>', 'PostgreSQL', 'SYSTEM', '<PROD|TEST|LAB>') RETURNING target_id),
-n AS (
-  INSERT INTO keystone.target (parent_target_id, name, provider, target_type, environment)
-  SELECT target_id, '<node name>', 'PostgreSQL', 'NODE', '<PROD|TEST|LAB>' FROM s RETURNING target_id, parent_target_id)
-INSERT INTO keystone.target_connection
-  (target_id, connection_name, host, port, database_name, username, auth_type, credential_data, connection_purpose)
-SELECT x.target_id, x.connection_name, '<host>', 5432, 'postgres', 'keystone_monitor', 'PASSWORD', :'cred', 'DIRECT'
-FROM n, LATERAL (VALUES (n.parent_target_id, '<system>-direct'), (n.target_id, '<node>-direct')) AS x(target_id, connection_name);
-```
-
-At `\prompt` paste the **encrypted** value (starts with `gAAAAA`), not the password. Check without showing it:
-
-```sql
-select connection_id, length(credential_data) as len, left(credential_data, 6) as head from keystone.target_connection;
-```
-
-`head` is `gAAAAA`; `len` is 100 for a password under 16 characters, longer for longer ones. A wrong value shows in the health check as "Credential decryption failed" on every collector.
-
----
+When the connection fails nothing is written; the message gives the server's reason. When `KEYSTONE_MASTER_KEY` is not set in the window nothing is written either (step 2).
 
 ## 7. First health check
 
@@ -154,7 +128,7 @@ select connection_id, length(credential_data) as len, left(credential_data, 6) a
 python -m repository.healthcheck.health_check --target <system id> --report tr
 ```
 
-Collects, assesses and writes the HTML report; prints the health check number and the report file. A target with no active connection is refused before anything is written. If collectors fail, read the reasons:
+Collects, assesses and writes the HTML report; prints the health check number and the report file. A target with no active connection is refused before anything is written. If collectors fail, read the reasons ("Credential decryption failed" on every collector: the master key of this window is not the one the password was stored with):
 
 ```powershell
 psql -h localhost -U keystone -d keystone -c "select target_id, collector_key, status, left(status_message, 200) from keystone.health_check_collection where health_check_id = (select max(health_check_id) from keystone.health_check) order by 1, 2"
@@ -171,8 +145,8 @@ Host data (disk, memory, CPU) needs a HOST (SSH) connection on Linux; Windows ho
 | 1 | Turkish characters broken in the Windows console (`chcp 65001` before psql) | this guide |
 | 2 | Windows default collation; Linux recommendation | this guide |
 | 3 | The installer prints six lines per migration on a first install; the start scrolls out of the console | small fixes |
-| 4 | No way to add a target except SQL | target CLI |
+| 4 | No way to add a target except SQL | done: target command (V069) |
 | 5 | Master key: what it is, how to keep it, how to give it per session — nowhere | this guide; web interface later |
-| 6 | Copy and paste of the encrypted value: the plain password went in by mistake (hc1, every collector "Credential decryption failed", the password stored in clear until replaced). The message blames the master key and never says the stored value is not an encrypted one | target CLI (asks, encrypts, writes); error message |
+| 6 | Copy and paste of the encrypted value: the plain password went in by mistake (hc1, every collector "Credential decryption failed", the password stored in clear until replaced). The message blames the master key and never says the stored value is not an encrypted one | done for new targets and password changes: the target command asks, tries, encrypts and writes; the decryption message: small fixes |
 | 7 | Preparing the monitoring role on checked servers is not part of the flow | this guide (step 5) |
 | 8 | Setting the session variables is tedious and error-prone | this guide (script); web interface later |

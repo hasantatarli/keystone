@@ -553,11 +553,29 @@ class OfflineImportTests(unittest.TestCase):
                 ([first, second],))}
             nodes = conn.execute("SELECT name, environment FROM keystone.target WHERE parent_target_id = %s",
                                  (targets[first],)).fetchall()
+            topology = conn.execute("SELECT topology FROM keystone.target WHERE target_id = %s",
+                                    (targets[first],)).fetchone()["topology"]
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s "
                          "OR parent_target_id = %s", (targets[first], targets[first]))
             conn.commit()
         self.assertEqual(targets[first], targets[second])
         self.assertEqual([(n["name"], n["environment"]) for n in nodes], [("dbsrv7", "PROD")])
+        self.assertEqual(topology, "STANDALONE")                    # one server seen (V069)
+
+    def test_a_new_system_does_not_take_a_name_in_use(self):
+        files, host = self.evidence_files()
+        with self.connect() as conn:
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (self.target,))
+            other = conn.execute("INSERT INTO keystone.target (name, provider, target_type, environment, "
+                                 "topology) VALUES ('Musteri DB', 'PostgreSQL', 'SYSTEM', 'PROD', 'STANDALONE') "
+                                 "RETURNING target_id").fetchone()["target_id"]
+            conn.commit()
+        with self.assertRaises(imp.BundleError) as raised:
+            imp.import_bundle(self.connect, None, files, [host], name="musteri db")
+        self.assertIn("--name", str(raised.exception))
+        with self.connect() as conn:
+            conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s", (other,))
+            conn.commit()
 
     def test_a_server_is_one_node_whether_typed_by_address_or_name(self):
         # Hasan 2026-11-10: first by IP, then by host name; the collector records what the name resolves to.
@@ -630,10 +648,13 @@ class OfflineImportTests(unittest.TestCase):
                 "JOIN keystone.target t USING (target_id) WHERE c.health_check_id = %s", (check_id,))}
             system = conn.execute("SELECT target_id FROM keystone.health_check WHERE health_check_id = %s",
                                   (check_id,)).fetchone()["target_id"]
+            topology = conn.execute("SELECT topology FROM keystone.target WHERE target_id = %s",
+                                    (system,)).fetchone()["topology"]
             conn.execute("UPDATE keystone.target SET is_active = FALSE WHERE target_id = %s "
                          "OR parent_target_id = %s", (system, system))
             conn.commit()
         self.assertIn("created in Keystone", notes[0])
+        self.assertEqual(topology, "CLUSTER")                       # two servers seen (V069)
         for label in ("WINSRV-A", "WINSRV-B"):
             self.assertEqual(got[(label, "PG_HOST_SNAPSHOT")], "SUCCESS")
             self.assertEqual(got[(label, "PG_CONFIGURATION_SNAPSHOT")], "SUCCESS")

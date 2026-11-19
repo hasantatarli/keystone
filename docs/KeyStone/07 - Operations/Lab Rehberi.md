@@ -112,6 +112,8 @@ python -m repository.lifecycle.release_reference --refresh
 
 ## 7. Kontrol sorguları
 
+Tanımlı hedefler, şifresiz: `python -m repository.tools.target list`. Yeni hedef eklemek ya da izleme şifresini değiştirmek için de bu komut (Command Reference §7); SQL gerekmez.
+
 ```sql
 -- hedefler (SYSTEM = cluster, NODE = sunucu)
 SELECT target_id, name, target_type, parent_target_id FROM keystone.target ORDER BY target_id;
