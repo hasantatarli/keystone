@@ -332,9 +332,15 @@ def resolve_target(conn, docs, host_files, manifests, node_map, name=None, envir
     else:
         display = name or next((d["server"]["cluster_name"] for d in docs if d["server"].get("cluster_name")),
                                labels[0])
+        taken = conn.execute(
+            "SELECT target_id FROM keystone.target WHERE lower(name) = lower(%s) AND is_active "
+            "AND parent_target_id IS NULL", (display,)).fetchone()
+        if taken:
+            raise BundleError(f"a target named {display} already exists (target {taken['target_id']}) "
+                              "and is another PostgreSQL system; give another name with --name")
         system_id = conn.execute(
-            "INSERT INTO keystone.target (name, provider, target_type, environment, description) "
-            "VALUES (%s, 'PostgreSQL', 'SYSTEM', %s, %s) RETURNING target_id",
+            "INSERT INTO keystone.target (name, provider, target_type, environment, description, topology) "
+            "VALUES (%s, 'PostgreSQL', 'SYSTEM', %s, %s, 'STANDALONE') RETURNING target_id",
             (display, environment, f"Offline evidence, system {identifier}")).fetchone()["target_id"]
         created.append(display)
     target, nodes = hc.load_target_tree(conn, system_id)
@@ -346,6 +352,12 @@ def resolve_target(conn, docs, host_files, manifests, node_map, name=None, envir
                              "parent_target_id) SELECT %s, provider, 'NODE', environment, target_id "
                              "FROM keystone.target WHERE target_id = %s", (label, system_id))
                 created.append(label)
+        # A second server seen in the files makes a single server a cluster.
+        conn.execute(
+            "UPDATE keystone.target SET topology = 'CLUSTER' WHERE target_id = %s "
+            "AND topology = 'STANDALONE' AND (SELECT count(*) FROM keystone.target "
+            "WHERE parent_target_id = %s AND target_type = 'NODE' AND is_active) > 1",
+            (system_id, system_id))
     conn.commit()
     return system_id, created
 

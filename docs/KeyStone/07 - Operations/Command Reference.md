@@ -246,7 +246,35 @@ python -m repository.lifecycle.release_reference --import reference.json
 - Operating systems (PG-LIFE-003) are not refreshed online: migrations and reference files only.
 - PG-LIFE-001 is "not assessed" when the reference is older than 100 days; the report says how old it is.
 
-## 7. Credential tool
+## 7. Targets and credentials
+
+### Target command
+
+Defines the systems Keystone checks, without SQL (V069). The password is asked without echo, tried against the server and only then encrypted with `KEYSTONE_MASTER_KEY` and written; when a step fails nothing is written and the message says why (password, address, `pg_hba.conf`). Names are found in any case; a number is taken as the id.
+
+```powershell
+# a single server: one entry (stored as a system with one server; no node is asked)
+python -m repository.tools.target add-server --name laptop-pg --environment LAB --host localhost --user keystone_monitor
+# a cluster: its entry point (HAProxy, VIP), then each of its servers
+python -m repository.tools.target add-cluster --name pg-prod --environment PROD --host 10.0.0.10 --user keystone_monitor
+python -m repository.tools.target add-member --cluster pg-prod --name postgre-1 --host 10.0.0.11 --user keystone_monitor
+# what is defined (no passwords)
+python -m repository.tools.target list
+# the monitoring password changed on the server: every connection of the system and its members
+python -m repository.tools.target set-password --name pg-prod
+python -m repository.tools.target --help
+```
+
+| Option | Meaning |
+|---|---|
+| `--port` | default `5432` |
+| `--database` | database Keystone connects to, default `postgres` (the `pg_hba_file_rules` GRANTs go here) |
+| `--skip-connection-test` | store without trying, for a server not reachable from this machine (an agent elsewhere checks it) |
+| `set-password --user` | only connections of this user, when a system connects as several |
+
+Refused without writing: missing information; a system name already in use (active systems and older single servers share one name space, any case); a host and port already defined (a member may share its own cluster's entry point: primary + replica without a VIP); a member for a system that is not a cluster (`add-member` to a single server says so); an unknown cluster name (the message lists the names). HOST (SSH) connections for host data are still added by SQL (backlog).
+
+### Credential tool
 
 Encrypts a target password with `KEYSTONE_MASTER_KEY` for `target_connection.credential_data`. The password is typed hidden.
 
