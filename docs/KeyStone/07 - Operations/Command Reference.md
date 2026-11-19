@@ -272,7 +272,7 @@ python -m repository.tools.target --help
 | `--skip-connection-test` | store without trying, for a server not reachable from this machine (an agent elsewhere checks it) |
 | `set-password --user` | only connections of this user, when a system connects as several |
 
-Refused without writing: missing information; a system name already in use (active systems and older single servers share one name space, any case); a host and port already defined; a member for a system that is not a cluster (`add-member` to a single server says so); an unknown cluster name (the message lists the names). HOST (SSH) connections for host data are still added by SQL (backlog).
+Refused without writing: missing information; a system name already in use (active systems and older single servers share one name space, any case); a host and port already defined (a member may share its own cluster's entry point: primary + replica without a VIP); a member for a system that is not a cluster (`add-member` to a single server says so); an unknown cluster name (the message lists the names). HOST (SSH) connections for host data are still added by SQL (backlog).
 
 ### Credential tool
 

@@ -173,6 +173,17 @@ class TargetCommandTests(unittest.TestCase):
         self.assertIn("cluster", listed)
         self.assertIn("member of pg-prod", listed)
 
+    def test_a_member_may_be_its_clusters_entry_point(self):
+        # Primary + replica without a VIP: the entry point is the primary (lab pg17-lab).
+        self.run_cmd("add-cluster", "--name", "pg17", "--environment", "LAB", *self.server_args())
+        self.run_cmd("add-member", "--cluster", "pg17", "--name", "primary", *self.server_args())
+        self.run_cmd("add-cluster", "--name", "other", "--environment", "LAB",
+                     "--host", "10.9.9.1", "--user", "u", "--skip-connection-test")
+        with self.assertRaises(target.TargetError) as raised:     # another system's address: refused
+            self.run_cmd("add-member", "--cluster", "other", "--name", "m", *self.server_args())
+        self.assertIn("already defined (pg17", str(raised.exception))
+        self.assertEqual(len(self.targets()), 3)
+
     def test_member_only_goes_to_a_cluster(self):
         self.run_cmd("add-server", "--name", "laptop-pg", "--environment", "LAB", *self.server_args())
         with self.assertRaises(target.TargetError) as raised:

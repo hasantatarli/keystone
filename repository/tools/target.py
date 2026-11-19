@@ -72,7 +72,9 @@ def member_name_taken(conn, system_id, name):
         raise TargetError(f"The cluster already has a member named {row['name']} (target {row['target_id']}).")
 
 
-def address_taken(conn, host, port):
+def address_taken(conn, host, port, cluster_id=None):
+    """Refuse an address already defined; a member may share its own cluster's entry point
+    (primary + replica without a VIP: the entry point is the primary, as lab pg17-lab)."""
     row = conn.execute(
         """
         SELECT t.target_id, t.name, p.name AS system_name
@@ -81,8 +83,9 @@ def address_taken(conn, host, port):
         LEFT JOIN keystone.target p ON p.target_id = t.parent_target_id
         WHERE c.is_active AND c.connection_purpose <> 'HOST'
           AND lower(c.host) = lower(%s) AND c.port = %s
+          AND t.target_id IS DISTINCT FROM %s
         ORDER BY t.target_id LIMIT 1
-        """, (host, port)).fetchone()
+        """, (host, port, cluster_id)).fetchone()
     if row:
         where = f"{row['system_name']} / {row['name']}" if row["system_name"] else row["name"]
         raise TargetError(f"{host}:{port} is already defined ({where}, target {row['target_id']}).")
@@ -182,7 +185,7 @@ def add_member(conn, args):
         raise TargetError(f"{system['name']} is defined as {kind}, not a cluster: members can be added "
                           "only to a cluster. Nothing was written.")
     member_name_taken(conn, system["target_id"], args.name)
-    address_taken(conn, args.host, args.port)
+    address_taken(conn, args.host, args.port, cluster_id=system["target_id"])
     credential = checked_credential(args)
     member_id = insert_target(conn, args.name, "NODE", system["environment"], parent=system["target_id"])
     insert_connection(conn, member_id, args.name, args, credential)
