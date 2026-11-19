@@ -1,6 +1,6 @@
 # Installation Guide
 
-Installing Keystone for a new customer, from an empty PostgreSQL server to the first health check report. Draft from the first clean install as a customer would do it (2026-11-19, Windows, PostgreSQL 17.9, database `keystone`, hc1–hc2). Commands for daily use are in [[Command Reference]]; this page is the order of the first time.
+Installing Keystone for a new customer, from an empty PostgreSQL server to the first health check report. From the first clean install as a customer would do it (2026-11-19, Windows, PostgreSQL 17.9, database `keystone`, hc1–hc3); step 6 by the target command since PR #56. Commands for daily use are in [[Command Reference]]; this page is the order of the first time.
 
 ---
 
